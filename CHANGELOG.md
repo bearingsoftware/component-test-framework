@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.5](https://github.com/chattersley/component-test-framework/compare/v0.1.4...v0.1.5) (2026-06-05)
+
+
+### Bug Fixes
+
+* retry truncateTables on Postgres deadlock (40P01) ([98708f5](https://github.com/chattersley/component-test-framework/commit/98708f54661be7e93bfec1e9b8c73895456d4f84))
+* retry truncateTables on Postgres deadlock (40P01) ([6d1df08](https://github.com/chattersley/component-test-framework/commit/6d1df083a5b2d2c748c80dac88efadefe3d40742))
+
 ## [0.1.4](https://github.com/chattersley/component-test-framework/compare/v0.1.3...v0.1.4) (2026-04-24)
 
 
