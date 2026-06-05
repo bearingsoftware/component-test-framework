@@ -20,10 +20,51 @@ export class DbClient {
     return this.pool.query<T>(sql, params)
   }
 
-  /** Truncate one or more tables with CASCADE. */
-  async truncateTables(tables: string[]): Promise<void> {
+  /**
+   * Truncate one or more tables with CASCADE.
+   *
+   * Retries on Postgres deadlock (SQLSTATE 40P01). When a long-running
+   * service under test holds row locks via active queries, the
+   * AccessExclusiveLock TRUNCATE needs can race with the service's
+   * RowExclusiveLock + cascading FK locks and produce a circular wait.
+   * PG picks a victim; if it picks us, the After-hook fails and the
+   * next scenario inherits orphan locks. Retry with exponential backoff
+   * resolves the rare deadlock without restructuring the harness to
+   * stop the service under test per scenario.
+   *
+   * Configuration:
+   *  - `maxAttempts`: total tries (default 4). Anything past attempt 1
+   *    is a rare event; 4 covers worst-case CI contention storms.
+   *  - `baseDelayMs`: first retry waits this long; each subsequent
+   *    retry doubles (50, 100, 200ms). Total worst-case added wait
+   *    on a 4-retry trip is 350ms.
+   *
+   * Non-deadlock errors (SQL syntax, perms, etc.) surface immediately
+   * — only `40P01` triggers the retry path.
+   */
+  async truncateTables(
+    tables: string[],
+    opts?: { maxAttempts?: number; baseDelayMs?: number },
+  ): Promise<void> {
     if (tables.length === 0) return
-    await this.pool.query(`TRUNCATE ${tables.join(', ')} CASCADE`)
+    const maxAttempts = opts?.maxAttempts ?? 4
+    const baseDelayMs = opts?.baseDelayMs ?? 50
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await this.pool.query(`TRUNCATE ${tables.join(', ')} CASCADE`)
+        return
+      } catch (err) {
+        if (!isDeadlock(err) || attempt === maxAttempts) {
+          throw err
+        }
+        const delay = baseDelayMs * 2 ** (attempt - 1)
+        console.warn(
+          `[component-test-framework] TRUNCATE deadlock on attempt ${attempt}/${maxAttempts}; retrying in ${delay}ms`,
+        )
+        await new Promise((r) => setTimeout(r, delay))
+      }
+    }
   }
 
   /**
@@ -51,4 +92,11 @@ export class DbClient {
   async close(): Promise<void> {
     await this.pool.end()
   }
+}
+
+/** Detect Postgres deadlock errors (SQLSTATE 40P01). */
+function isDeadlock(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+  const code = (err as { code?: unknown }).code
+  return code === '40P01'
 }
