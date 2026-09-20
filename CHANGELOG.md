@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/bearingsoftware/component-test-framework/compare/v0.1.5...v0.2.0) (2026-09-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* DbClient.truncateTables is now cleanTables, because it no longer truncates. Nothing outside this package called it.
+
+### Bug Fixes
+
+* empty cleanup tables with DELETE instead of TRUNCATE ([15a9cb9](https://github.com/bearingsoftware/component-test-framework/commit/15a9cb98d3825051e499d80cc2e2a935f732bb38))
+
 ## [0.1.5](https://github.com/chattersley/component-test-framework/compare/v0.1.4...v0.1.5) (2026-06-05)
 
 
