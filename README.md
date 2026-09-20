@@ -358,7 +358,7 @@ The wrapper mutates `package.json` to a snapshot version like `0.1.0-snapshot.<b
 Consumers opt in by adding a project-level `.npmrc`:
 
 ```
-@chattersley:registry=http://localhost:4873
+@bearingsoftware:registry=http://localhost:4873
 ```
 
-then `npm install @chattersley/component-test-framework@snapshot` for the latest snapshot, or pin to an exact snapshot version for reproducibility.
+then `npm install @bearingsoftware/component-test-framework@snapshot` for the latest snapshot, or pin to an exact snapshot version for reproducibility.
