@@ -90,7 +90,7 @@ export function registerHooks(config: FrameworkConfig): void {
       this.activeSubscription = undefined
     }
     if (db && config.cleanupTables && config.cleanupTables.length > 0) {
-      await db.truncateTables(config.cleanupTables)
+      await db.cleanTables(config.cleanupTables)
     }
   })
 }
