@@ -1,6 +1,6 @@
 {
   "name": "@bearingsoftware/component-test-framework",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Reusable Cucumber-based component test framework for APIs, workers, and UIs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
