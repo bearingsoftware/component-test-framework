@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/bearingsoftware/component-test-framework/compare/v0.2.0...v0.3.0) (2026-09-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* the package is now @bearingsoftware/component-test-framework. Consumers must update the dependency name, their imports and their .npmrc scope registry line.
+
+### Bug Fixes
+
+* publish under the [@bearingsoftware](https://github.com/bearingsoftware) scope ([617e2c7](https://github.com/bearingsoftware/component-test-framework/commit/617e2c715ddd6480a809d5d00ec3c04599cc6935))
+
 ## [0.2.0](https://github.com/bearingsoftware/component-test-framework/compare/v0.1.5...v0.2.0) (2026-09-20)
 
 
