@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.0...v0.3.1) (2026-09-25)
+
+
+### Features
+
+* **SECREPO-602:** reuse one browser per worker instead of one per scenario ([fa2194e](https://github.com/bearingsoftware/component-test-framework/commit/fa2194e0bcc7336e0beae3c78c043ed66c29243a))
+* **SECREPO-602:** reuse one browser per worker instead of one per scenario ([f5035ab](https://github.com/bearingsoftware/component-test-framework/commit/f5035abfffc87bbf9489e763a6d4111157dff4e3))
+
 ## [0.3.0](https://github.com/bearingsoftware/component-test-framework/compare/v0.2.0...v0.3.0) (2026-09-20)
 
 
