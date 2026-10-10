@@ -38,6 +38,7 @@ import {
   stopServices,
   type ServiceOptions,
 } from './process'
+import { eventually } from './eventually'
 
 const FAKE_SERVICE = path.join(__dirname, '__fixtures__', 'fake-service.cjs')
 
@@ -177,16 +178,17 @@ describe('service lifecycle (COMPONENT-8)', () => {
       const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
         const crashing = spawnServiceUnderTest(
-          options({ env: { ...process.env, PORT: String(port), CRASH_AFTER_MS: '300' } }),
+          options({ env: { ...process.env, PORT: String(port), CRASH_AFTER_MS: '1500' } }),
         )
         started.push(crashing)
         await crashing.ready
-        await new Promise((resolve) => setTimeout(resolve, 600))
+        await new Promise((resolve) => crashing.process.once('exit', resolve))
         expect(errors).toHaveBeenCalledWith('[fake] exited unexpectedly with code 3')
 
         errors.mockClear()
         port = await freePort()
         const stopped = spawnServiceUnderTest(options())
+        started.push(stopped)
         await stopped.ready
         await stopped.restart()
         await stopped.stop()
@@ -237,6 +239,77 @@ describe('service lifecycle (COMPONENT-8)', () => {
       }
     })
 
+    it('stops a service that never becomes ready, so it cannot hold its port', async () => {
+      const failure = await startService(
+        options({ readyCheck: { probe: async () => false }, healthTimeoutMs: 1_000 }),
+      ).catch((err: Error) => err)
+
+      expect((failure as Error).message).toBe('fake did not become ready within 1000ms')
+      await expect(fetch(`http://127.0.0.1:${port}/health`)).rejects.toThrow()
+    })
+
+    it('fails at once, naming the log, when the service exits before it is ready', async () => {
+      const begun = Date.now()
+      await expect(
+        startService(
+          options({
+            env: { ...process.env, PORT: String(port), CRASH_AFTER_MS: '0' },
+            readyCheck: { probe: async () => false },
+          }),
+        ),
+      ).rejects.toThrow(
+        `[fake] exited with code 3 before becoming ready (see ${path.join(dir, 'service.log')})`,
+      )
+      expect(Date.now() - begun).toBeLessThan(5_000)
+    })
+
+    it('fails at once when the command does not exist', async () => {
+      const begun = Date.now()
+      await expect(startService(options({ cmd: '/no/such/binary', args: [] }))).rejects.toThrow(
+        /\[fake\] could not be started: spawn \/no\/such\/binary ENOENT before becoming ready/,
+      )
+      expect(Date.now() - begun).toBeLessThan(5_000)
+    })
+
+    it('waits for processes the service spawned, not just the service', async () => {
+      const service = await startService(
+        options({ env: { ...process.env, PORT: String(port), GRANDCHILD_STOP_MS: '700' } }),
+      )
+      started.push(service)
+      const grandchild = await eventually(
+        () => {
+          const pid = Number(
+            /grandchild (\d+)/.exec(fs.readFileSync(path.join(dir, 'service.log'), 'utf8'))?.[1],
+          )
+          if (!pid) throw new Error('grandchild not started yet')
+          return pid
+        },
+        { timeout: 5_000, interval: 50 },
+      )
+      expect(grandchild).toBeGreaterThan(0)
+
+      const begun = Date.now()
+      await service.stop()
+      expect(Date.now() - begun).toBeGreaterThanOrEqual(600)
+      // An exited process lingers as a zombie until it's reaped, which counts as gone.
+      const state = () => {
+        try {
+          return fs.readFileSync(`/proc/${grandchild}/stat`, 'utf8').split(' ')[2]
+        } catch {
+          return 'gone'
+        }
+      }
+      expect(['gone', 'Z']).toContain(state())
+    })
+
+    it('can be stopped twice, and will not start again once stopped', async () => {
+      const service = spawnServiceUnderTest(options())
+      started.push(service)
+      await service.ready
+      await Promise.all([service.stop(), service.stop()])
+      await expect(service.restart()).rejects.toThrow('[fake] has been stopped')
+    })
+
     it('fails clearly when the service never becomes ready', async () => {
       await expect(
         startService(
@@ -263,7 +336,7 @@ describe('service lifecycle (COMPONENT-8)', () => {
 
     const begun = Date.now()
     await stopServices(a, b, null)
-    expect(Date.now() - begun).toBeLessThan(1_300)
+    expect(Date.now() - begun).toBeLessThan(1_800)
   })
 
   describe('registerServiceUnderTest', () => {
@@ -288,7 +361,27 @@ describe('service lifecycle (COMPONENT-8)', () => {
 
       await hooks.afterAll[0].fn.call({})
       expect(exited(api.handle.process)).toBe(true)
-      expect(hooks.afterAll[0].options.timeout).toBe(12_000)
+      expect(hooks.afterAll[0].options.timeout).toBe(24_000)
+    })
+
+    it('stops every registered service at once, from whichever AfterAll runs first', async () => {
+      const slow = { ...process.env, STOP_DELAY_MS: '700' }
+      const portB = await freePort()
+      registerServiceUnderTest(options({ env: { ...slow, PORT: String(port) } }))
+      registerServiceUnderTest(
+        options({
+          env: { ...slow, PORT: String(portB) },
+          readyCheck: { url: `http://127.0.0.1:${portB}/health` },
+        }),
+      )
+      for (const hook of hooks.beforeAll) await hook.fn.call({})
+
+      const begun = Date.now()
+      await hooks.afterAll.at(-1)!.fn.call({})
+      expect(Date.now() - begun).toBeLessThan(1_800)
+      await expect(fetch(`http://127.0.0.1:${port}/health`)).rejects.toThrow()
+      await expect(fetch(`http://127.0.0.1:${portB}/health`)).rejects.toThrow()
+      await hooks.afterAll[0].fn.call({})
     })
 
     it('skips tagged scenarios when the service is skipped', async () => {

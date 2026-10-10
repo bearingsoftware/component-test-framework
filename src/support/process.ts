@@ -70,17 +70,34 @@ export interface SpawnServiceHandle {
 
 const DEFAULT_HEALTH_TIMEOUT = 60_000
 const DEFAULT_STOP_GRACE = 5_000
+// How long to wait for a SIGKILLed process group to be gone.
 const KILL_WAIT = 2_000
+// Room in hook timeouts for beforeStart and a SIGKILL wait.
+const HOOK_SLACK = 20_000
 
-function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve()
+/** Resolves when `promise` does, or after `ms`, whichever is first. */
+function within(promise: Promise<unknown>, ms: number): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, timeoutMs)
-    child.once('exit', () => {
+    const timer = setTimeout(resolve, Math.max(ms, 0))
+    promise.then(() => {
       clearTimeout(timer)
       resolve()
     })
   })
+}
+
+/** One spawned process: the child, why it ended (if it has), and when its output closed. */
+interface Running {
+  child: ChildProcess
+  /** Set when the process exits or fails to start, e.g. "exited with code 2". */
+  ended: string | null
+  /**
+   * Resolves when the process has exited and its stdout and stderr have
+   * closed. The pipes close only when every process holding them has gone:
+   * the service and anything it spawned (as `go run` does). The exit and the
+   * closes can arrive in either order, so all are awaited.
+   */
+  gone: Promise<void>
 }
 
 /**
@@ -88,9 +105,10 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void> {
  * restarted. Everything public below is built on it.
  */
 class ManagedService {
-  private child: ChildProcess | null = null
+  private running: Running | null = null
   private log: WriteStream | undefined
   private stopping = false
+  private finalStop: Promise<void> | null = null
 
   constructor(private readonly opts: SpawnServiceOptions) {
     if (opts.logFile) {
@@ -100,11 +118,15 @@ class ManagedService {
   }
 
   get process(): ChildProcess | null {
-    return this.child
+    return this.running?.child ?? null
   }
 
   /** Spawn the process now. Readiness is checked separately, by {@link waitReady}. */
   spawn(env: NodeJS.ProcessEnv | undefined): ChildProcess {
+    // A start still running when the suite stopped the service (a BeforeAll
+    // that timed out) must not leave a process behind.
+    if (this.finalStop) throw new Error(`[${this.opts.name}] has been stopped`)
+
     const binary = this.opts.binaryEnvVar ? process.env[this.opts.binaryEnvVar] : undefined
     const cmd = binary || this.opts.cmd
     const args = binary ? (this.opts.binaryArgs ?? []) : (this.opts.args ?? [])
@@ -115,56 +137,94 @@ class ManagedService {
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
-    this.child = child
+    const exited = new Promise<void>((resolve) => {
+      child.once('exit', () => resolve())
+      child.once('error', () => resolve())
+    })
+    const outputClosed = [child.stdout, child.stderr].map(
+      (stream) =>
+        new Promise<void>((resolve) => (stream ? stream.once('close', resolve) : resolve())),
+    )
+    const running: Running = {
+      child,
+      ended: null,
+      gone: Promise.all([exited, ...outputClosed]).then(() => undefined),
+    }
+    this.running = running
     this.stopping = false
 
     if (this.log) {
       // end: false, so a restarted process keeps writing to the same log.
       child.stdout?.pipe(this.log, { end: false })
       child.stderr?.pipe(this.log, { end: false })
+    } else {
+      // Unread output fills the pipe and blocks a chatty service.
+      child.stdout?.resume()
+      child.stderr?.resume()
     }
-    child.on('exit', (code) => {
-      if (!this.stopping && this.child === child) {
+    child.on('error', (err) => {
+      // e.g. ENOENT: the command or binary doesn't exist.
+      running.ended = `could not be started: ${err.message}`
+    })
+    child.on('exit', (code, signal) => {
+      running.ended = signal ? `was killed by ${signal}` : `exited with code ${code}`
+      if (!this.stopping && this.running === running) {
         console.error(`[${this.opts.name}] exited unexpectedly with code ${code}`)
       }
     })
     return child
   }
 
+  /**
+   * Wait until the readiness check passes. Fails at once, rather than at the
+   * timeout, if the process exits or can't be started.
+   */
   async waitReady(): Promise<void> {
-    await waitReady(this.opts, this.opts.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT)
+    const running = this.running
+    await waitReady(this.opts, this.opts.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT, () => {
+      if (!running?.ended) return null
+      const log = this.opts.logFile ? ` (see ${this.opts.logFile})` : ''
+      return `[${this.opts.name}] ${running.ended} before becoming ready${log}`
+    })
   }
 
-  /** Stop the current process; the log stays open for a restart. */
+  /** Stop the current process and anything it spawned; the log stays open for a restart. */
   async stopProcess(): Promise<void> {
-    const child = this.child
+    const running = this.running
     this.stopping = true
-    if (!child?.pid) return
+    const pid = running?.child.pid
+    if (!running || !pid || running.ended?.startsWith('could not be started')) return
     try {
-      process.kill(-child.pid, 'SIGINT')
+      process.kill(-pid, 'SIGINT')
     } catch {
-      /* already dead */
+      /* already gone */
     }
-    const deadline = Date.now() + (this.opts.stopGraceMs ?? DEFAULT_STOP_GRACE)
-    while (child.exitCode === null && child.signalCode === null && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 100))
-    }
-    if (child.exitCode === null && child.signalCode === null) {
+    // Done when the process has exited and the whole group has gone, which is
+    // when its output closes. The direct child exiting isn't enough: a
+    // process it spawned can still hold the port.
+    const graceful = await Promise.race([
+      running.gone.then(() => true),
+      new Promise<boolean>((resolve) =>
+        setTimeout(() => resolve(false), this.opts.stopGraceMs ?? DEFAULT_STOP_GRACE),
+      ),
+    ])
+    if (!graceful) {
       try {
-        process.kill(-child.pid, 'SIGKILL')
+        process.kill(-pid, 'SIGKILL')
       } catch {
         /* ignore */
       }
-      // SIGKILL can't be ignored, but the exit still takes a moment to be
-      // reported. Waiting for it means the port is free for a restart.
-      await waitForExit(child, KILL_WAIT)
+      await within(running.gone, KILL_WAIT)
     }
   }
 
-  /** Stop for good: the process, then the log. */
-  async stop(): Promise<void> {
-    await this.stopProcess()
-    await new Promise<void>((resolve) => (this.log ? this.log.end(resolve) : resolve()))
+  /** Stop for good: the process, then the log. Calling it again waits for the first call. */
+  stop(): Promise<void> {
+    this.finalStop ??= (async () => {
+      await this.stopProcess()
+      await new Promise<void>((resolve) => (this.log ? this.log.end(resolve) : resolve()))
+    })()
+    return this.finalStop
   }
 }
 
@@ -253,7 +313,14 @@ export async function startService(opts: ServiceOptions): Promise<ServiceHandle>
     service.spawn(env)
     await service.waitReady()
   }
-  await start(opts.env)
+  try {
+    await start(opts.env)
+  } catch (err) {
+    // A service that started but never became ready would otherwise outlive
+    // the run, holding its port for the next one.
+    await service.stop()
+    throw err
+  }
   return {
     skipped: false,
     get process() {
@@ -274,6 +341,9 @@ export async function stopServices(
   await Promise.all(services.map((service) => service?.stop()))
 }
 
+/** Every service registered with {@link registerServiceUnderTest}, for the shared shutdown. */
+const registeredServices: { stop: () => Promise<void> }[] = []
+
 /** What {@link registerServiceUnderTest} returns. */
 export interface RegisteredService {
   /** The started service. Throws if asked for before the suite's BeforeAll. */
@@ -282,7 +352,9 @@ export interface RegisteredService {
    * Restart the service with `envOverrides` before each scenario tagged
    * `tag`, and with its original environment after it: for settings the
    * service reads once at start-up. Scenarios are skipped when the service
-   * itself is skipped, since it can't be restarted.
+   * itself is skipped, since it can't be restarted. Overrides for different
+   * tags aren't combined: a scenario with two such tags is restarted for
+   * each, and runs with the last one's settings.
    */
   restartForTag: (tag: string, envOverrides: NodeJS.ProcessEnv) => void
 }
@@ -310,16 +382,21 @@ export interface RegisteredService {
 export function registerServiceUnderTest(opts: ServiceOptions): RegisteredService {
   const healthTimeout = opts.healthTimeoutMs ?? DEFAULT_HEALTH_TIMEOUT
   const stopGrace = opts.stopGraceMs ?? DEFAULT_STOP_GRACE
-  // Room for one stop and one start, plus whatever beforeStart does.
-  const startTimeout = healthTimeout + 10_000
-  const restartTimeout = stopGrace + healthTimeout + 10_000
+  const stopTimeout = stopGrace + KILL_WAIT + HOOK_SLACK
+  const startTimeout = healthTimeout + stopTimeout
+  const restartTimeout = stopGrace + KILL_WAIT + healthTimeout + HOOK_SLACK
   let handle: ServiceHandle | null = null
+  const registration = { stop: () => handle?.stop() ?? Promise.resolve() }
+  registeredServices.push(registration)
 
   BeforeAll({ timeout: startTimeout }, async function () {
     handle = await startService(opts)
   })
-  AfterAll({ timeout: stopGrace + 10_000 }, async function () {
-    await handle?.stop()
+  // Each service has its own AfterAll, but the first to run stops every
+  // registered service at once, so shutdown takes the longest grace rather
+  // than the sum of them.
+  AfterAll({ timeout: stopTimeout }, async function () {
+    await Promise.all(registeredServices.map((service) => service.stop()))
   })
 
   const started = (): ServiceHandle => {
@@ -346,7 +423,11 @@ export function registerServiceUnderTest(opts: ServiceOptions): RegisteredServic
   }
 }
 
-async function waitReady(opts: SpawnServiceOptions, timeoutMs: number): Promise<void> {
+async function waitReady(
+  opts: SpawnServiceOptions,
+  timeoutMs: number,
+  failure: () => string | null = () => null,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs
   const probe =
     'url' in opts.readyCheck
@@ -361,8 +442,12 @@ async function waitReady(opts: SpawnServiceOptions, timeoutMs: number): Promise<
       : opts.readyCheck.probe
 
   while (Date.now() < deadline) {
+    const failed = failure()
+    if (failed) throw new Error(failed)
     if (await probe()) return
     await new Promise((r) => setTimeout(r, 250))
   }
+  const failed = failure()
+  if (failed) throw new Error(failed)
   throw new Error(`${opts.name} did not become ready within ${timeoutMs}ms`)
 }

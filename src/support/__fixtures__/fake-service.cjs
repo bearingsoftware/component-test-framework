@@ -15,3 +15,17 @@ process.on('SIGINT', () => {
 })
 if (process.env.CRASH_AFTER_MS)
   setTimeout(() => process.exit(3), Number(process.env.CRASH_AFTER_MS))
+// GRANDCHILD_STOP_MS: start a child in the same process group that holds
+// stdout and takes that long to exit on SIGINT, as `go run`'s child does.
+if (process.env.GRANDCHILD_STOP_MS) {
+  const { spawn } = require('child_process')
+  const grandchild = spawn(
+    process.execPath,
+    [
+      '-e',
+      `process.on('SIGINT', () => setTimeout(() => process.exit(0), ${Number(process.env.GRANDCHILD_STOP_MS)})); setInterval(() => {}, 1000)`,
+    ],
+    { stdio: ['ignore', 'inherit', 'inherit'] },
+  )
+  console.log(`grandchild ${grandchild.pid}`)
+}

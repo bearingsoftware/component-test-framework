@@ -559,8 +559,12 @@ api.restartForTag('@actuation-locked', { ACTUATION_DISABLED: 'true' })
 
 - **Process group and log.** The service runs in its own process group, so stopping it also stops anything it spawned (`go run` starts a child). Its output goes to `logFile`, which a restart keeps writing to. `appendLog` keeps an earlier run's log too.
 - **Unexpected exits.** A service that dies on its own is reported on the console with its exit code.
-- **Order.** Services start in the order they're registered and stop in reverse. Register a dependency, such as a test server the API calls, first.
+- **Environment.** `env` is read when `registerServiceUnderTest` is called, at module load, not when the service starts.
+- **Order.** Services start in the order they're registered. Register a dependency, such as a test server the API calls, first. Cucumber still runs later `BeforeAll` hooks when an earlier one fails, so a failed dependency can be followed by a slow failure of the service that needed it.
+- **Stopping.** All registered services are stopped together, in parallel, after the suite. A stop waits for the service and anything it spawned to exit, then sends SIGKILL to the group after `stopGraceMs`.
+- **Failures are reported at once.** A missing command, or a service that exits before it's ready, fails the start immediately, naming the log. A service that never becomes ready is stopped, so it can't hold its port into the next run.
 - **Skipping.** When `skipEnvVar` is `1`, the service isn't started, prepared or stopped, and `restartForTag` skips its scenarios.
+- **Tags don't combine.** A scenario with two `restartForTag` tags is restarted for each, and runs with the last one's settings.
 
 For more control, `startService(options)` does the same without registering hooks and returns a handle with `restart(envOverrides)` and `stop()`. `stopServices(a, b)` stops several at once. The older `spawnServiceUnderTest` still works, and also takes `binaryEnvVar`, `stopGraceMs` and `appendLog`; its handle gains `restart`.
 
