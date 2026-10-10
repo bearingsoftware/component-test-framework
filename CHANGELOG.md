@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.6](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.5...v0.3.6) (2026-10-10)
+
+
+### Features
+
+* **COMPONENT-8:** service lifecycle for hand-written harnesses ([eebbab0](https://github.com/bearingsoftware/component-test-framework/commit/eebbab02ce655bb4fa3153f86bfa9b170d4590db))
+* **COMPONENT-8:** service lifecycle for hand-written harnesses ([7dd993d](https://github.com/bearingsoftware/component-test-framework/commit/7dd993de3766fc6fffc9d1815a22aba349dc0c66))
+
+
+### Bug Fixes
+
+* **COMPONENT-8:** address review findings ([cc64ba2](https://github.com/bearingsoftware/component-test-framework/commit/cc64ba237fdc5c5bd893cfd2bf6a608df1687c4a))
+
 ## [0.3.5](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.4...v0.3.5) (2026-10-10)
 
 
