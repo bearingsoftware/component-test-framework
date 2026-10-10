@@ -530,6 +530,50 @@ Then('the export finishes', async function (this: ComponentTestWorld) {
 - `assertPartialMatch(actual, expected, { nullMatchesAnything? })` does the deep partial JSON match the response, service and Valkey steps use.
 - `requestPattern(path, filter)` builds a WireMock request pattern.
 
+## Starting the service under test
+
+`registerServiceUnderTest` starts a service (API, worker, test server) before the suite and stops it after, so a harness is the service's configuration and its environment:
+
+```typescript
+import { registerServiceUnderTest } from '@bearingsoftware/component-test-framework'
+
+const api = registerServiceUnderTest({
+  name: 'api',
+  cwd: BACKEND_ROOT,
+  cmd: 'go',
+  args: ['run', './cmd/api'],
+  binaryEnvVar: 'API_BIN',          // run this prebuilt binary instead, when set
+  skipEnvVar: 'SKIP_API_SPAWN',     // =1: it's already running, leave it alone
+  beforeStart: clearSettings,       // before every start, restarts included
+  env: { ...process.env, LISTEN_ADDR: ':18080', DATABASE_URL },
+  logFile: path.join(__dirname, '..', '.api.log'),
+  readyCheck: { url: 'http://localhost:18080/health' }, // or { probe: async () => boolean }
+  healthTimeoutMs: 60_000,
+  stopGraceMs: 15_000,              // SIGINT, then SIGKILL after this
+})
+
+// Settings read once at start-up: restart with them changed for tagged
+// scenarios, and with the original environment afterwards.
+api.restartForTag('@actuation-locked', { ACTUATION_DISABLED: 'true' })
+```
+
+- **Process group and log.** The service runs in its own process group, so stopping it also stops anything it spawned (`go run` starts a child). Its output goes to `logFile`, which a restart keeps writing to. `appendLog` keeps an earlier run's log too.
+- **Unexpected exits.** A service that dies on its own is reported on the console with its exit code.
+- **Environment.** `env` is read when `registerServiceUnderTest` is called, at module load, not when the service starts.
+- **Order.** Services start in the order they're registered. Register a dependency, such as a test server the API calls, first. Cucumber still runs later `BeforeAll` hooks when an earlier one fails, so a failed dependency can be followed by a slow failure of the service that needed it.
+- **Stopping.** All registered services are stopped together, in parallel, after the suite. A stop waits for the service and anything it spawned to exit, then sends SIGKILL to the group after `stopGraceMs`.
+- **Failures are reported at once.** A missing command, or a service that exits before it's ready, fails the start immediately, naming the log. A service that never becomes ready is stopped, so it can't hold its port into the next run.
+- **Skipping.** When `skipEnvVar` is `1`, the service isn't started, prepared or stopped, and `restartForTag` skips its scenarios.
+- **Tags don't combine.** A scenario with two `restartForTag` tags is restarted for each, and runs with the last one's settings.
+
+For more control, `startService(options)` does the same without registering hooks and returns a handle with `restart(envOverrides)` and `stop()`. `stopServices(a, b)` stops several at once. The older `spawnServiceUnderTest` still works, and also takes `binaryEnvVar`, `stopGraceMs` and `appendLog`; its handle gains `restart`.
+
+**Patterns that keep runs fast and reliable:**
+- **Build the binary once in CI** (`go build -cover`) and pass it with `binaryEnvVar`, rather than `go run` per job. Set `GOCOVERDIR`, and give `stopGraceMs` time (15s is safe) for coverage to be written on exit.
+- **Shorten background intervals through the environment** (tick, poll and backoff settings), so scenarios don't wait on a schedule. Set them to 0 where the service supports turning the work off.
+- **Point every vendor URL at WireMock** in the service's environment.
+- **Clear state the service reads once at boot** in `beforeStart`. A table the previous run left behind otherwise reconfigures this one.
+
 ## Scenario Lifecycle
 
 Each scenario follows this lifecycle:
@@ -561,6 +605,9 @@ RedisClient           // Redis client (ioredis)
 
 // Pages
 BasePage              // Abstract page object base class
+
+// Services
+registerServiceUnderTest(), startService(), stopServices(), spawnServiceUnderTest()
 
 // Requests, values and login
 sendOperation(), fillPath(), EMPTY_REQUEST, valueAt()
