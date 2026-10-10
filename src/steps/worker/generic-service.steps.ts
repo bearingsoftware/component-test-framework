@@ -4,12 +4,11 @@ import { loadFixture } from '../../support/fixtures'
 import { requireApiBaseUrl } from '../../support/config'
 import type { ComponentTestWorld } from '../../support/world'
 import { assertPartialMatch } from '../../utils/match'
-import { eventually, waitTimeout } from '../../support/eventually'
-import { assertSafeTableName, countRows } from '../../support/db'
+import { eventually, serviceWaitTimeout, waitTimeout } from '../../support/eventually'
+import { assertSafeTableName, countRows, queryOnce } from '../../support/db'
 
-// The DB waits below have always polled for 30s; that stays their default
-// unless the suite sets waitTimeout or defaultStepTimeout.
-const RECORD_WAIT_FALLBACK = 30_000
+// The record waits below poll for serviceWaitTimeout (30s by default, as
+// they always have).
 const RECORD_POLL_INTERVAL = 500
 
 When(
@@ -104,18 +103,17 @@ Then(
 When(
   'I wait for a new record in {word} matching {string}',
   async function (this: ComponentTestWorld, table: string, whereClause: string) {
-    const db = this.db
-    assert.ok(db, 'Database client not configured')
+    assert.ok(this.db, 'Database client not configured')
     assertSafeTableName(table)
 
     const row = await eventually(
       async () => {
-        const result = await db.query(`SELECT * FROM ${table} WHERE ${whereClause} LIMIT 1`)
-        assert.ok(result.rows.length > 0, `no record in ${table} WHERE ${whereClause}`)
-        return result.rows[0]
+        const rows = await queryOnce(this, `SELECT * FROM ${table} WHERE ${whereClause} LIMIT 1`)
+        assert.ok(rows.length > 0, `no record in ${table} WHERE ${whereClause}`)
+        return rows[0]
       },
       {
-        timeout: waitTimeout(this.config, RECORD_WAIT_FALLBACK),
+        timeout: serviceWaitTimeout(this.config),
         interval: RECORD_POLL_INTERVAL,
         description: 'Timed out waiting for record',
       },
@@ -133,13 +131,14 @@ When(
   'I wait for {int} record(s) in {word} matching {string}',
   async function (this: ComponentTestWorld, count: number, table: string, whereClause: string) {
     assert.ok(this.db, 'Database client not configured')
+    assertSafeTableName(table)
     await eventually(
       async () => {
         const actual = await countRows(this, table, whereClause)
         assert.ok(actual >= count, `have ${actual}`)
       },
       {
-        timeout: waitTimeout(this.config, RECORD_WAIT_FALLBACK),
+        timeout: serviceWaitTimeout(this.config),
         interval: RECORD_POLL_INTERVAL,
         description: `Timed out waiting for ${count} record(s) in ${table} WHERE ${whereClause}`,
       },

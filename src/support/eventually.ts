@@ -118,9 +118,25 @@ export function waitTimeout(
   config: { waitTimeout?: number; defaultStepTimeout?: number },
   fallback = CUCUMBER_DEFAULT_TIMEOUT - HEADROOM,
 ): number {
-  if (config.waitTimeout !== undefined) return config.waitTimeout
+  if (config.waitTimeout !== undefined) return atLeastOneMs(config.waitTimeout)
   if (config.defaultStepTimeout !== undefined) {
-    return Math.max(config.defaultStepTimeout - HEADROOM, 0)
+    return atLeastOneMs(config.defaultStepTimeout - HEADROOM)
   }
   return fallback
 }
+
+/** How long the DB record waits have always polled. */
+const SERVICE_WAIT_DEFAULT = 30_000
+
+/**
+ * How long waits for background work poll before failing: a worker writing
+ * rows, or a service calling a stubbed API. `serviceWaitTimeout` if set,
+ * otherwise 30s, which the DB record waits have always used.
+ */
+export function serviceWaitTimeout(config: { serviceWaitTimeout?: number }): number {
+  return atLeastOneMs(config.serviceWaitTimeout ?? SERVICE_WAIT_DEFAULT)
+}
+
+// Playwright treats a timeout of 0 as "wait forever", so a wait is never
+// shorter than 1ms.
+const atLeastOneMs = (ms: number) => Math.max(ms, 1)

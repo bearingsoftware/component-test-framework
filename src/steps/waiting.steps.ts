@@ -2,16 +2,18 @@ import { Given, When, Then } from '@cucumber/cucumber'
 import { strict as assert } from 'assert'
 import type { Page } from '@playwright/test'
 import type { ComponentTestWorld } from '../support/world'
-import { eventually, holdsFor, waitTimeout } from '../support/eventually'
-import { countRows } from '../support/db'
+import { eventually, holdsFor, serviceWaitTimeout, waitTimeout } from '../support/eventually'
+import { assertSafeTableName, countRows } from '../support/db'
 import { describeRequests, type RequestFilter } from '../clients/wiremock-client'
 
 /** Options for {@link registerWaitingSteps}. Pass the same object you give `registerHooks`. */
 export interface WaitingStepOptions {
-  /** How long each step waits before failing, in ms. */
+  /** How long the UI steps wait before failing, in ms. */
   waitTimeout?: number
-  /** Used to derive the wait when `waitTimeout` isn't set: 1s less than this. */
+  /** Used to derive the UI wait when `waitTimeout` isn't set: 1s less than this. */
   defaultStepTimeout?: number
+  /** How long the WireMock and database steps wait, in ms. Default 30s. */
+  serviceWaitTimeout?: number
 }
 
 // Headroom between a step's own wait and its Cucumber timeout, so the step
@@ -20,9 +22,11 @@ const STEP_HEADROOM = 1_000
 // For steps that watch a window of a length the feature file sets, the
 // Cucumber timeout is turned off; the step's own waits bound it.
 const NO_STEP_TIMEOUT = -1
-// How long "no further requests" waits for the count to stop moving before
-// starting its window, and how far apart the two reads are.
+// "No further requests" first waits for the count to stop moving: up to
+// SETTLE_READS reads, SETTLE_READ_GAP apart, until two agree. If it never
+// settles it carries on with the last count, as the step it replaces did.
 const SETTLE_READ_GAP = 2_000
+const SETTLE_READS = 7
 
 function requirePage(world: ComponentTestWorld): Page {
   if (!world.page) throw new Error('No Playwright page available')
@@ -55,12 +59,16 @@ function pageUrl(world: ComponentTestWorld, pageName: string): string {
  * registerWaitingSteps(options)
  * ```
  *
- * Every step waits up to the same budget, `waitTimeout`, and gets a Cucumber
- * timeout 1s longer, so a failure says what it was waiting for.
+ * UI steps wait up to `waitTimeout`; WireMock and database steps, which wait
+ * on background work, up to `serviceWaitTimeout` (30s by default). Each step
+ * gets a Cucumber timeout 1s longer than its wait, so a failure says what it
+ * was waiting for.
  */
 export function registerWaitingSteps(options: WaitingStepOptions = {}): void {
   const budget = waitTimeout(options)
   const step = { timeout: budget + STEP_HEADROOM }
+  const serviceBudget = serviceWaitTimeout(options)
+  const serviceStep = { timeout: serviceBudget + STEP_HEADROOM }
 
   // --- UI (Playwright) ---
 
@@ -70,14 +78,15 @@ export function registerWaitingSteps(options: WaitingStepOptions = {}): void {
     async function (this: ComponentTestWorld, pageName: string) {
       const page = requirePage(this)
       const path = pageUrl(this, pageName)
-      await eventually(
-        () =>
-          assert.ok(
-            page.url().includes(path),
-            `Expected URL to contain "${path}", got "${page.url()}"`,
-          ),
-        { timeout: budget, interval: 100 },
-      )
+      // The URL must end with the page's path, not just contain it, so a
+      // longer path such as /household/invite doesn't pass for /household.
+      try {
+        await page.waitForURL(`**${path}`, { timeout: budget })
+      } catch {
+        throw new Error(
+          `Expected URL to end with "${path}" within ${budget}ms, got "${page.url()}"`,
+        )
+      }
     },
   )
 
@@ -109,7 +118,8 @@ export function registerWaitingSteps(options: WaitingStepOptions = {}): void {
     'I should eventually not see {word} on the {word} page',
     step,
     async function (this: ComponentTestWorld, testId: string, _pageName: string) {
-      await requirePage(this).getByTestId(testId).waitFor({ state: 'hidden', timeout: budget })
+      // Removed from the page, not just hidden.
+      await requirePage(this).getByTestId(testId).waitFor({ state: 'detached', timeout: budget })
     },
   )
 
@@ -215,13 +225,13 @@ export function registerWaitingSteps(options: WaitingStepOptions = {}): void {
         )
         return actual
       },
-      { timeout: budget, interval: 500 },
+      { timeout: serviceBudget, interval: 500 },
     )
   }
 
   Then(
     'the {word} API eventually receives {int} {word} request(s) to {string}',
-    step,
+    serviceStep,
     async function (
       this: ComponentTestWorld,
       _provider: string,
@@ -235,7 +245,7 @@ export function registerWaitingSteps(options: WaitingStepOptions = {}): void {
 
   Then(
     'the {word} API eventually receives {int} {word} request(s) to {string} whose body matches {string}',
-    step,
+    serviceStep,
     async function (
       this: ComponentTestWorld,
       _provider: string,
@@ -278,10 +288,10 @@ export function registerWaitingSteps(options: WaitingStepOptions = {}): void {
     },
   )
 
-  // Something has stopped calling the API. Waits for the count to stop moving
-  // (two reads SETTLE_READ_GAP apart that agree), so a request already in
-  // flight isn't mistaken for a new one, then requires no new requests for
-  // the window. At least one request must have arrived before the window.
+  // Something has stopped calling the API. First lets the count stop moving
+  // (see SETTLE_READS), so a request already in flight isn't mistaken for a
+  // new one, then requires no new requests for the window. At least one
+  // request must have arrived before the window.
   Then(
     'the {word} API receives no further {word} requests to {string} for {int} seconds',
     { timeout: NO_STEP_TIMEOUT },
@@ -294,16 +304,12 @@ export function registerWaitingSteps(options: WaitingStepOptions = {}): void {
     ) {
       const filter = { method }
       let settled = await count(this, path, filter)
-      await eventually(
-        async () => {
-          await new Promise((resolve) => setTimeout(resolve, SETTLE_READ_GAP))
-          const next = await count(this, path, filter)
-          const moved = next !== settled
-          settled = next
-          assert.ok(!moved, `${describeRequests(path, filter)} count still changing`)
-        },
-        { timeout: budget, interval: 0 },
-      )
+      for (let read = 1; read < SETTLE_READS; read++) {
+        await new Promise((resolve) => setTimeout(resolve, SETTLE_READ_GAP))
+        const next = await count(this, path, filter)
+        if (next === settled) break
+        settled = next
+      }
       assert.ok(
         settled > 0,
         `expected at least one ${describeRequests(path, filter)} request before checking for further ones`,
@@ -326,8 +332,9 @@ export function registerWaitingSteps(options: WaitingStepOptions = {}): void {
 
   Then(
     'the {word} table contains at least {int} row(s) matching {string}',
-    step,
+    serviceStep,
     async function (this: ComponentTestWorld, table: string, expected: number, predicate: string) {
+      assertSafeTableName(table)
       await eventually(
         async () => {
           const actual = await countRows(this, table, predicate)
@@ -336,22 +343,23 @@ export function registerWaitingSteps(options: WaitingStepOptions = {}): void {
             `expected at least ${expected} row(s) in ${table} matching "${predicate}", got ${actual}`,
           )
         },
-        { timeout: budget, interval: 500 },
+        { timeout: serviceBudget, interval: 500 },
       )
     },
   )
 
   When(
     'I wait for exactly {int} record(s) in {word} matching {string}',
-    step,
+    serviceStep,
     async function (this: ComponentTestWorld, expected: number, table: string, predicate: string) {
+      assertSafeTableName(table)
       await eventually(
         async () => {
           const actual = await countRows(this, table, predicate)
           assert.equal(actual, expected, `last count: ${actual}`)
         },
         {
-          timeout: budget,
+          timeout: serviceBudget,
           interval: 500,
           description: `Timed out waiting for exactly ${expected} record(s) in ${table} WHERE ${predicate}`,
         },

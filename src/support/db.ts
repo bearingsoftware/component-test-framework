@@ -1,10 +1,14 @@
 import type { ComponentTestWorld } from './world'
+import { StopRetrying } from './eventually'
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
 
+// The errors below throw StopRetrying: retrying can't fix them, so a wait
+// that hits one fails at once instead of polling until it times out.
+
 export function requireDb(world: ComponentTestWorld): NonNullable<ComponentTestWorld['db']> {
   if (!world.db) {
-    throw new Error('DbClient is not configured — set databaseUrl on FrameworkConfig')
+    throw new StopRetrying('DbClient is not configured — set databaseUrl on FrameworkConfig')
   }
   return world.db
 }
@@ -12,7 +16,23 @@ export function requireDb(world: ComponentTestWorld): NonNullable<ComponentTestW
 /** Reject anything but a plain SQL identifier before it's interpolated into a query. */
 export function assertSafeTableName(table: string): void {
   if (!IDENTIFIER.test(table)) {
-    throw new Error(`unsafe table name: ${table}`)
+    throw new StopRetrying(`unsafe table name: ${table}`)
+  }
+}
+
+/**
+ * Run a query, turning a failure (a syntax error in a predicate, a missing
+ * table) into {@link StopRetrying}.
+ */
+export async function queryOnce<T extends Record<string, unknown>>(
+  world: ComponentTestWorld,
+  sql: string,
+): Promise<T[]> {
+  const db = requireDb(world)
+  try {
+    return (await db.query<T>(sql)).rows
+  } catch (err) {
+    throw new StopRetrying(`query failed: ${(err as Error).message}\n  ${sql}`)
   }
 }
 
@@ -28,8 +48,9 @@ export async function countRows(
 ): Promise<number> {
   assertSafeTableName(table)
   const where = predicate ? ` WHERE ${predicate}` : ''
-  const result = await requireDb(world).query<{ count: string }>(
+  const rows = await queryOnce<{ count: string }>(
+    world,
     `SELECT COUNT(*)::text AS count FROM ${table}${where}`,
   )
-  return Number(result.rows[0]?.count ?? '0')
+  return Number(rows[0]?.count ?? '0')
 }

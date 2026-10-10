@@ -14,9 +14,15 @@ export { loadConfig, requireApiBaseUrl } from './support/config'
 export { loadFixture, listFixtures } from './support/fixtures'
 export { registerHooks } from './support/hooks'
 export { spawnServiceUnderTest } from './support/process'
-export { eventually, holdsFor, StopRetrying, waitTimeout } from './support/eventually'
+export {
+  eventually,
+  holdsFor,
+  StopRetrying,
+  waitTimeout,
+  serviceWaitTimeout,
+} from './support/eventually'
 export type { EventuallyOptions, HoldsForOptions } from './support/eventually'
-export { countRows, assertSafeTableName, requireDb } from './support/db'
+export { countRows, assertSafeTableName, requireDb, queryOnce } from './support/db'
 export type { SpawnServiceOptions, SpawnServiceHandle } from './support/process'
 
 // Clients

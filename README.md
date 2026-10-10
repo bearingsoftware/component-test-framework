@@ -140,7 +140,8 @@ All configuration is loaded from environment variables via `loadConfig()`. Overr
 | `operationMap` | `{}` | Your API's operationId-to-path map |
 | `cleanupTables` | _(none)_ | Tables to clear after each scenario, children first |
 | `defaultStepTimeout` | _(Cucumber's 5s)_ | Timeout in ms for every step and hook. Leave unset to keep a `setDefaultTimeout` call of your own |
-| `waitTimeout` | _(see [Waiting](#waiting))_ | How long waiting steps poll before failing, in ms |
+| `waitTimeout` | _(see [Waiting](#waiting))_ | How long UI and assertion waits poll before failing, in ms |
+| `serviceWaitTimeout` | `30000` | How long waits for background work (DB record waits, opt-in WireMock and DB steps) poll, in ms |
 
 ### Suites that don't use WireMock or an API
 
@@ -277,7 +278,7 @@ Generic steps for calling services and counting invocations. Call counts are tra
 | `Then the {word} table contains {int} row(s) matching {string}` | Wait until exactly N rows match |
 | `Then the {word} table is empty` | Wait until the table is empty |
 
-The two `I wait for` steps keep their 30s default unless `waitTimeout` or `defaultStepTimeout` is set. Table names must be plain SQL identifiers. Predicates are inserted into the SQL as written, so they must come from your own feature files.
+The two `I wait for` steps poll for `serviceWaitTimeout` (30s by default, as they always have). Table names must be plain SQL identifiers, such as `jobs`, not `schema.jobs`. Predicates are inserted into the SQL as written, so they must come from your own feature files. A query error fails the step at once rather than being retried.
 
 ### UI Steps (Playwright)
 
@@ -351,13 +352,12 @@ Before({ tags: '@ui' }, function (this: ComponentTestWorld) {
 
 Services, workers and SPAs settle asynchronously, so assertions on them wait rather than check once. Each one polls until its condition holds, and passes as soon as it does. A page or table that's already right is no slower.
 
-**How long steps wait.** In order of precedence:
+**How long steps wait.** There are two budgets:
 
-1. `waitTimeout`, if set.
-2. 1s less than `defaultStepTimeout`, so the step reports what it was waiting for before Cucumber's own timeout fires.
-3. Otherwise, 4s (just under Cucumber's 5s default). The DB `I wait for` steps keep their historical 30s.
+- **UI and assertions** (`I should see`, `was called N times`, `table contains N rows` and the opt-in UI steps): `waitTimeout` if set, otherwise 1s less than `defaultStepTimeout` (so the step reports what it was waiting for before Cucumber's own timeout fires), otherwise 4s (just under Cucumber's 5s default).
+- **Background work** (the DB `I wait for` steps and the opt-in WireMock and DB steps): `serviceWaitTimeout`, default 30s.
 
-If your suite calls `setDefaultTimeout` itself, set `waitTimeout` too, a little below it.
+If your suite calls `setDefaultTimeout` itself, set `waitTimeout` too, a little below it. Waits are never shorter than 1ms, because Playwright treats 0 as "wait forever".
 
 **Counts that can only grow fail early.** `was called {int} time(s)` fails straight away if WireMock has already received more requests than expected.
 
@@ -373,14 +373,24 @@ registerHooks(options)
 registerWaitingSteps(options)
 ```
 
-Each step waits up to `waitTimeout` and gets a Cucumber timeout 1s longer. Steps that watch a window you set in the feature file (`over {int} seconds`, `for {int} seconds`) have no Cucumber timeout; their own waits bound them.
+UI steps wait up to `waitTimeout`; WireMock and DB steps up to `serviceWaitTimeout`. Each gets a Cucumber timeout 1s longer than its wait. Steps that watch a window you set in the feature file (`over {int} seconds`, `for {int} seconds`) have no Cucumber timeout; their own waits bound them.
+
+**Migrating.** Keep the waits your copies used, or flakes they fixed can come back:
+
+| Suite | Copies waited | Set |
+|---|---|---|
+| joule-genie web | 25s (JG-829) | `waitTimeout: 25_000` |
+| joule-genie admin, secure-repo web, health-web | 10s | `waitTimeout: 10_000` |
+| joule-genie worker | 30s | nothing: `serviceWaitTimeout` defaults to 30s |
+
+health-web words some steps differently (`WireMock has received …`, `I accept the next confirmation on …`), so it keeps those.
 
 | Step | Description |
 |---|---|
-| `Then the {word} page should eventually be displayed` | Wait for the URL to contain the page's path |
+| `Then the {word} page should eventually be displayed` | Wait for the URL to end with the page's path |
 | `Then the URL should contain {string}` | Wait for the URL to contain a fragment |
 | `Then I should eventually see {word} on the {word} page` | Wait for an element to be visible |
-| `Then I should eventually not see {word} on the {word} page` | Wait for an element to be hidden or removed |
+| `Then I should eventually not see {word} on the {word} page` | Wait for an element to be removed from the page |
 | `Then I should still see {word} on the {word} page` | Assert an element is visible now, without waiting |
 | `Then I should eventually see {word} containing {string} on the {word} page` | Wait for an element's text to contain a string |
 | `Then {word} on the {word} page should eventually read {string}` | Wait for an element's trimmed text to equal a string |
@@ -392,7 +402,7 @@ Each step waits up to `waitTimeout` and gets a Cucumber timeout 1s longer. Steps
 | `Then the {word} API eventually receives {int} {word} request(s) to {string}` | Wait for at least N requests with this method to a path pattern |
 | `Then the {word} API eventually receives {int} {word} request(s) to {string} whose body matches {string}` | As above, counting only bodies that match a JSONPath |
 | `Then the {word} API receives exactly {int} {word} request(s) to {string} whose body matches {string} over {int} seconds` | Reach N, then stay at N for the window |
-| `Then the {word} API receives no further {word} requests to {string} for {int} seconds` | Once the count stops moving (at least one request must have arrived), no new requests for the window |
+| `Then the {word} API receives no further {word} requests to {string} for {int} seconds` | Let the count settle (up to 7 reads 2s apart), require at least one request, then no new requests for the window |
 | `Then the {word} table contains at least {int} row(s) matching {string}` | Wait for at least N matching rows |
 | `When I wait for exactly {int} record(s) in {word} matching {string}` | Wait for exactly N matching rows, e.g. after a delete |
 
@@ -417,7 +427,8 @@ Then('the export finishes', async function (this: ComponentTestWorld) {
 
 - `eventually(check, { timeout, interval?, description? })` retries `check` until it stops throwing, then returns its result. On timeout it throws the last error, prefixed with the description and the time waited.
 - `holdsFor(check, { duration, interval?, description? })` fails as soon as `check` throws during the window.
-- `countRows(world, table, predicate?)` counts rows and validates the table name.
+- `waitTimeout(config)` and `serviceWaitTimeout(config)` give the two budgets.
+- `countRows(world, table, predicate?)` counts rows and validates the table name. Configuration errors, unsafe table names and query errors throw `StopRetrying`, so a wait around it fails at once.
 - `assertPartialMatch(actual, expected, { nullMatchesAnything? })` does the deep partial JSON match the response, service and Valkey steps use.
 - `requestPattern(path, filter)` builds a WireMock request pattern.
 
@@ -454,7 +465,7 @@ RedisClient           // Redis client (ioredis)
 BasePage              // Abstract page object base class
 
 // Waiting
-eventually(), holdsFor(), StopRetrying, waitTimeout()
+eventually(), holdsFor(), StopRetrying, waitTimeout(), serviceWaitTimeout()
 countRows(), assertSafeTableName(), requireDb()
 assertPartialMatch(), requestPattern(), describeRequests()
 

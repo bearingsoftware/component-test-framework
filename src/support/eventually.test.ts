@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { eventually, holdsFor, StopRetrying, waitTimeout } from './eventually'
+import { eventually, holdsFor, serviceWaitTimeout, StopRetrying, waitTimeout } from './eventually'
 
 describe('eventually (COMPONENT-6)', () => {
   it('returns as soon as the check passes', async () => {
@@ -31,6 +31,19 @@ describe('eventually (COMPONENT-6)', () => {
     expect((failure as Error).message).toBe(
       `waiting for rows (timed out after 50ms): attempt ${calls}`,
     )
+  })
+
+  it('makes a last attempt at the deadline when the interval would overshoot it', async () => {
+    let calls = 0
+    const started = Date.now()
+    await eventually(
+      () => {
+        if (++calls < 2) throw new Error('not yet')
+      },
+      { timeout: 50, interval: 1_000 },
+    )
+    expect(calls).toBe(2)
+    expect(Date.now() - started).toBeLessThan(500)
   })
 
   it('always makes at least one attempt', async () => {
@@ -89,6 +102,18 @@ describe('waitTimeout (COMPONENT-6)', () => {
 
   it('otherwise fits inside Cucumber’s 5s default', () => {
     expect(waitTimeout({})).toBe(4_000)
+  })
+
+  // Playwright treats a timeout of 0 as "wait forever".
+  it('never returns 0', () => {
+    expect(waitTimeout({ waitTimeout: 0 })).toBe(1)
+    expect(waitTimeout({ defaultStepTimeout: 500 })).toBe(1)
+    expect(serviceWaitTimeout({ serviceWaitTimeout: 0 })).toBe(1)
+  })
+
+  it('gives waits for background work 30s unless told otherwise', () => {
+    expect(serviceWaitTimeout({})).toBe(30_000)
+    expect(serviceWaitTimeout({ serviceWaitTimeout: 45_000 })).toBe(45_000)
   })
 
   it('lets steps that always waited keep their own default', () => {

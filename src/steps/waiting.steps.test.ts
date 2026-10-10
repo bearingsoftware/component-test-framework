@@ -29,6 +29,9 @@ import './worker/generic-service.steps'
 import { registerWaitingSteps } from './waiting.steps'
 
 const BUDGET = 300
+// The opt-in UI steps get their own, different budget, to show the two are
+// kept apart. These tests only run the WireMock and DB steps.
+const UI_BUDGET = 2_000
 
 const run = (world: unknown, expression: string, ...args: unknown[]) => {
   const step = steps.get(expression)
@@ -49,6 +52,7 @@ const world = (counts: { requests?: () => Promise<number>; rows?: () => Promise<
     wiremockUrl: 'http://wiremock.test',
     fixturesDir: '.',
     waitTimeout: BUDGET,
+    serviceWaitTimeout: BUDGET,
   },
   wiremock: { getRequestCount: vi.fn((..._args: unknown[]) => counts.requests?.() ?? 0) },
   db: {
@@ -103,6 +107,29 @@ describe('existing count steps now wait (COMPONENT-6)', () => {
     await run(world({ rows: sequence(2, 1, 0) }), 'the {word} table is empty', 'jobs')
   })
 
+  // Retrying can't fix these, so they fail at once rather than polling for
+  // the whole wait (30s by default for record waits).
+  it('fails a record wait at once when the query errors', async () => {
+    const w = world({})
+    w.config.serviceWaitTimeout = 30_000
+    w.db.query = vi.fn(async () => {
+      throw new Error('syntax error at or near "WHERE"')
+    })
+    const started = Date.now()
+    await expect(
+      run(w, 'I wait for {int} record(s) in {word} matching {string}', 1, 'jobs', 'WHERE'),
+    ).rejects.toThrow(/query failed: syntax error/)
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
+  it('fails a record wait at once when no database is configured', async () => {
+    const w = { ...world({}), db: undefined }
+    w.config.serviceWaitTimeout = 30_000
+    await expect(
+      run(w, 'I wait for a new record in {word} matching {string}', 'jobs', 'true'),
+    ).rejects.toThrow(/Database client not configured/)
+  })
+
   it('rejects unsafe table names in record waits', async () => {
     await expect(
       run(
@@ -129,12 +156,18 @@ describe('registerWaitingSteps (COMPONENT-6)', () => {
   })
 
   describe('once registered', () => {
-    beforeAll(() => registerWaitingSteps({ waitTimeout: BUDGET }))
+    beforeAll(() => registerWaitingSteps({ waitTimeout: UI_BUDGET, serviceWaitTimeout: BUDGET }))
 
-    it('registers the steps, with a timeout just past the wait', () => {
-      for (const expression of optIn) {
-        expect(steps.get(expression)?.options.timeout).toBe(BUDGET + 1_000)
-      }
+    it('gives UI steps the UI wait, and WireMock and DB steps the service wait', () => {
+      const timeout = (expression: string) => steps.get(expression)?.options.timeout
+      expect(timeout('the {word} page should eventually be displayed')).toBe(UI_BUDGET + 1_000)
+      expect(timeout('I should eventually see {word} on the {word} page')).toBe(UI_BUDGET + 1_000)
+      expect(
+        timeout('the {word} API eventually receives {int} {word} request(s) to {string}'),
+      ).toBe(BUDGET + 1_000)
+      expect(timeout('the {word} table contains at least {int} row(s) matching {string}')).toBe(
+        BUDGET + 1_000,
+      )
     })
 
     it('turns off the Cucumber timeout for steps that watch a window', () => {
