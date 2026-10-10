@@ -73,20 +73,26 @@ export async function sendOperation(
   }).toString()
   const url = `${requireApiBaseUrl(world.config)}${path}${query ? `?${query}` : ''}`
 
+  const method = op.method.toUpperCase()
+  if (options.rawBody !== undefined && ['GET', 'HEAD'].includes(method)) {
+    throw new Error(`Can't send a body with ${method} (operation "${operationId}")`)
+  }
+
   const headers: Record<string, string> = {
     'Content-Type':
       options.rawBody !== undefined
         ? (options.contentType ?? 'application/json')
         : 'application/json',
-    ...options.headers,
   }
   const auth = options.auth ?? 'current'
   const token = auth === 'none' ? null : auth === 'current' ? world.accessToken : auth.token
   if (token) headers['Authorization'] = `Bearer ${token}`
+  // Headers passed explicitly win, including an Authorization of your own.
+  Object.assign(headers, options.headers)
 
   let body: string | undefined
   if (options.rawBody !== undefined) body = options.rawBody
-  else if (!METHODS_WITHOUT_BODY.includes(op.method.toUpperCase())) body = JSON.stringify(jsonBody)
+  else if (!METHODS_WITHOUT_BODY.includes(method)) body = JSON.stringify(jsonBody)
 
   const res = await fetch(url, { method: op.method, headers, body })
 

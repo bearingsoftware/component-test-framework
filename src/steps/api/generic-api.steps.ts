@@ -48,7 +48,7 @@ When(
     // Tokens are read from config.auth.tokenPath / refreshTokenPath, which
     // default to access_token / refresh_token.
     if (this.lastResponse && this.lastResponse.status < 300) {
-      adoptTokens(this, this.lastResponse.body, { require: false })
+      adoptTokens(this, this.lastResponse.body, { require: false, refresh: 'keep' })
     }
   },
 )

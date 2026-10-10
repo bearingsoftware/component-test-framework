@@ -16,32 +16,52 @@ function tokenAt(body: unknown, path: string): string | undefined {
   }
 }
 
+/** Options for {@link adoptTokens}. */
+export interface AdoptTokensOptions {
+  /** Fail when there's no access token. Default true; when false, nothing changes. */
+  require?: boolean
+  /**
+   * What to do with the refresh token: `replace` (default) sets it, or clears
+   * it when the response has none, so an earlier user's can't linger;
+   * `require` fails when there's none; `keep` leaves the current one when
+   * there's none.
+   */
+  refresh?: 'replace' | 'require' | 'keep'
+}
+
+/** Describe a body without its values, which may be tokens: `{token, user}`. */
+function shapeOf(body: unknown): string {
+  if (body === null || typeof body !== 'object') return typeof body
+  return Array.isArray(body) ? `array(${body.length})` : `{${Object.keys(body).join(', ')}}`
+}
+
 /**
- * Take the access token (and refresh token, if there is one) from a response
- * body and make them the world's current tokens. Where they are is set by
+ * Take the access token (and refresh token) from a response body and make
+ * them the world's current tokens. Where they are is set by
  * `config.auth.tokenPath` and `refreshTokenPath`, which default to
- * `access_token` and `refresh_token`. With `require` (the default), a body
- * with no access token is an error; without it, nothing changes.
+ * `access_token` and `refresh_token`.
  */
 export function adoptTokens(
   world: ComponentTestWorld,
   body: unknown,
-  { require = true }: { require?: boolean } = {},
+  { require = true, refresh = 'replace' }: AdoptTokensOptions = {},
 ): void {
   const tokenPath = world.config.auth?.tokenPath ?? DEFAULT_TOKEN_PATH
+  const refreshPath = world.config.auth?.refreshTokenPath ?? DEFAULT_REFRESH_TOKEN_PATH
   const accessToken = tokenAt(body, tokenPath)
+  const refreshToken = tokenAt(body, refreshPath)
   if (!accessToken) {
-    if (require) {
-      throw new Error(`No token at "${tokenPath}" in the response: ${JSON.stringify(body)}`)
-    }
+    if (require)
+      throw new Error(`No token at "${tokenPath}" in the response, which has ${shapeOf(body)}`)
     return
   }
+  if (refresh === 'require' && !refreshToken) {
+    throw new Error(
+      `No refresh token at "${refreshPath}" in the response, which has ${shapeOf(body)}`,
+    )
+  }
   world.accessToken = accessToken
-  const refreshToken = tokenAt(
-    body,
-    world.config.auth?.refreshTokenPath ?? DEFAULT_REFRESH_TOKEN_PATH,
-  )
-  if (refreshToken) world.refreshToken = refreshToken
+  if (refreshToken || refresh !== 'keep') world.refreshToken = refreshToken ?? null
 }
 
 /** The response to a login request. */
@@ -110,13 +130,19 @@ export async function login(
  * tokens the API under test issued.
  */
 export function jwtClaims(token: string): Record<string, unknown> {
+  // Errors describe the token without printing it, so it doesn't land in CI logs.
   const payload = token.split('.')[1]
-  if (!payload) throw new Error(`Not a JWT: ${token}`)
+  if (!payload) throw new Error(`Not a JWT (${token.length} characters, no payload section)`)
+  let claims: unknown
   try {
-    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<string, unknown>
+    claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'))
   } catch (err) {
     throw new Error(`JWT payload is not JSON: ${(err as Error).message}`)
   }
+  if (claims === null || typeof claims !== 'object' || Array.isArray(claims)) {
+    throw new Error(`JWT payload is not an object of claims: ${typeof claims}`)
+  }
+  return claims as Record<string, unknown>
 }
 
 /** Options for {@link registerLoginTag}. */
@@ -131,13 +157,21 @@ export interface LoginTagOptions {
   before?: (world: ComponentTestWorld) => unknown | Promise<unknown>
   /**
    * Reuse the tokens from this worker's first login for the tag, instead of
-   * logging in for every scenario. Only safe when the user and its session
-   * outlive a scenario (not when cleanup deletes the user).
+   * logging in for every scenario. Only safe when the user, its session and
+   * everything its token refers to outlive a scenario. Not when cleanup
+   * deletes the user, when `before` seeds new data the token carries (such
+   * as a household id in a claim), or when a scenario logs out, revokes or
+   * rotates the session. {@link clearLoginCache} empties it.
    */
   cache?: boolean
 }
 
 const cachedTokens = new Map<string, { accessToken: string; refreshToken: string | null }>()
+
+/** Forget every login cached by {@link registerLoginTag}. */
+export function clearLoginCache(): void {
+  cachedTokens.clear()
+}
 
 /**
  * Log in before every scenario tagged `tag`: run `before` (to seed the user),
@@ -152,6 +186,11 @@ const cachedTokens = new Map<string, { accessToken: string; refreshToken: string
  */
 export function registerLoginTag(tag: string, options: LoginTagOptions): void {
   Before({ tags: tag }, async function (this: ComponentTestWorld) {
+    if (!this.config) {
+      throw new Error(
+        `${tag}: the framework isn't set up for this scenario. Call registerHooks before registerLoginTag.`,
+      )
+    }
     await options.before?.(this)
     const { username, password } =
       typeof options.credentials === 'function'

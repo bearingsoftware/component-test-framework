@@ -170,8 +170,9 @@ export function registerRequestSteps(): void {
     this.accessToken = this.recall<string>(`token:${name}`)
   })
 
+  // Both tokens must be there, as with a token-pair endpoint such as refresh.
   When('I adopt the tokens from the last response', function (this: ComponentTestWorld) {
-    adoptTokens(this, lastResponse(this).body)
+    adoptTokens(this, lastResponse(this).body, { refresh: 'require' })
   })
 
   // --- Response assertions ---

@@ -32,7 +32,7 @@ vi.mock('@cucumber/cucumber', async (importOriginal) => {
 
 import { ComponentTestWorld } from '../support/world'
 import { sendOperation } from '../support/requests'
-import { jwtClaims, registerLoginTag } from '../support/auth'
+import { adoptTokens, clearLoginCache, jwtClaims, registerLoginTag } from '../support/auth'
 import { signHS256 } from '../utils/jwt'
 import './api/generic-api.steps'
 import { registerRequestSteps } from './request.steps'
@@ -170,6 +170,20 @@ describe('requests, values and auth (COMPONENT-7)', () => {
       expect(received[0].body).toBe('{not json')
       expect(received[0].headers['content-type']).toBe('text/plain')
       expect(received[0].headers.authorization).toBeUndefined()
+    })
+
+    it('lets an explicit Authorization header win over the current token', async () => {
+      const w = world()
+      w.accessToken = 'tok'
+      await sendOperation(w, 'createThing', { headers: { Authorization: 'Basic abc' } })
+      expect(received[0].headers.authorization).toBe('Basic abc')
+    })
+
+    it('refuses a raw body on a GET', async () => {
+      await expect(sendOperation(world(), 'getThing', { rawBody: 'x' })).rejects.toThrow(
+        `Can't send a body with GET (operation "getThing")`,
+      )
+      expect(received).toHaveLength(0)
     })
 
     it('treats _empty as no fixture', async () => {
@@ -339,6 +353,35 @@ describe('requests, values and auth (COMPONENT-7)', () => {
       expect(w.accessToken).toBe('leaver')
     })
 
+    it("clears an earlier user's refresh token when a login returns none", () => {
+      const w = world()
+      w.refreshToken = 'earlier-user'
+      adoptTokens(w, { access_token: 'a' })
+      expect([w.accessToken, w.refreshToken]).toEqual(['a', null])
+    })
+
+    it('names only the keys when there is no access token, never the values', () => {
+      expect(() => adoptTokens(world(), { session: 'secret-value', user: { id: 1 } })).toThrow(
+        'No token at "access_token" in the response, which has {session, user}',
+      )
+    })
+
+    it('keeps the refresh token for the existing authenticate step, as before', () => {
+      const w = world()
+      w.refreshToken = 'kept'
+      adoptTokens(w, { access_token: 'a' }, { require: false, refresh: 'keep' })
+      expect(w.refreshToken).toBe('kept')
+    })
+
+    it('requires both tokens when adopting from the last response, and names only the keys', async () => {
+      const w = world()
+      w.lastResponse = { status: 200, body: { access_token: 'secret-value' }, headers: {} }
+      expect(() => run(w, 'I adopt the tokens from the last response')).toThrow(
+        'No refresh token at "refresh_token" in the response, which has {access_token}',
+      )
+      expect(w.accessToken).toBeNull()
+    })
+
     it('adopts the token pair from the last response', async () => {
       const w = world()
       await sendOperation(w, 'issueTokens')
@@ -360,6 +403,14 @@ describe('requests, values and auth (COMPONENT-7)', () => {
         'login',
       )
       expect(w.accessToken).toBe(ACCESS)
+    })
+
+    it('describes a bad JWT without printing it', () => {
+      expect(() => jwtClaims('opaque-session-token')).toThrow(
+        'Not a JWT (20 characters, no payload section)',
+      )
+      const nullPayload = `h.${Buffer.from('null').toString('base64url')}.s`
+      expect(() => jwtClaims(nullPayload)).toThrow('JWT payload is not an object of claims: object')
     })
 
     it('decodes JWT claims and asserts on them', async () => {
@@ -423,6 +474,24 @@ describe('requests, values and auth (COMPONENT-7)', () => {
         expect(w.accessToken).toBe(ACCESS)
       }
       expect(logins).toBe(1)
+    })
+
+    it('can forget cached logins', async () => {
+      registerLoginTag('@cached-then-cleared', {
+        credentials: { username: 'd@example.com', password: 'right' },
+        cache: true,
+      })
+      await hookFor('@cached-then-cleared').call(world({ loginPath: '/auth/login' }))
+      clearLoginCache()
+      await hookFor('@cached-then-cleared').call(world({ loginPath: '/auth/login' }))
+      expect(logins).toBe(2)
+    })
+
+    it('says to call registerHooks first when the world has no config', async () => {
+      registerLoginTag('@too-early', { credentials: { username: 'e', password: 'right' } })
+      await expect(hookFor('@too-early').call({})).rejects.toThrow(
+        "@too-early: the framework isn't set up for this scenario. Call registerHooks before registerLoginTag.",
+      )
     })
 
     it('names the tag when its login fails', async () => {

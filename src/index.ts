@@ -27,8 +27,15 @@ export type { EventuallyOptions, HoldsForOptions } from './support/eventually'
 export { countRows, assertSafeTableName, requireDb, queryOnce } from './support/db'
 export { sendOperation, fillPath, EMPTY_REQUEST } from './support/requests'
 export type { SendOperationOptions } from './support/requests'
-export { adoptTokens, login, requestLogin, jwtClaims, registerLoginTag } from './support/auth'
-export type { LoginResponse, LoginTagOptions } from './support/auth'
+export {
+  adoptTokens,
+  login,
+  requestLogin,
+  jwtClaims,
+  registerLoginTag,
+  clearLoginCache,
+} from './support/auth'
+export type { AdoptTokensOptions, LoginResponse, LoginTagOptions } from './support/auth'
 export type { SpawnServiceOptions, SpawnServiceHandle } from './support/process'
 
 // Clients

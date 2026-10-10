@@ -381,7 +381,7 @@ await sendOperation(this, 'getScan', {
 })
 ```
 
-It fills every `{placeholder}` in the path (explicit values win over the fixture's `_pathParams`), keeps `_queryParams`, and records the response, headers included, as the last response. `rawBody` and `contentType` send a body other than the fixture's JSON.
+It fills every `{placeholder}` in the path (explicit values win over the fixture's `_pathParams`), keeps `_queryParams`, and records the response, headers included, as the last response. Headers you pass win over the defaults, including an `Authorization` of your own. `rawBody` and `contentType` send a body other than the fixture's JSON; a GET or HEAD can't have one.
 
 ### Login
 
@@ -406,15 +406,19 @@ registerHooks({
 registerLoginTag('@auth-required', {
   before: (world) => seedUser(world, 'owner@example.com'),   // optional
   credentials: { username: 'owner@example.com', password: 'Sup3rSecret!' },
-  cache: false, // true reuses the worker's first login: only when the user outlives a scenario
+  cache: false, // true reuses the worker's first login; see below
 })
 ```
 
-Helpers: `login(world, username, password)`, `requestLogin(config, username, password)` (doesn't change the world), `adoptTokens(world, body)` and `jwtClaims(token)` (decodes without verifying).
+`cache: true` is only safe when the user, its session and everything its token refers to outlive a scenario. It isn't safe when cleanup deletes the user, when `before` seeds data the token carries (such as a household id in a claim), or when a scenario logs out or revokes the session. `clearLoginCache()` empties the cache.
+
+Helpers: `login(world, username, password)`, `requestLogin(config, username, password)` (doesn't change the world), `adoptTokens(world, body, { refresh })` and `jwtClaims(token)` (decodes without verifying). A login or adopt replaces the refresh token, clearing it when the response has none, so an earlier user's can't linger. Errors about tokens name the response's keys, never its values, so tokens stay out of CI logs.
 
 ### Opt-in request steps
 
-`registerRequestSteps()` adds steps worded as secure-repo and joule-genie wrote them. Like the waiting steps, they're registered only when called: delete your own copies first, then call it once, after `registerHooks`.
+`registerRequestSteps()` adds steps worded as secure-repo and joule-genie wrote them. Like the waiting steps, they're registered only when called: delete your own copies first, then call it once, after `registerHooks`. It registers all of them, so a suite that wants to keep its own version of one of these steps can't use it yet.
+
+**Migrating:** these steps keep values with `world.remember` and read them with `world.recall`. Your own steps that read or write those values (for example a seed step that saves an id for a later `saved as` step) must use the same methods, not their own fields such as `world.savedIds`.
 
 | Step | Description |
 |---|---|
@@ -428,7 +432,7 @@ Helpers: `login(world, username, password)`, `requestLogin(config, username, pas
 | `When I log in as {string} with password {string}` | Log in; fails if refused. Doesn't change the last response |
 | `When I attempt to log in as {string} with password {string}` | Log in without failing; the response becomes the last response |
 | `When I remember the current token as {word}` / `When I use the remembered token {word}` | Keep a token aside and switch back to it |
-| `When I adopt the tokens from the last response` | Use the tokens in the last response |
+| `When I adopt the tokens from the last response` | Use the token pair in the last response; fails if either token is missing |
 | `Then the response body contains {string}` / `does not contain {string}` | Text anywhere in the JSON body |
 | `Then the response header {word} contains {string}` | Part of a header value |
 | `Then the response body at {word} should be a non-empty string` | A non-empty string at a path |
@@ -560,7 +564,7 @@ BasePage              // Abstract page object base class
 
 // Requests, values and login
 sendOperation(), fillPath(), EMPTY_REQUEST, valueAt()
-login(), requestLogin(), adoptTokens(), jwtClaims(), registerLoginTag()
+login(), requestLogin(), adoptTokens(), jwtClaims(), registerLoginTag(), clearLoginCache()
 world.remember(), world.recall(), world.uniqueId()
 
 // Waiting
