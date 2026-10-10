@@ -91,12 +91,14 @@ async function sendRequest(
     responseHeaders[key] = value
   })
 
-  world.lastResponse = {
+  // COMPONENT-4: trackCall sets lastResponse, so the headers go through it.
+  // Setting lastResponse here first and calling trackCall without headers
+  // used to wipe them, and header assertions after an operation step failed.
+  world.trackCall(operationId, requestFile, {
     status: res.status,
     body: responseBody,
     headers: responseHeaders,
-  }
-  world.trackCall(operationId, requestFile, { status: res.status, body: responseBody })
+  })
 }
 
 // --- Step definitions ---
