@@ -3,6 +3,13 @@ import { strict as assert } from 'assert'
 import { loadFixture } from '../../support/fixtures'
 import { requireApiBaseUrl } from '../../support/config'
 import type { ComponentTestWorld } from '../../support/world'
+import { assertPartialMatch } from '../../utils/match'
+import { eventually, serviceWaitTimeout, waitTimeout } from '../../support/eventually'
+import { assertSafeTableName, countRows, queryOnce } from '../../support/db'
+
+// The record waits below poll for serviceWaitTimeout (30s by default, as
+// they always have).
+const RECORD_POLL_INTERVAL = 500
 
 When(
   'the service {word} is called with the request {word} it returns the response {word}',
@@ -61,7 +68,7 @@ When(
 
     // Compare with expected response fixture
     const expected = loadFixture('responses', responseFile, this.config.fixturesDir)
-    assertDeepPartialMatch(responseBody, expected)
+    assertPartialMatch(responseBody, expected, { nullMatchesAnything: true })
   },
 )
 
@@ -97,21 +104,21 @@ When(
   'I wait for a new record in {word} matching {string}',
   async function (this: ComponentTestWorld, table: string, whereClause: string) {
     assert.ok(this.db, 'Database client not configured')
+    assertSafeTableName(table)
 
-    const maxWait = 30_000
-    const interval = 500
-    const start = Date.now()
-
-    while (Date.now() - start < maxWait) {
-      const result = await this.db.query(`SELECT * FROM ${table} WHERE ${whereClause} LIMIT 1`)
-      if (result.rows.length > 0) {
-        this.lastResponse = { status: 200, body: result.rows[0], headers: {} }
-        return
-      }
-      await new Promise((resolve) => setTimeout(resolve, interval))
-    }
-
-    throw new Error(`Timed out waiting for record in ${table} WHERE ${whereClause}`)
+    const row = await eventually(
+      async () => {
+        const rows = await queryOnce(this, `SELECT * FROM ${table} WHERE ${whereClause} LIMIT 1`)
+        assert.ok(rows.length > 0, `no record in ${table} WHERE ${whereClause}`)
+        return rows[0]
+      },
+      {
+        timeout: serviceWaitTimeout(this.config),
+        interval: RECORD_POLL_INTERVAL,
+        description: `waiting for a record in ${table} WHERE ${whereClause}`,
+      },
+    )
+    this.lastResponse = { status: 200, body: row, headers: {} }
   },
 )
 
@@ -124,55 +131,28 @@ When(
   'I wait for {int} record(s) in {word} matching {string}',
   async function (this: ComponentTestWorld, count: number, table: string, whereClause: string) {
     assert.ok(this.db, 'Database client not configured')
-
-    const maxWait = 30_000
-    const interval = 500
-    const start = Date.now()
-
-    while (Date.now() - start < maxWait) {
-      const result = await this.db.query<{ count: string }>(
-        `SELECT COUNT(*)::text AS count FROM ${table} WHERE ${whereClause}`,
-      )
-      const actual = Number(result.rows[0]?.count ?? '0')
-      if (actual >= count) return
-      await new Promise((resolve) => setTimeout(resolve, interval))
-    }
-
-    throw new Error(`Timed out waiting for ${count} record(s) in ${table} WHERE ${whereClause}`)
+    assertSafeTableName(table)
+    await eventually(
+      async () => {
+        const actual = await countRows(this, table, whereClause)
+        assert.ok(actual >= count, `have ${actual}`)
+      },
+      {
+        timeout: serviceWaitTimeout(this.config),
+        interval: RECORD_POLL_INTERVAL,
+        description: `waiting for ${count} record(s) in ${table} WHERE ${whereClause}`,
+      },
+    )
   },
 )
 
 Then('the {word} table is empty', async function (this: ComponentTestWorld, table: string) {
   assert.ok(this.db, 'Database client not configured')
-  const result = await this.db.query<{ count: string }>(
-    `SELECT COUNT(*)::text AS count FROM ${table}`,
+  await eventually(
+    async () => {
+      const actual = await countRows(this, table)
+      assert.equal(actual, 0, `expected ${table} to be empty, has ${actual} row(s)`)
+    },
+    { timeout: waitTimeout(this.config) },
   )
-  const actual = Number(result.rows[0]?.count ?? '0')
-  assert.equal(actual, 0, `expected ${table} to be empty, has ${actual} row(s)`)
 })
-
-function assertDeepPartialMatch(actual: unknown, expected: unknown, path = ''): void {
-  if (expected === null || expected === undefined) {
-    return
-  }
-  if (Array.isArray(expected)) {
-    assert.ok(Array.isArray(actual), `Expected array at ${path || 'root'}`)
-    assert.equal((actual as unknown[]).length, expected.length, `Length mismatch at ${path}`)
-    for (let i = 0; i < expected.length; i++) {
-      assertDeepPartialMatch((actual as unknown[])[i], expected[i], `${path}[${i}]`)
-    }
-    return
-  }
-  if (typeof expected === 'object') {
-    assert.ok(typeof actual === 'object' && actual !== null, `Expected object at ${path}`)
-    for (const key of Object.keys(expected as Record<string, unknown>)) {
-      assertDeepPartialMatch(
-        (actual as Record<string, unknown>)[key],
-        (expected as Record<string, unknown>)[key],
-        path ? `${path}.${key}` : key,
-      )
-    }
-    return
-  }
-  assert.equal(actual, expected, `Mismatch at ${path || 'root'}`)
-}

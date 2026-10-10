@@ -56,6 +56,16 @@ export abstract class BasePage {
     await this.page.getByTestId(testId).waitFor({ state: 'visible', timeout })
   }
 
+  /** Wait for an element to be hidden or removed from the page. */
+  async waitForHidden(testId: string, timeout = 5000): Promise<void> {
+    await this.page.getByTestId(testId).waitFor({ state: 'hidden', timeout })
+  }
+
+  /** Hover over an element by its data-testid attribute. */
+  async hoverElement(testId: string): Promise<void> {
+    await this.page.getByTestId(testId).hover()
+  }
+
   /** Select an option from a select element by its data-testid. */
   async selectOption(testId: string, value: string): Promise<void> {
     await this.page.getByTestId(testId).selectOption(value)

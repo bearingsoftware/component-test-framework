@@ -50,6 +50,19 @@ export interface FrameworkConfig {
    * to keep whatever the suite configures itself.
    */
   defaultStepTimeout?: number
+  /**
+   * How long waiting steps poll before failing, in ms. Defaults to 1s less
+   * than `defaultStepTimeout`, so a failed wait reports what it was waiting
+   * for before Cucumber's timeout fires. Without either, steps that used to
+   * check once wait up to 4s, and steps that always waited keep their 30s.
+   */
+  waitTimeout?: number
+  /**
+   * How long waits for background work poll before failing, in ms: the DB
+   * record waits and the opt-in WireMock and database waiting steps. Default
+   * 30s, which the record waits have always used.
+   */
+  serviceWaitTimeout?: number
 }
 
 /**

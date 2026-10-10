@@ -5,6 +5,16 @@ import * as path from 'path'
 export interface RequestFilter {
   /** Only match requests with this HTTP method, e.g. "POST". Matches any method when omitted. */
   method?: string
+  /**
+   * Treat the path as an exact path rather than a regular expression. Use it
+   * for paths containing regex characters such as `?`, `+` or `.`.
+   */
+  exactPath?: boolean
+  /**
+   * Only match requests whose JSON body matches this JSONPath expression,
+   * e.g. `$[?(@.status == 'active')]`.
+   */
+  bodyJsonPath?: string
 }
 
 /**
@@ -15,7 +25,20 @@ export interface RequestFilter {
  * constructed, but every call throws and says how to configure it.
  */
 export class WireMockClient {
-  constructor(readonly baseUrl: string) {}
+  /**
+   * @param baseUrl WireMock's base URL. Empty means not configured.
+   * @param requestTimeout How long each admin request may take, in ms, so a
+   *   stalled WireMock fails a step rather than hanging the run.
+   */
+  constructor(
+    readonly baseUrl: string,
+    private readonly requestTimeout = 10_000,
+  ) {}
+
+  /** `fetch` with this client's request timeout. */
+  private fetch(url: string, init: RequestInit = {}): Promise<Response> {
+    return fetch(url, { ...init, signal: AbortSignal.timeout(this.requestTimeout) })
+  }
 
   private url(adminPath: string): string {
     if (!this.baseUrl) {
@@ -35,13 +58,13 @@ export class WireMockClient {
 
   /** Reset all stubs and request logs. */
   async resetAll(): Promise<void> {
-    const res = await fetch(this.url('/__admin/reset'), { method: 'POST' })
+    const res = await this.fetch(this.url('/__admin/reset'), { method: 'POST' })
     await this.expectOk(res, 'resetAll')
   }
 
   /** Reset only the request journal (keep stubs). */
   async resetRequests(): Promise<void> {
-    const res = await fetch(this.url('/__admin/requests'), { method: 'DELETE' })
+    const res = await this.fetch(this.url('/__admin/requests'), { method: 'DELETE' })
     await this.expectOk(res, 'resetRequests')
   }
 
@@ -83,7 +106,7 @@ export class WireMockClient {
    */
   async importStubs(mappings: Record<string, unknown>[]): Promise<void> {
     if (mappings.length === 0) return
-    const res = await fetch(this.url('/__admin/mappings/import'), {
+    const res = await this.fetch(this.url('/__admin/mappings/import'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -99,7 +122,7 @@ export class WireMockClient {
 
   /** Register a single stub mapping. */
   async addStub(mapping: Record<string, unknown>): Promise<void> {
-    const res = await fetch(this.url('/__admin/mappings'), {
+    const res = await this.fetch(this.url('/__admin/mappings'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(mapping),
@@ -149,7 +172,7 @@ export class WireMockClient {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       try {
-        const res = await fetch(healthUrl)
+        const res = await this.fetch(healthUrl)
         if (res.ok) return
       } catch {
         /* not up yet */
@@ -161,7 +184,7 @@ export class WireMockClient {
 
   /** Remove a stub mapping by its UUID. */
   async removeStub(id: string): Promise<void> {
-    const res = await fetch(this.url(`/__admin/mappings/${id}`), { method: 'DELETE' })
+    const res = await this.fetch(this.url(`/__admin/mappings/${id}`), { method: 'DELETE' })
     // Removing a stub that's already gone is not an error.
     if (res.status === 404) return
     await this.expectOk(res, 'removeStub')
@@ -169,7 +192,7 @@ export class WireMockClient {
 
   /** Get the count of requests matching a URL path pattern, optionally filtered by method. */
   async getRequestCount(urlPathPattern: string, filter: RequestFilter = {}): Promise<number> {
-    const res = await fetch(this.url('/__admin/requests/count'), {
+    const res = await this.fetch(this.url('/__admin/requests/count'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestPattern(urlPathPattern, filter)),
@@ -189,16 +212,15 @@ export class WireMockClient {
   ): Promise<void> {
     const actual = await this.getRequestCount(urlPathPattern, filter)
     if (actual !== expectedCount) {
-      const target = filter.method
-        ? `${filter.method.toUpperCase()} ${urlPathPattern}`
-        : urlPathPattern
-      throw new Error(`Expected ${expectedCount} calls to ${target}, got ${actual}`)
+      throw new Error(
+        `Expected ${expectedCount} calls to ${describeRequests(urlPathPattern, filter)}, got ${actual}`,
+      )
     }
   }
 
   /** Find all requests matching a URL path pattern, optionally filtered by method. */
   async findRequests(urlPathPattern: string, filter: RequestFilter = {}): Promise<unknown[]> {
-    const res = await fetch(this.url('/__admin/requests/find'), {
+    const res = await this.fetch(this.url('/__admin/requests/find'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestPattern(urlPathPattern, filter)),
@@ -211,8 +233,19 @@ export class WireMockClient {
   }
 }
 
-function requestPattern(urlPathPattern: string, filter: RequestFilter): Record<string, string> {
-  return filter.method
-    ? { urlPathPattern, method: filter.method.toUpperCase() }
-    : { urlPathPattern }
+/** Build a WireMock request pattern from a path and a {@link RequestFilter}. */
+export function requestPattern(path: string, filter: RequestFilter = {}): Record<string, unknown> {
+  const pattern: Record<string, unknown> = filter.exactPath
+    ? { urlPath: path }
+    : { urlPathPattern: path }
+  if (filter.method) pattern.method = filter.method.toUpperCase()
+  if (filter.bodyJsonPath) pattern.bodyPatterns = [{ matchesJsonPath: filter.bodyJsonPath }]
+  return pattern
+}
+
+/** Describe a path and filter for error messages, e.g. "POST /orders matching $.id". */
+export function describeRequests(path: string, filter: RequestFilter = {}): string {
+  const method = filter.method ? `${filter.method.toUpperCase()} ` : ''
+  const body = filter.bodyJsonPath ? ` matching ${filter.bodyJsonPath}` : ''
+  return `${method}${path}${body}`
 }
