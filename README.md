@@ -591,7 +591,8 @@ registerHooks({
   hooks: {
     afterReset: (world) => world.remember('tenant', world.uniqueId('tenant')),
     onScenarioFailed: async (world, scenario) => {
-      await world.page?.screenshot({ path: `reports/${scenario.pickle.name}.png` })
+      const name = scenario.pickle.name.replace(/[^\w-]+/g, '_')
+      await world.page?.screenshot({ path: `reports/${name}.png` })
     },
     beforePageClose: (world) => collectCoverage(world),
   },
@@ -601,16 +602,18 @@ registerHooks({
 
 | Hook | When |
 |---|---|
-| `afterReset` | After the per-scenario reset (world state, WireMock reset and baseline stubs, Redis flush), before the scenario's own `Before` hooks |
-| `onScenarioFailed` | When a scenario has failed, before anything is torn down; the page is still open |
-| `beforePageClose` | In `@ui` scenarios, just before the framework closes the page |
+| `afterReset` | After the per-scenario reset (world state, WireMock reset and baseline stubs, Redis flush). It runs before the framework's `@ui` hook, so there's no page yet, and before `Before` hooks registered after `registerHooks` |
+| `onScenarioFailed` | When a scenario has failed, including an undefined, ambiguous or pending step, before anything is torn down; the page is still open. If it throws, cleanup still runs and the error is reported after it |
+| `beforePageClose` | In `@ui` scenarios, just before the framework closes the page. The page is closed even if it throws |
 | `cleanup` (option) | After each scenario, after the `cleanupTables` cleanup |
 
 After a scenario the order is: `onScenarioFailed` (if it failed), cleanup, `beforePageClose`, then the page closes.
 
+`wiremockBaseline` directories use WireMock's layout, `<dir>/mappings/*.json`, and need `wiremockUrl`. A missing directory, a baseline without WireMock, and `pages` without `webBaseUrl` are reported when `registerHooks` is called, not in every scenario.
+
 ## Entry points
 
-The package root works as it always has: it exports everything and registers every built-in step when it's imported. Alongside it are entry points that register nothing on import, so a suite loads and registers only what it uses:
+The package root works as it always has: it exports everything and registers every built-in step when it's imported. Only the entry points below can be imported: deep paths into `dist/` are no longer reachable. Alongside it are entry points that register nothing on import, so a suite loads and registers only what it uses:
 
 | Entry point | Contents |
 |---|---|

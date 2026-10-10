@@ -193,10 +193,72 @@ describe('registerHooks lifecycle options (COMPONENT-9)', () => {
     expect(login).toMatchObject({ page: w.page, baseUrl: 'http://web.test' })
   })
 
-  it('says pages needs webBaseUrl', async () => {
-    registerHooks({ ...baseOptions, pages: { login: class {} as never } })
-    await expect(uiBefore().fn.call(world())).rejects.toThrow('The pages option needs webBaseUrl')
+  it('says pages needs webBaseUrl when the hooks are registered', () => {
+    expect(() => registerHooks({ ...baseOptions, pages: { login: class {} as never } })).toThrow(
+      'The pages option needs webBaseUrl',
+    )
   })
+
+  it('checks wiremockBaseline when the hooks are registered', () => {
+    expect(() => registerHooks({ ...baseOptions, wiremockBaseline: ['login'] })).toThrow(
+      'wiremockBaseline needs wiremockUrl',
+    )
+    expect(() =>
+      registerHooks({
+        ...baseOptions,
+        wiremockUrl: 'http://wiremock.test',
+        wiremockBaseline: ['nope'],
+      }),
+    ).toThrow(/wiremockBaseline directory has no mappings folder: .*nope\/mappings/)
+  })
+
+  it('cleans up even when onScenarioFailed throws, then reports its error', async () => {
+    const cleanup = vi.fn()
+    registerHooks({
+      ...baseOptions,
+      cleanup,
+      hooks: {
+        onScenarioFailed: () => {
+          throw new Error('screenshot failed')
+        },
+      },
+    })
+    const close = vi.fn()
+    const w = Object.assign(world(), { activeSubscription: { close } })
+    await expect(
+      everyAfter().fn.call(w, { pickle: { name: 'x', uri: 'x' }, result: { status: 'FAILED' } }),
+    ).rejects.toThrow('screenshot failed')
+    expect(close).toHaveBeenCalled()
+    expect(cleanup).toHaveBeenCalledWith(w)
+  })
+
+  it('closes the page even when beforePageClose throws', async () => {
+    registerHooks({
+      ...baseOptions,
+      hooks: {
+        beforePageClose: () => {
+          throw new Error('coverage failed')
+        },
+      },
+    })
+    const page = { close: vi.fn() }
+    const browserContext = { close: vi.fn() }
+    const w = Object.assign(world(), { page, browserContext })
+    await expect(uiAfter().fn.call(w)).rejects.toThrow('coverage failed')
+    expect(page.close).toHaveBeenCalled()
+    expect(browserContext.close).toHaveBeenCalled()
+    expect(w).toMatchObject({ page: null, browserContext: null })
+  })
+
+  it.each(['FAILED', 'UNDEFINED', 'AMBIGUOUS', 'PENDING'])(
+    'calls onScenarioFailed for a %s result',
+    async (status) => {
+      const onScenarioFailed = vi.fn()
+      registerHooks({ ...baseOptions, hooks: { onScenarioFailed } })
+      await everyAfter().fn.call(world(), { pickle: { name: 'x', uri: 'x' }, result: { status } })
+      expect(onScenarioFailed).toHaveBeenCalled()
+    },
+  )
 
   it('calls onScenarioFailed while the page is open, then beforePageClose, then closes the page', async () => {
     const order: string[] = []

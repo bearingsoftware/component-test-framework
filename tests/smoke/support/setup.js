@@ -5,6 +5,10 @@ const assert = require('assert')
 const path = require('path')
 const { Given, Then } = require('@cucumber/cucumber')
 const core = require('../../../dist/core')
+// The root import registers every step group as it loads. Using it alongside
+// the core entry point's register…Steps calls must not register any step
+// twice, which Cucumber would report as ambiguous.
+require('../../../dist/index')
 
 core.registerHooks({
   fixturesDir: path.join(__dirname, '..'),

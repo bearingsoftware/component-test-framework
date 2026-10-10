@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import type { ITestCaseHookParameter } from '@cucumber/cucumber'
 import type { ComponentTestWorld } from '../support/world'
 import type { BasePage } from '../pages/base.page'
 
@@ -33,20 +34,25 @@ export interface UIStateSnapshot {
 export interface LifecycleHooks {
   /**
    * After the framework's per-scenario reset (world state, WireMock reset and
-   * baseline stubs, Redis flush), before the scenario's own Before hooks.
+   * baseline stubs, Redis flush). It runs before the framework's @ui hook, so
+   * there's no page yet, and before Before hooks registered after
+   * registerHooks.
    */
   afterReset?: (world: ComponentTestWorld) => unknown | Promise<unknown>
   /**
-   * When a scenario has failed, before anything is torn down: the page is
-   * still open, so this is the place to save a screenshot or the HTML.
+   * When a scenario has failed (including an undefined, ambiguous or pending
+   * step), before anything is torn down: the page is still open, so this is
+   * the place to save a screenshot or the HTML. If it throws, cleanup still
+   * runs and the error is reported after it.
    */
   onScenarioFailed?: (
     world: ComponentTestWorld,
-    scenario: { pickle: { name: string; uri: string }; result?: { status: string } },
+    scenario: ITestCaseHookParameter,
   ) => unknown | Promise<unknown>
   /**
    * In @ui scenarios, just before the framework closes the page: for
-   * example to collect browser-side coverage.
+   * example to collect browser-side coverage. The page is closed even if this
+   * throws.
    */
   beforePageClose?: (world: ComponentTestWorld) => unknown | Promise<unknown>
 }
@@ -106,8 +112,8 @@ export interface FrameworkConfig {
    */
   pages?: Record<string, PageClass>
   /**
-   * WireMock stub directories, relative to `fixturesDir`, loaded after every
-   * reset: stubs most scenarios need, such as a login, so each scenario's
+   * WireMock stub directories, relative to `fixturesDir`, each laid out as
+   * `<dir>/mappings/*.json`, loaded after every reset: stubs most scenarios need, such as a login, so each scenario's
    * own stubs are only what's particular to it. A scenario's stubs are
    * added later, so they win where both match at the same priority.
    */
