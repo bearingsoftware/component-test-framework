@@ -18,6 +18,7 @@ export {
   eventually,
   holdsFor,
   StopRetrying,
+  isStopRetrying,
   waitTimeout,
   serviceWaitTimeout,
 } from './support/eventually'

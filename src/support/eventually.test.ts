@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { eventually, holdsFor, serviceWaitTimeout, StopRetrying, waitTimeout } from './eventually'
+import { AssertionError, strict as assert } from 'assert'
+import {
+  eventually,
+  holdsFor,
+  isStopRetrying,
+  serviceWaitTimeout,
+  StopRetrying,
+  waitTimeout,
+} from './eventually'
 
 describe('eventually (COMPONENT-6)', () => {
   it('returns as soon as the check passes', async () => {
@@ -66,6 +74,48 @@ describe('eventually (COMPONENT-6)', () => {
   })
 })
 
+describe('errors from a wait (COMPONENT-6)', () => {
+  it('keeps the original error, so an assertion keeps its actual and expected values', async () => {
+    const failure = await eventually(() => assert.equal(1, 2), {
+      timeout: 0,
+      description: 'counting',
+    }).catch((err: unknown) => err)
+
+    expect(failure).toBeInstanceOf(AssertionError)
+    expect(failure).toMatchObject({ actual: 1, expected: 2 })
+    expect((failure as Error).message).toMatch(/^counting \(timed out after 0ms\): /)
+  })
+
+  it('lets a StopRetrying from a nested wait stop the outer one', async () => {
+    let outerAttempts = 0
+    await expect(
+      eventually(
+        async () => {
+          outerAttempts++
+          await eventually(
+            () => {
+              throw new StopRetrying('gone for good')
+            },
+            { timeout: 1_000 },
+          )
+        },
+        { timeout: 1_000, interval: 10 },
+      ),
+    ).rejects.toThrow('gone for good')
+    expect(outerAttempts).toBe(1)
+  })
+
+  it('recognises a StopRetrying from another copy of the package by name', () => {
+    class OtherCopyStopRetrying extends Error {
+      override name = 'StopRetrying'
+    }
+    expect(isStopRetrying(new OtherCopyStopRetrying('x'))).toBe(true)
+    expect(isStopRetrying(new StopRetrying('x'))).toBe(true)
+    expect(isStopRetrying(new Error('x'))).toBe(false)
+    expect(new StopRetrying('x').name).toBe('StopRetrying')
+  })
+})
+
 describe('holdsFor (COMPONENT-6)', () => {
   it('passes when the check holds for the whole window', async () => {
     let calls = 0
@@ -114,9 +164,5 @@ describe('waitTimeout (COMPONENT-6)', () => {
   it('gives waits for background work 30s unless told otherwise', () => {
     expect(serviceWaitTimeout({})).toBe(30_000)
     expect(serviceWaitTimeout({ serviceWaitTimeout: 45_000 })).toBe(45_000)
-  })
-
-  it('lets steps that always waited keep their own default', () => {
-    expect(waitTimeout({}, 30_000)).toBe(30_000)
   })
 })

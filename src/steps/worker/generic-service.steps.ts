@@ -115,7 +115,7 @@ When(
       {
         timeout: serviceWaitTimeout(this.config),
         interval: RECORD_POLL_INTERVAL,
-        description: 'Timed out waiting for record',
+        description: `waiting for a record in ${table} WHERE ${whereClause}`,
       },
     )
     this.lastResponse = { status: 200, body: row, headers: {} }
@@ -140,7 +140,7 @@ When(
       {
         timeout: serviceWaitTimeout(this.config),
         interval: RECORD_POLL_INTERVAL,
-        description: `Timed out waiting for ${count} record(s) in ${table} WHERE ${whereClause}`,
+        description: `waiting for ${count} record(s) in ${table} WHERE ${whereClause}`,
       },
     )
   },

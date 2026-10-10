@@ -95,7 +95,10 @@ describe('registerHooks (COMPONENT-5)', () => {
     await scenarioHook().fn.call(fakeWorld())
 
     expect(cucumber.beforeAll).toHaveLength(1)
-    expect(fetchSpy).toHaveBeenCalledWith('http://wiremock.test/__admin/reset', { method: 'POST' })
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'http://wiremock.test/__admin/reset',
+      expect.objectContaining({ method: 'POST', signal: expect.any(AbortSignal) }),
+    )
   })
 
   it('warns when wiremockStubsDir does not exist', () => {

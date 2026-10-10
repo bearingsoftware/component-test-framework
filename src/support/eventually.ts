@@ -30,7 +30,17 @@ export interface HoldsForOptions {
  * Thrown by a check to stop {@link eventually} retrying: the condition can no
  * longer become true, so waiting out the timeout would only delay the failure.
  */
-export class StopRetrying extends Error {}
+export class StopRetrying extends Error {
+  override name = 'StopRetrying'
+}
+
+/**
+ * True for a {@link StopRetrying}, including one from another installed copy
+ * of this package, where `instanceof` would say no.
+ */
+export function isStopRetrying(err: unknown): boolean {
+  return err instanceof Error && err.name === 'StopRetrying'
+}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -51,7 +61,7 @@ export async function eventually<T>(
     try {
       return await check()
     } catch (err) {
-      if (err instanceof StopRetrying) {
+      if (isStopRetrying(err)) {
         throw withContext(err, options.description)
       }
       if (Date.now() >= deadline) {
@@ -87,16 +97,21 @@ export async function holdsFor(
 
 /**
  * Prefix an error with what was being checked and how it ended, e.g.
- * "waiting for rows (timed out after 300ms): got 1".
+ * "waiting for rows (timed out after 300ms): got 1". The error itself is kept,
+ * so its class survives (a StopRetrying still stops an outer wait) and so do
+ * an AssertionError's actual and expected values.
  */
 function withContext(err: unknown, description?: string, outcome?: string): Error {
-  const message = err instanceof Error ? err.message : String(err)
   const context = [description, outcome && (description ? `(${outcome})` : outcome)]
     .filter(Boolean)
     .join(' ')
-  const wrapped = new Error(context ? `${context}: ${message}` : message)
-  if (err instanceof Error) wrapped.stack = `${wrapped.message}\n${err.stack ?? ''}`
-  return wrapped
+  if (!(err instanceof Error))
+    return new Error(context ? `${context}: ${String(err)}` : String(err))
+  if (!context) return err
+  const original = err.message
+  err.message = `${context}: ${original}`
+  if (err.stack?.includes(original)) err.stack = err.stack.replace(original, err.message)
+  return err
 }
 
 /**
@@ -108,21 +123,17 @@ const CUCUMBER_DEFAULT_TIMEOUT = 5_000
 const HEADROOM = 1_000
 
 /**
- * How long a waiting step polls before failing. In order: the explicit
- * `waitTimeout`, 1s less than `defaultStepTimeout`, or `fallback`. Steps that
- * have always waited (such as the DB record waits) pass their historical 30s
- * as the fallback; steps that used to check once fall back to just under
- * Cucumber's 5s default.
+ * How long UI and assertion waits poll before failing. In order: the
+ * explicit `waitTimeout`, 1s less than `defaultStepTimeout`, or just under
+ * Cucumber's 5s default. Waits for background work use
+ * {@link serviceWaitTimeout} instead.
  */
-export function waitTimeout(
-  config: { waitTimeout?: number; defaultStepTimeout?: number },
-  fallback = CUCUMBER_DEFAULT_TIMEOUT - HEADROOM,
-): number {
+export function waitTimeout(config: { waitTimeout?: number; defaultStepTimeout?: number }): number {
   if (config.waitTimeout !== undefined) return atLeastOneMs(config.waitTimeout)
   if (config.defaultStepTimeout !== undefined) {
     return atLeastOneMs(config.defaultStepTimeout - HEADROOM)
   }
-  return fallback
+  return CUCUMBER_DEFAULT_TIMEOUT - HEADROOM
 }
 
 /** How long the DB record waits have always polled. */

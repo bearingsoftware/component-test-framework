@@ -51,6 +51,22 @@ describe('WireMockClient (COMPONENT-5)', () => {
     expect(new WireMockClient(baseUrl).baseUrl).toBe(baseUrl)
   })
 
+  it('gives up on a stalled WireMock instead of hanging', async () => {
+    const stalled = http.createServer(() => {
+      /* never responds */
+    })
+    await new Promise<void>((resolve) => stalled.listen(0, '127.0.0.1', resolve))
+    const url = `http://127.0.0.1:${(stalled.address() as AddressInfo).port}`
+    try {
+      const started = Date.now()
+      await expect(new WireMockClient(url, 200).getRequestCount('/x')).rejects.toThrow()
+      expect(Date.now() - started).toBeLessThan(2_000)
+    } finally {
+      stalled.closeAllConnections()
+      await new Promise((resolve) => stalled.close(resolve))
+    }
+  })
+
   it('throws a configuration error when no URL is set', async () => {
     await expect(new WireMockClient('').resetAll()).rejects.toThrow(/WireMock is not configured/)
   })

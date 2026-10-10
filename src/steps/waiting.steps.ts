@@ -43,6 +43,8 @@ function pageUrl(world: ComponentTestWorld, pageName: string): string {
   return pageObj.url
 }
 
+let registered = false
+
 /**
  * Register opt-in waiting steps, worded to match the steps several consumer
  * suites wrote for themselves: "I should eventually see …", "the X API
@@ -65,6 +67,10 @@ function pageUrl(world: ComponentTestWorld, pageName: string): string {
  * was waiting for.
  */
 export function registerWaitingSteps(options: WaitingStepOptions = {}): void {
+  // A second registration would make every one of these steps ambiguous.
+  if (registered) return
+  registered = true
+
   const budget = waitTimeout(options)
   const step = { timeout: budget + STEP_HEADROOM }
   const serviceBudget = serviceWaitTimeout(options)
@@ -82,9 +88,9 @@ export function registerWaitingSteps(options: WaitingStepOptions = {}): void {
       // longer path such as /household/invite doesn't pass for /household.
       try {
         await page.waitForURL(`**${path}`, { timeout: budget })
-      } catch {
+      } catch (err) {
         throw new Error(
-          `Expected URL to end with "${path}" within ${budget}ms, got "${page.url()}"`,
+          `Expected URL to end with "${path}" within ${budget}ms, got "${page.url()}": ${(err as Error).message}`,
         )
       }
     },
@@ -138,7 +144,7 @@ export function registerWaitingSteps(options: WaitingStepOptions = {}): void {
       const element = requirePage(this).getByTestId(testId)
       await eventually(
         async () => {
-          const actual = (await element.textContent()) ?? ''
+          const actual = (await element.textContent({ timeout: 100 })) ?? ''
           assert.ok(
             actual.includes(text),
             `testid "${testId}" text is "${actual}", want it to contain "${text}"`,
@@ -156,7 +162,7 @@ export function registerWaitingSteps(options: WaitingStepOptions = {}): void {
       const element = requirePage(this).getByTestId(testId)
       await eventually(
         async () => {
-          const actual = ((await element.textContent()) ?? '').trim()
+          const actual = ((await element.textContent({ timeout: 100 })) ?? '').trim()
           assert.equal(actual, text, `testid "${testId}" reads "${actual}", want "${text}"`)
         },
         { timeout: budget, interval: 100 },
@@ -361,7 +367,7 @@ export function registerWaitingSteps(options: WaitingStepOptions = {}): void {
         {
           timeout: serviceBudget,
           interval: 500,
-          description: `Timed out waiting for exactly ${expected} record(s) in ${table} WHERE ${predicate}`,
+          description: `waiting for exactly ${expected} record(s) in ${table} WHERE ${predicate}`,
         },
       )
     },

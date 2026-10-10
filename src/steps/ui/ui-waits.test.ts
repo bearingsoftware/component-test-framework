@@ -56,11 +56,15 @@ class DashboardPage extends BasePage {
 describe('UI steps wait for the page (COMPONENT-6)', () => {
   // Skipped, rather than failed, where Chromium can't be launched.
   let browserAvailable = false
-  const uiIt = (name: string, fn: () => Promise<void>) =>
-    it(name, async (ctx) => {
-      if (!browserAvailable) ctx.skip()
-      await fn()
-    })
+  const uiIt = (name: string, fn: () => Promise<void>, timeout?: number) =>
+    it(
+      name,
+      async (ctx) => {
+        if (!browserAvailable) ctx.skip()
+        await fn()
+      },
+      timeout,
+    )
 
   let server: http.Server
   let baseUrl: string
@@ -173,6 +177,33 @@ describe('UI steps wait for the page (COMPONENT-6)', () => {
         '51.5',
       )
     })
+
+    // Each read is bounded, so a missing element fails with the step's own
+    // message within the wait, not after Playwright's 30s action timeout.
+    uiIt(
+      'fails text waits within the budget when the element never appears',
+      async () => {
+        const started = Date.now()
+        await expect(
+          run(
+            '{word} on the {word} page should eventually read {string}',
+            'missing',
+            'dashboard',
+            'x',
+          ),
+        ).rejects.toThrow(/timed out after 3000ms/)
+        await expect(
+          run(
+            'I should eventually see {word} containing {string} on the {word} page',
+            'missing',
+            'x',
+            'dashboard',
+          ),
+        ).rejects.toThrow(/timed out after 3000ms/)
+        expect(Date.now() - started).toBeLessThan(10_000)
+      },
+      15_000,
+    )
 
     uiIt('I should still see … checks without waiting', async () => {
       await run('I should still see {word} on the {word} page', 'count', 'dashboard')

@@ -70,11 +70,13 @@ describe('existing count steps now wait (COMPONENT-6)', () => {
   })
 
   it('fails at once when WireMock has already overshot', async () => {
+    const w = world({ requests: sequence(3) })
+    w.config.waitTimeout = 10_000
     const started = Date.now()
-    await expect(
-      run(world({ requests: sequence(3) }), 'the {word} API was called {int} time(s)', 'vendor', 2),
-    ).rejects.toThrow('Expected 2 calls to /vendor/.*, got 3')
-    expect(Date.now() - started).toBeLessThan(BUDGET)
+    await expect(run(w, 'the {word} API was called {int} time(s)', 'vendor', 2)).rejects.toThrow(
+      'Expected 2 calls to /vendor/.*, got 3',
+    )
+    expect(Date.now() - started).toBeLessThan(2_000)
   })
 
   it('fails with the last count when WireMock never gets there', async () => {
@@ -113,21 +115,35 @@ describe('existing count steps now wait (COMPONENT-6)', () => {
     const w = world({})
     w.config.serviceWaitTimeout = 30_000
     w.db.query = vi.fn(async () => {
-      throw new Error('syntax error at or near "WHERE"')
+      throw Object.assign(new Error('syntax error at or near "WHERE"'), { code: '42601' })
     })
     const started = Date.now()
     await expect(
       run(w, 'I wait for {int} record(s) in {word} matching {string}', 1, 'jobs', 'WHERE'),
     ).rejects.toThrow(/query failed: syntax error/)
-    expect(Date.now() - started).toBeLessThan(1_000)
+    expect(Date.now() - started).toBeLessThan(2_000)
   })
 
-  it('fails a record wait at once when no database is configured', async () => {
+  it('rides out a dropped connection during a record wait', async () => {
+    const w = world({})
+    let calls = 0
+    w.db.query = vi.fn(async () => {
+      if (++calls === 1)
+        throw Object.assign(new Error('Connection terminated'), { code: undefined })
+      return { rows: [{ count: '1' }] }
+    })
+    await run(w, 'I wait for {int} record(s) in {word} matching {string}', 1, 'jobs', 'true')
+    expect(calls).toBe(2)
+  })
+
+  it('fails a row-count wait at once when no database is configured', async () => {
     const w = { ...world({}), db: undefined }
-    w.config.serviceWaitTimeout = 30_000
+    w.config.waitTimeout = 10_000
+    const started = Date.now()
     await expect(
-      run(w, 'I wait for a new record in {word} matching {string}', 'jobs', 'true'),
-    ).rejects.toThrow(/Database client not configured/)
+      run(w, 'the {word} table contains {int} row(s) matching {string}', 'jobs', 1, 'true'),
+    ).rejects.toThrow(/DbClient is not configured/)
+    expect(Date.now() - started).toBeLessThan(2_000)
   })
 
   it('rejects unsafe table names in record waits', async () => {
@@ -168,6 +184,13 @@ describe('registerWaitingSteps (COMPONENT-6)', () => {
       expect(timeout('the {word} table contains at least {int} row(s) matching {string}')).toBe(
         BUDGET + 1_000,
       )
+    })
+
+    // A second registration would make every step ambiguous.
+    it('ignores a second registration', () => {
+      const before = steps.get('I should eventually see {word} on the {word} page')
+      registerWaitingSteps({ waitTimeout: 1 })
+      expect(steps.get('I should eventually see {word} on the {word} page')).toBe(before)
     })
 
     it('turns off the Cucumber timeout for steps that watch a window', () => {

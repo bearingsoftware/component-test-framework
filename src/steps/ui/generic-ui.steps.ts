@@ -5,7 +5,7 @@ import type { BasePage } from '../../pages/base.page'
 import { eventually, waitTimeout } from '../../support/eventually'
 
 /** Resolve a page object from the world's page registry by name. */
-export function getPage(world: ComponentTestWorld, pageName: string): BasePage {
+function getPage(world: ComponentTestWorld, pageName: string): BasePage {
   const page = world.pageRegistry.get(pageName)
   if (!page) {
     throw new Error(

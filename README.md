@@ -244,6 +244,8 @@ Manage external API stubs during scenarios.
 
 `the {word} API is stubbed from {word}` sends every mapping in the directory to WireMock in a single `/__admin/mappings/import` call. Mapping files can hold one mapping or WireMock's multi-mapping form, `{ "mappings": [...] }`. Stub precedence is the same as registering each mapping in turn: for equal priorities, the last file wins. Tested against WireMock 3.9.
 
+Each admin request to WireMock times out after 10s, so a stalled WireMock fails a step rather than hanging the run.
+
 From code, `this.wiremock` exposes the client. Its `baseUrl` is public, and `getRequestCount`, `verifyCallCount` and `findRequests` take an optional filter: `method`, `exactPath` (match the path literally rather than as a regex) and `bodyJsonPath`:
 
 ```typescript
@@ -387,7 +389,7 @@ health-web words some steps differently (`WireMock has received …`, `I accept 
 
 | Step | Description |
 |---|---|
-| `Then the {word} page should eventually be displayed` | Wait for the URL to end with the page's path |
+| `Then the {word} page should eventually be displayed` | Wait for the URL to end with the page's path. A query string, `#hash` or trailing `/` after it doesn't match, as with the steps it replaces |
 | `Then the URL should contain {string}` | Wait for the URL to contain a fragment |
 | `Then I should eventually see {word} on the {word} page` | Wait for an element to be visible |
 | `Then I should eventually not see {word} on the {word} page` | Wait for an element to be removed from the page |
@@ -428,7 +430,9 @@ Then('the export finishes', async function (this: ComponentTestWorld) {
 - `eventually(check, { timeout, interval?, description? })` retries `check` until it stops throwing, then returns its result. On timeout it throws the last error, prefixed with the description and the time waited.
 - `holdsFor(check, { duration, interval?, description? })` fails as soon as `check` throws during the window.
 - `waitTimeout(config)` and `serviceWaitTimeout(config)` give the two budgets.
-- `countRows(world, table, predicate?)` counts rows and validates the table name. Configuration errors, unsafe table names and query errors throw `StopRetrying`, so a wait around it fails at once.
+- `countRows(world, table, predicate?)` counts rows and validates the table name. `queryOnce(world, sql)` runs any query. A missing DB client, an unsafe table name or an error in the SQL itself (SQLSTATE class 42 or 22) throws `StopRetrying`, so a wait around it fails at once. Other errors, such as a dropped connection, are retried.
+- `isStopRetrying(err)` recognises a `StopRetrying`, even one thrown by another installed copy of this package.
+- Errors from a wait are the original error with context added to the message, so an `AssertionError` keeps its actual and expected values.
 - `assertPartialMatch(actual, expected, { nullMatchesAnything? })` does the deep partial JSON match the response, service and Valkey steps use.
 - `requestPattern(path, filter)` builds a WireMock request pattern.
 
@@ -465,8 +469,8 @@ RedisClient           // Redis client (ioredis)
 BasePage              // Abstract page object base class
 
 // Waiting
-eventually(), holdsFor(), StopRetrying, waitTimeout(), serviceWaitTimeout()
-countRows(), assertSafeTableName(), requireDb()
+eventually(), holdsFor(), StopRetrying, isStopRetrying(), waitTimeout(), serviceWaitTimeout()
+countRows(), queryOnce(), assertSafeTableName(), requireDb()
 assertPartialMatch(), requestPattern(), describeRequests()
 
 // Steps (import to register with Cucumber)

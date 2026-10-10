@@ -20,9 +20,15 @@ export function assertSafeTableName(table: string): void {
   }
 }
 
+// SQLSTATE classes no retry can fix: 42 is a syntax error or a missing
+// table or column, 22 is bad data such as an invalid cast.
+const PERMANENT_SQLSTATE_CLASSES = ['42', '22']
+
 /**
- * Run a query, turning a failure (a syntax error in a predicate, a missing
- * table) into {@link StopRetrying}.
+ * Run a query. An error in the SQL itself (a syntax error in a predicate, a
+ * missing table) becomes {@link StopRetrying}, so a wait fails at once.
+ * Anything else, such as a dropped connection, is rethrown as is, so a wait
+ * can ride it out.
  */
 export async function queryOnce<T extends Record<string, unknown>>(
   world: ComponentTestWorld,
@@ -32,7 +38,11 @@ export async function queryOnce<T extends Record<string, unknown>>(
   try {
     return (await db.query<T>(sql)).rows
   } catch (err) {
-    throw new StopRetrying(`query failed: ${(err as Error).message}\n  ${sql}`)
+    const code = (err as { code?: unknown }).code
+    if (typeof code === 'string' && PERMANENT_SQLSTATE_CLASSES.includes(code.slice(0, 2))) {
+      throw new StopRetrying(`query failed: ${(err as Error).message}\n  ${sql}`)
+    }
+    throw err
   }
 }
 
