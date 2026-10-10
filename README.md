@@ -16,7 +16,7 @@ Peer dependencies (install in your project):
 npm install @cucumber/cucumber @playwright/test
 ```
 
-Playwright is optional -- only needed if you use the `@ui` tagged features.
+Playwright is optional -- only needed if you use the `@ui` tagged features. It is loaded when the first `@ui` scenario starts, so suites without UI scenarios don't need it installed.
 
 ## Project Setup
 
@@ -131,6 +131,32 @@ All configuration is loaded from environment variables via `loadConfig()`. Overr
 | `DATABASE_URL` | _(none)_ | PostgreSQL connection string |
 | `REDIS_URL` | _(none)_ | Redis connection string |
 | `FIXTURES_DIR` | `./fixtures` | Path to your fixtures directory |
+| `WIREMOCK_STUBS_DIR` | `{FIXTURES_DIR}/wiremock` | Root for `the WireMock stub {string} is registered`. A warning is logged at start-up if it doesn't exist |
+
+### Options only available in code
+
+| Option | Default | Description |
+|---|---|---|
+| `operationMap` | `{}` | Your API's operationId-to-path map |
+| `cleanupTables` | _(none)_ | Tables to clear after each scenario, children first |
+| `defaultStepTimeout` | _(Cucumber's 5s)_ | Timeout in ms for every step and hook. Leave unset to keep a `setDefaultTimeout` call of your own |
+
+### Suites that don't use WireMock or an API
+
+`wiremockUrl` and `apiBaseUrl` are optional in `registerHooks`. Leave one out (or set it to `''` or `undefined` after `loadConfig()`) and the framework skips it:
+
+- Without `wiremockUrl`, there's no readiness wait and no reset before each scenario. Any WireMock step fails with "WireMock is not configured".
+- Without `apiBaseUrl`, any API step fails with "apiBaseUrl is not configured".
+
+```typescript
+// A UI-only suite: no WireMock, no API, no database.
+registerHooks({
+  ...loadConfig(),
+  wiremockUrl: undefined,
+  apiBaseUrl: undefined,
+  defaultStepTimeout: 30_000,
+})
+```
 
 ## Fixtures
 
@@ -213,6 +239,14 @@ Manage external API stubs during scenarios.
 | `Given the {word} API at {string} returns the response {word}` | Override a path with a fixture body |
 | `Then the {word} API at {string} was called {int} time(s)` | Verify call count for a specific path |
 | `Then the {word} API was called {int} time(s)` | Verify total calls to a provider |
+
+`the {word} API is stubbed from {word}` sends every mapping in the directory to WireMock in a single `/__admin/mappings/import` call. Mapping files can hold one mapping or WireMock's multi-mapping form, `{ "mappings": [...] }`. Requires WireMock 2.27 or later.
+
+From code, `this.wiremock` exposes the client. Its `baseUrl` is public, and `getRequestCount`, `verifyCallCount` and `findRequests` take an optional `{ method }` filter:
+
+```typescript
+const posts = await this.wiremock.getRequestCount('/vendor/orders', { method: 'POST' })
+```
 
 Example:
 
@@ -308,7 +342,7 @@ Before({ tags: '@ui' }, function (this: ComponentTestWorld) {
 
 Each scenario follows this lifecycle:
 
-1. **Before** -- Reset world state, reset WireMock, flush Redis
+1. **Before** -- Reset world state, reset WireMock (if configured), flush Redis (if configured)
 2. **Before @ui** -- Launch Chromium browser and page
 3. **Steps** -- Execute scenario steps
 4. **After @ui** -- Close browser
@@ -318,11 +352,12 @@ Each scenario follows this lifecycle:
 
 ```typescript
 // Types
-OperationEntry, OperationMap, CallRecord, UIStateSnapshot, FrameworkConfig
+OperationEntry, OperationMap, CallRecord, UIStateSnapshot, FrameworkConfig, FrameworkOptions, RequestFilter
 
 // Support
 ComponentTestWorld    // Base Cucumber World class
 loadConfig()          // Load config from env vars
+requireApiBaseUrl()   // Configured API URL, or a clear error if unset
 loadFixture()         // Load a JSON fixture file
 listFixtures()        // List all fixtures in a directory
 registerHooks()       // Wire up Before/After hooks

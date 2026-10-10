@@ -1,10 +1,18 @@
-import { Before, BeforeAll, After, AfterAll, setWorldConstructor } from '@cucumber/cucumber'
-import { chromium, type Browser } from '@playwright/test'
+import * as fs from 'fs'
+import {
+  Before,
+  BeforeAll,
+  After,
+  AfterAll,
+  setDefaultTimeout,
+  setWorldConstructor,
+} from '@cucumber/cucumber'
+import type { Browser } from '@playwright/test'
 import { ComponentTestWorld } from './world'
 import { WireMockClient } from '../clients/wiremock-client'
 import { DbClient } from '../clients/db-client'
 import { RedisClient } from '../clients/redis-client'
-import type { FrameworkConfig } from '../types'
+import type { FrameworkConfig, FrameworkOptions } from '../types'
 
 /**
  * Register framework hooks with Cucumber. Call this once in the consumer's
@@ -53,13 +61,44 @@ export async function reuseBrowser(
   return launch()
 }
 
+// Playwright is an optional peer dependency, so it's loaded on the first @ui
+// scenario rather than when this module is imported. A suite without @ui
+// scenarios never needs it installed.
 async function browserForWorker(): Promise<Browser> {
-  sharedBrowser = await reuseBrowser(sharedBrowser, () => chromium.launch())
+  sharedBrowser = await reuseBrowser(sharedBrowser, async () => {
+    const { chromium } = await import('@playwright/test')
+    return chromium.launch()
+  })
   return sharedBrowser
 }
 
-export function registerHooks(config: FrameworkConfig): void {
+/**
+ * Fill in defaults for the optional URLs. An empty string means "not
+ * configured": the WireMock client and `requireApiBaseUrl` throw a clear
+ * error if something tries to use it.
+ */
+function resolveConfig(options: FrameworkOptions): FrameworkConfig {
+  return {
+    ...options,
+    apiBaseUrl: options.apiBaseUrl ?? '',
+    wiremockUrl: options.wiremockUrl ?? '',
+  }
+}
+
+export function registerHooks(options: FrameworkOptions): void {
+  const config = resolveConfig(options)
   setWorldConstructor(ComponentTestWorld)
+
+  if (config.defaultStepTimeout) {
+    setDefaultTimeout(config.defaultStepTimeout)
+  }
+
+  if (config.wiremockStubsDir && !fs.existsSync(config.wiremockStubsDir)) {
+    console.warn(
+      `[component-test-framework] wiremockStubsDir does not exist: ${config.wiremockStubsDir}. ` +
+        `Steps that register stubs from files will fail.`,
+    )
+  }
 
   const wiremock = new WireMockClient(config.wiremockUrl)
   let db: DbClient | undefined
@@ -89,7 +128,9 @@ export function registerHooks(config: FrameworkConfig): void {
     this.resetScenario()
 
     // Reset WireMock state
-    await wiremock.resetAll()
+    if (config.wiremockUrl) {
+      await wiremock.resetAll()
+    }
 
     // Flush Redis cache
     if (redis) {

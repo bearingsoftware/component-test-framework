@@ -44,4 +44,22 @@ export interface FrameworkConfig {
   operationMap?: OperationMap
   /** Tables to truncate between scenarios (with CASCADE). */
   cleanupTables?: string[]
+  /**
+   * Default timeout in milliseconds for every step and hook, applied through
+   * Cucumber's `setDefaultTimeout`. Cucumber's own default is 5s. Leave unset
+   * to keep whatever the suite configures itself.
+   */
+  defaultStepTimeout?: number
+}
+
+/**
+ * Options accepted by `registerHooks`. The same as {@link FrameworkConfig},
+ * except the API and WireMock URLs are optional, so a suite that doesn't
+ * call an API or use WireMock can leave them out. A missing URL is stored on
+ * `world.config` as an empty string, and anything that needs it throws a
+ * clear error.
+ */
+export type FrameworkOptions = Omit<FrameworkConfig, 'apiBaseUrl' | 'wiremockUrl'> & {
+  apiBaseUrl?: string
+  wiremockUrl?: string
 }

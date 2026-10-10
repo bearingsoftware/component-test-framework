@@ -1,4 +1,5 @@
 import { When } from '@cucumber/cucumber'
+import { requireApiBaseUrl } from '../../support/config'
 import type { ComponentTestWorld } from '../../support/world'
 
 /**
@@ -23,7 +24,7 @@ export async function readSSE(
   const controller = new AbortController()
   const headers: Record<string, string> = { Accept: 'text/event-stream' }
   if (world.accessToken) headers.Authorization = `Bearer ${world.accessToken}`
-  const res = await fetch(`${world.config.apiBaseUrl}${path}`, {
+  const res = await fetch(`${requireApiBaseUrl(world.config)}${path}`, {
     method: 'GET',
     headers,
     signal: controller.signal,

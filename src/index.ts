@@ -5,11 +5,12 @@ export type {
   CallRecord,
   UIStateSnapshot,
   FrameworkConfig,
+  FrameworkOptions,
 } from './types'
 
 // Support
 export { ComponentTestWorld } from './support/world'
-export { loadConfig } from './support/config'
+export { loadConfig, requireApiBaseUrl } from './support/config'
 export { loadFixture, listFixtures } from './support/fixtures'
 export { registerHooks } from './support/hooks'
 export { spawnServiceUnderTest } from './support/process'
@@ -17,6 +18,7 @@ export type { SpawnServiceOptions, SpawnServiceHandle } from './support/process'
 
 // Clients
 export { WireMockClient } from './clients/wiremock-client'
+export type { RequestFilter } from './clients/wiremock-client'
 export { DbClient } from './clients/db-client'
 export { RedisClient } from './clients/redis-client'
 export type { PubSubSubscription } from './clients/redis-client'
