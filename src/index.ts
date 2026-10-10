@@ -14,7 +14,12 @@ export { ComponentTestWorld } from './support/world'
 export { loadConfig, requireApiBaseUrl } from './support/config'
 export { loadFixture, listFixtures } from './support/fixtures'
 export { registerHooks } from './support/hooks'
-export { spawnServiceUnderTest } from './support/process'
+export {
+  spawnServiceUnderTest,
+  startService,
+  stopServices,
+  registerServiceUnderTest,
+} from './support/process'
 export {
   eventually,
   holdsFor,
@@ -36,7 +41,13 @@ export {
   clearLoginCache,
 } from './support/auth'
 export type { AdoptTokensOptions, LoginResponse, LoginTagOptions } from './support/auth'
-export type { SpawnServiceOptions, SpawnServiceHandle } from './support/process'
+export type {
+  SpawnServiceOptions,
+  SpawnServiceHandle,
+  ServiceOptions,
+  ServiceHandle,
+  RegisteredService,
+} from './support/process'
 
 // Clients
 export { WireMockClient } from './clients/wiremock-client'
