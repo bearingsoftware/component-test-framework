@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.4](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.3...v0.3.4) (2026-10-10)
+
+
+### Features
+
+* **COMPONENT-6:** waiting assertions and opt-in waiting steps ([587fe89](https://github.com/bearingsoftware/component-test-framework/commit/587fe8919e003928ddd2adf973395fe61dc15c31))
+* **COMPONENT-6:** waiting assertions and opt-in waiting steps ([e188bb0](https://github.com/bearingsoftware/component-test-framework/commit/e188bb00f4ef996b3487a5071d62a31ce515d8a9))
+
+
+### Bug Fixes
+
+* **COMPONENT-6:** address review findings ([92ba704](https://github.com/bearingsoftware/component-test-framework/commit/92ba704c6e7b2e833450acb556d60fa5c6bc1bea))
+* **COMPONENT-6:** address second review ([65ff291](https://github.com/bearingsoftware/component-test-framework/commit/65ff29193e708301ad275cfb576b5e8aedbb1608))
+
 ## [0.3.3](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.2...v0.3.3) (2026-10-10)
 
 
