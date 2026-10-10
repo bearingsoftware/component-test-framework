@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.5](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.4...v0.3.5) (2026-10-10)
+
+
+### Features
+
+* **COMPONENT-7:** requests, saved values and pluggable login ([7449d62](https://github.com/bearingsoftware/component-test-framework/commit/7449d6225dbd0962ea67941d76c3b27895e50504))
+* **COMPONENT-7:** requests, saved values and pluggable login ([b17e633](https://github.com/bearingsoftware/component-test-framework/commit/b17e633c96407bd06fc2fc7ca0b5416b4bf4796d))
+
+
+### Bug Fixes
+
+* **COMPONENT-7:** address review findings ([b1f377e](https://github.com/bearingsoftware/component-test-framework/commit/b1f377e37334c45a117fecdc62a953790e694f72))
+
 ## [0.3.4](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.3...v0.3.4) (2026-10-10)
 
 
