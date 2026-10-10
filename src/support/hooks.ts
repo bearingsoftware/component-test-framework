@@ -23,7 +23,7 @@ import type { FrameworkConfig } from '../types'
  * })
  * ```
  */
-// SECREPO-602: one browser per worker process, not one per scenario.
+// SECREPO-602: one browser per worker, not one per scenario.
 //
 // A suite of 65 @ui scenarios meant 65 chromium.launch() and 65 browser.close()
 // calls, and launching a browser is the part of this that suffers most under
@@ -31,9 +31,10 @@ import type { FrameworkConfig } from '../types'
 // teardown, because closing Chromium took longer than the suite's 30s hook
 // timeout while the host was at a load average of 101-180.
 //
-// Cucumber runs each parallel worker in its own process, so this is per worker
-// rather than global — the isolation that matters between scenarios is the
-// browser context, which is still fresh every time.
+// Cucumber runs each parallel worker with its own module instances (a child
+// process up to v12, a worker thread from v13), so this is per worker rather
+// than global — the isolation that matters between scenarios is the browser
+// context, which is still fresh every time.
 let sharedBrowser: Browser | null = null
 
 /**
