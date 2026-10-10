@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.3](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.2...v0.3.3) (2026-10-10)
+
+
+### Features
+
+* **COMPONENT-5:** optional config, default timeout, lazy Playwright, WireMock client gaps ([172b028](https://github.com/bearingsoftware/component-test-framework/commit/172b028e877f6dda86a90d7fdae6477619a743f1))
+* **COMPONENT-5:** optional config, default timeout, lazy Playwright, WireMock client gaps ([ef56271](https://github.com/bearingsoftware/component-test-framework/commit/ef5627174115262cbb4d86bbc00c6e72d110a4ea))
+
+
+### Bug Fixes
+
+* **COMPONENT-4:** keep response headers after operation steps ([0ff2925](https://github.com/bearingsoftware/component-test-framework/commit/0ff2925ecc1c256075d7512ec69241c0983a7075))
+* **COMPONENT-4:** keep response headers after operation steps ([4e3bae0](https://github.com/bearingsoftware/component-test-framework/commit/4e3bae0e8e0fccc82ec28fbb69ca450b40a0988f))
+* **COMPONENT-5:** address review findings on the WireMock client ([ae50b5b](https://github.com/bearingsoftware/component-test-framework/commit/ae50b5b3ac41c1d7f8b10359fcea8a72d6e6ab7e))
+
 ## [0.3.2](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.1...v0.3.2) (2026-10-10)
 
 
