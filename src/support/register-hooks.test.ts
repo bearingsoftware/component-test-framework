@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import * as fs from 'fs'
+import * as os from 'os'
+import * as path from 'path'
 
 type HookFn = (this: unknown, ...args: unknown[]) => unknown
 interface Hook {
@@ -10,6 +13,7 @@ interface Hook {
 const cucumber = vi.hoisted(() => ({
   before: [] as Hook[],
   beforeAll: [] as Hook[],
+  after: [] as Hook[],
   setDefaultTimeout: vi.fn(),
 }))
 
@@ -26,7 +30,7 @@ vi.mock('@cucumber/cucumber', async (importOriginal) => {
     ...actual,
     Before: register(cucumber.before),
     BeforeAll: register(cucumber.beforeAll),
-    After: vi.fn(),
+    After: register(cucumber.after),
     AfterAll: vi.fn(),
     setWorldConstructor: vi.fn(),
     setDefaultTimeout: cucumber.setDefaultTimeout,
@@ -35,7 +39,7 @@ vi.mock('@cucumber/cucumber', async (importOriginal) => {
 
 vi.mock('@playwright/test', () => {
   playwright.loads++
-  const page = { close: vi.fn() }
+  const page = { close: vi.fn(), url: () => 'about:blank' }
   const context = { newPage: vi.fn().mockResolvedValue(page), close: vi.fn() }
   const browser = { isConnected: () => true, newContext: vi.fn().mockResolvedValue(context) }
   return { chromium: { launch: vi.fn().mockResolvedValue(browser) } }
@@ -59,6 +63,7 @@ describe('registerHooks (COMPONENT-5)', () => {
   beforeEach(() => {
     cucumber.before.length = 0
     cucumber.beforeAll.length = 0
+    cucumber.after.length = 0
     cucumber.setDefaultTimeout.mockClear()
     fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}'))
   })
@@ -119,5 +124,123 @@ describe('registerHooks (COMPONENT-5)', () => {
 
     expect(playwright.loads).toBe(1)
     expect(world.page).toBeTruthy()
+  })
+})
+
+describe('registerHooks lifecycle options (COMPONENT-9)', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    cucumber.before.length = 0
+    cucumber.beforeAll.length = 0
+    cucumber.after.length = 0
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}'))
+  })
+
+  afterEach(() => {
+    fetchSpy.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  const world = () =>
+    ({ resetScenario: vi.fn(), pageRegistry: new Map() }) as Record<string, unknown>
+  const uiBefore = () => cucumber.before.find((h) => h.options.tags === '@ui')!
+  const uiAfter = () => cucumber.after.find((h) => h.options.tags === '@ui')!
+  const everyAfter = () => cucumber.after.find((h) => !h.options.tags)!
+
+  it('runs afterReset after the reset, once baseline stubs are loaded', async () => {
+    const order: string[] = []
+    fetchSpy.mockImplementation(async (url: unknown) => {
+      order.push(String(url).replace('http://wiremock.test', ''))
+      return new Response('{}')
+    })
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctf-baseline-'))
+    fs.mkdirSync(`${dir}/login/mappings`, { recursive: true })
+    fs.writeFileSync(
+      `${dir}/login/mappings/login.json`,
+      JSON.stringify({ request: { url: '/login' } }),
+    )
+
+    registerHooks({
+      fixturesDir: dir,
+      wiremockUrl: 'http://wiremock.test',
+      wiremockBaseline: ['login'],
+      hooks: { afterReset: () => void order.push('afterReset') },
+    })
+    await scenarioHook().fn.call(world())
+
+    expect(order).toEqual(['/__admin/reset', '/__admin/mappings/import', 'afterReset'])
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('creates page objects from the pages option for @ui scenarios', async () => {
+    class LoginPage {
+      constructor(
+        readonly page: unknown,
+        readonly baseUrl: string,
+      ) {}
+    }
+    registerHooks({
+      ...baseOptions,
+      webBaseUrl: 'http://web.test',
+      pages: { login: LoginPage as never },
+    })
+    const w = world()
+    await uiBefore().fn.call(w)
+
+    const login = (w.pageRegistry as Map<string, LoginPage>).get('login')
+    expect(login).toBeInstanceOf(LoginPage)
+    expect(login).toMatchObject({ page: w.page, baseUrl: 'http://web.test' })
+  })
+
+  it('says pages needs webBaseUrl', async () => {
+    registerHooks({ ...baseOptions, pages: { login: class {} as never } })
+    await expect(uiBefore().fn.call(world())).rejects.toThrow('The pages option needs webBaseUrl')
+  })
+
+  it('calls onScenarioFailed while the page is open, then beforePageClose, then closes the page', async () => {
+    const order: string[] = []
+    registerHooks({
+      ...baseOptions,
+      hooks: {
+        onScenarioFailed: (_w, scenario) => void order.push(`failed: ${scenario.pickle.name}`),
+        beforePageClose: (w) => void order.push(`beforePageClose, page open: ${w.page !== null}`),
+      },
+    })
+    // Cucumber runs After hooks in reverse registration order.
+    expect(cucumber.after.indexOf(everyAfter())).toBeGreaterThan(cucumber.after.indexOf(uiAfter()))
+
+    const w = world()
+    const page = { close: vi.fn(() => void order.push('page closed')) }
+    Object.assign(w, { page, browserContext: { close: vi.fn() } })
+    const scenario = {
+      pickle: { name: 'checkout', uri: 'x.feature' },
+      result: { status: 'FAILED' },
+    }
+    await everyAfter().fn.call(w, scenario)
+    await uiAfter().fn.call(w, scenario)
+
+    expect(order).toEqual(['failed: checkout', 'beforePageClose, page open: true', 'page closed'])
+  })
+
+  it('leaves onScenarioFailed alone when the scenario passed', async () => {
+    const onScenarioFailed = vi.fn()
+    registerHooks({ ...baseOptions, hooks: { onScenarioFailed } })
+    await everyAfter().fn.call(world(), {
+      pickle: { name: 'ok', uri: 'x' },
+      result: { status: 'PASSED' },
+    })
+    expect(onScenarioFailed).not.toHaveBeenCalled()
+  })
+
+  it('runs the cleanup option after each scenario', async () => {
+    const cleanup = vi.fn()
+    registerHooks({ ...baseOptions, cleanup })
+    const w = world()
+    await everyAfter().fn.call(w, {
+      pickle: { name: 'ok', uri: 'x' },
+      result: { status: 'PASSED' },
+    })
+    expect(cleanup).toHaveBeenCalledWith(w)
   })
 })

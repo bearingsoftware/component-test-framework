@@ -1,12 +1,15 @@
 import * as fs from 'fs'
+import * as path from 'path'
 import {
   Before,
   BeforeAll,
   After,
   AfterAll,
+  Status,
   setDefaultTimeout,
   setWorldConstructor,
 } from '@cucumber/cucumber'
+import type { ITestCaseHookParameter } from '@cucumber/cucumber'
 import type { Browser } from '@playwright/test'
 import { ComponentTestWorld } from './world'
 import { WireMockClient } from '../clients/wiremock-client'
@@ -132,10 +135,17 @@ export function registerHooks(options: FrameworkOptions): void {
       await wiremock.resetAll()
     }
 
+    // Stubs most scenarios need, loaded after every reset
+    for (const dir of config.wiremockBaseline ?? []) {
+      await wiremock.loadMappingsFromDir(path.resolve(config.fixturesDir, dir))
+    }
+
     // Flush Redis cache
     if (redis) {
       await redis.flushDb()
     }
+
+    await config.hooks?.afterReset?.(this)
   })
 
   // --- Before @ui scenarios: launch Playwright ---
@@ -143,10 +153,20 @@ export function registerHooks(options: FrameworkOptions): void {
     this.browser = await browserForWorker()
     this.browserContext = await this.browser.newContext()
     this.page = await this.browserContext.newPage()
+
+    // Page objects from the pages option, so the suite needn't register them.
+    const pages = Object.entries(config.pages ?? {})
+    if (pages.length > 0 && !config.webBaseUrl) {
+      throw new Error('The pages option needs webBaseUrl, the base URL page objects navigate from.')
+    }
+    for (const [name, PageObject] of pages) {
+      this.pageRegistry.set(name, new PageObject(this.page, config.webBaseUrl as string))
+    }
   })
 
   // --- After @ui scenarios: close Playwright ---
   After({ tags: '@ui' }, async function (this: ComponentTestWorld) {
+    if (this.page) await config.hooks?.beforePageClose?.(this)
     // The context goes; the browser stays for the next scenario. Closing a
     // context discards its pages, cookies and storage, which is the isolation
     // a scenario actually needs.
@@ -162,8 +182,13 @@ export function registerHooks(options: FrameworkOptions): void {
     sharedBrowser = null
   })
 
-  // --- After every scenario: DB cleanup + stray pub/sub subscription ---
-  After(async function (this: ComponentTestWorld) {
+  // --- After every scenario: failure hook, stray pub/sub subscription, cleanup ---
+  // Registered after the @ui After, so Cucumber runs it first: the page is
+  // still open for onScenarioFailed.
+  After(async function (this: ComponentTestWorld, scenario: ITestCaseHookParameter) {
+    if (scenario.result?.status === Status.FAILED) {
+      await config.hooks?.onScenarioFailed?.(this, scenario)
+    }
     if (this.activeSubscription) {
       try {
         await this.activeSubscription.close()
@@ -175,5 +200,6 @@ export function registerHooks(options: FrameworkOptions): void {
     if (db && config.cleanupTables && config.cleanupTables.length > 0) {
       await db.cleanTables(config.cleanupTables)
     }
+    await config.cleanup?.(this)
   })
 }

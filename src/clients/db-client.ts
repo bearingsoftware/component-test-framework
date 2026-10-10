@@ -1,5 +1,13 @@
-import { Pool } from 'pg'
-import type { QueryResult, QueryResultRow } from 'pg'
+import type { Pool, QueryResult, QueryResultRow } from 'pg'
+
+/**
+ * pg, loaded on first use rather than when this module is imported, so a
+ * suite without a database never loads it.
+ */
+function pg(): typeof import('pg') {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('pg') as typeof import('pg')
+}
 
 /**
  * Thin wrapper around pg.Pool for test database operations:
@@ -11,7 +19,7 @@ export class DbClient {
   private cascadeNeeded = false
 
   constructor(connectionString: string) {
-    this.pool = new Pool({ connectionString })
+    this.pool = new (pg().Pool)({ connectionString })
   }
 
   /** Execute a SQL query with optional parameters. */

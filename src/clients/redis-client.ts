@@ -1,4 +1,13 @@
-import Redis from 'ioredis'
+import type Redis from 'ioredis'
+
+/**
+ * ioredis, loaded on first use rather than when this module is imported, so
+ * a suite without Redis never loads it.
+ */
+function ioredis(): typeof Redis {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('ioredis') as typeof Redis
+}
 
 /**
  * Thin wrapper around ioredis for test cache operations:
@@ -10,7 +19,7 @@ export class RedisClient {
 
   constructor(url: string) {
     this.url = url
-    this.client = new Redis(url)
+    this.client = new (ioredis())(url)
   }
 
   /** Flush the current database. Called between scenarios. */
@@ -67,7 +76,7 @@ export class RedisClient {
    * SUBSCRIBE doesn't interfere with the main client's commands.
    */
   async subscribe(...channels: string[]): Promise<PubSubSubscription> {
-    const subClient = new Redis(this.url)
+    const subClient = new (ioredis())(this.url)
     const buffer: { channel: string; message: string }[] = []
     const waiters: ((msg: { channel: string; message: string }) => void)[] = []
 

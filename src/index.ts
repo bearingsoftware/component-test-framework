@@ -7,6 +7,8 @@ export type {
   FrameworkConfig,
   FrameworkOptions,
   AuthOptions,
+  LifecycleHooks,
+  PageClass,
 } from './types'
 
 // Support
@@ -83,7 +85,18 @@ export * as uiSteps from './steps/ui/generic-ui.steps'
 export { registerWaitingSteps } from './steps/waiting.steps'
 export type { WaitingStepOptions } from './steps/waiting.steps'
 export { registerRequestSteps } from './steps/request.steps'
+export {
+  registerApiSteps,
+  registerRawApiSteps,
+  registerSseSteps,
+  registerResponseSteps,
+  registerWiremockSteps,
+  registerDbSteps,
+  registerRedisSteps,
+  registerServiceSteps,
+  registerUiSteps,
+} from './steps/register'
 
 // Helpers exposed so consumers can compose their own raw-request step defs.
-export { rawRequest } from './steps/api/raw-api.steps'
-export { readSSE } from './steps/api/sse.steps'
+export { rawRequest } from './support/raw-request'
+export { readSSE } from './support/sse'
