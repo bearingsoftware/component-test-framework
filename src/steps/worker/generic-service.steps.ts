@@ -48,7 +48,15 @@ When(
     })
 
     const responseBody = res.status === 204 ? null : await res.json().catch(() => null)
-    this.trackCall(service, requestFile, { status: res.status, body: responseBody })
+    const responseHeaders: Record<string, string> = {}
+    res.headers.forEach((value, key) => {
+      responseHeaders[key] = value
+    })
+    this.trackCall(service, requestFile, {
+      status: res.status,
+      body: responseBody,
+      headers: responseHeaders,
+    })
 
     // Compare with expected response fixture
     const expected = loadFixture('responses', responseFile, this.config.fixturesDir)

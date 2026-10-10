@@ -52,11 +52,15 @@ export class ComponentTestWorld extends World {
     super(options)
   }
 
-  /** Record a service call for count tracking and history. */
+  /**
+   * Record a service call for count tracking and history, and make it the
+   * last response. Pass the response headers through: anything omitted is
+   * recorded as no headers, and header assertions read from here.
+   */
   trackCall(
     service: string,
     requestFile: string,
-    response: { status: number; body: unknown },
+    response: { status: number; body: unknown; headers?: Record<string, string> },
   ): void {
     const key = `${service}:${requestFile}`
     this.callCounts.set(key, (this.callCounts.get(key) ?? 0) + 1)
@@ -69,7 +73,7 @@ export class ComponentTestWorld extends World {
     this.lastResponse = {
       status: response.status,
       body: response.body,
-      headers: {},
+      headers: response.headers ?? {},
     }
   }
 

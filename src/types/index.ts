@@ -11,7 +11,7 @@ export type OperationMap = Record<string, OperationEntry>
 export interface CallRecord {
   service: string
   requestFile: string
-  response: { status: number; body: unknown }
+  response: { status: number; body: unknown; headers?: Record<string, string> }
   timestamp: Date
 }
 
