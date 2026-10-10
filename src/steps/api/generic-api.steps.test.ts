@@ -21,6 +21,7 @@ vi.mock('@cucumber/cucumber', async (importOriginal) => {
 import { ComponentTestWorld } from '../../support/world'
 import './generic-api.steps'
 import '../common/response-assertion.steps'
+import '../worker/generic-service.steps'
 
 const run = (world: ComponentTestWorld, expression: string, ...args: unknown[]) => {
   const step = steps.get(expression)
@@ -44,6 +45,8 @@ describe('operation steps keep response headers (COMPONENT-4)', () => {
     fixturesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctf-fixtures-'))
     fs.mkdirSync(path.join(fixturesDir, 'requests'), { recursive: true })
     fs.writeFileSync(path.join(fixturesDir, 'requests', 'empty.json'), '{}')
+    fs.mkdirSync(path.join(fixturesDir, 'responses'), { recursive: true })
+    fs.writeFileSync(path.join(fixturesDir, 'responses', 'ok.json'), '{"ok":true}')
   })
 
   afterAll(async () => {
@@ -86,6 +89,21 @@ describe('operation steps keep response headers (COMPONENT-4)', () => {
         'abc-123',
       ),
     ).not.toThrow()
+  })
+
+  it('records headers after a service call step too', async () => {
+    const world = makeWorld()
+
+    await run(
+      world,
+      'the service {word} is called with the request {word} it returns the response {word}',
+      'getThing',
+      'empty',
+      'ok',
+    )
+
+    expect(world.lastResponse?.headers['x-request-id']).toBe('abc-123')
+    expect(world.getCallCount('getThing', 'empty')).toBe(1)
   })
 
   it('still counts calls', async () => {
