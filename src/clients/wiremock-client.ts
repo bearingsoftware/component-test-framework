@@ -60,15 +60,26 @@ export class WireMockClient {
       .filter((f) => f.endsWith('.json'))
       .sort()
     const mappings = files.flatMap((file) => {
-      const parsed = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf-8'))
+      const filePath = path.join(dir, file)
+      let parsed
+      try {
+        parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+      } catch (err) {
+        throw new Error(`WireMock mapping ${filePath} is not valid JSON: ${String(err)}`)
+      }
       return Array.isArray(parsed.mappings) ? parsed.mappings : [parsed]
     })
-    await this.importStubs(mappings)
+    try {
+      await this.importStubs(mappings)
+    } catch (err) {
+      throw new Error(`${(err as Error).message} (mappings from ${dir})`)
+    }
   }
 
   /**
-   * Register several stub mappings in one request. Existing stubs are kept;
-   * a mapping whose `id` matches an existing stub replaces it.
+   * Register several stub mappings in one request, with the same result as
+   * calling {@link addStub} for each in order. Existing stubs are kept; a
+   * mapping whose `id` matches an existing stub replaces it.
    */
   async importStubs(mappings: Record<string, unknown>[]): Promise<void> {
     if (mappings.length === 0) return
@@ -76,7 +87,10 @@ export class WireMockClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        mappings,
+        // When two stubs have the same priority, WireMock serves the one added
+        // most recently. One POST at a time, that's the last one; an import
+        // gives precedence to the first. Reversing keeps "last one wins".
+        mappings: [...mappings].reverse(),
         importOptions: { duplicatePolicy: 'OVERWRITE', deleteAllNotInImport: false },
       }),
     })
@@ -129,10 +143,13 @@ export class WireMockClient {
 
   /** Wait for the WireMock admin API to respond to /__admin/health. */
   async waitForReady(timeoutMs: number): Promise<void> {
+    // Resolved outside the retry loop, so a missing URL fails at once rather
+    // than being swallowed as "not up yet" until the timeout.
+    const healthUrl = this.url('/__admin/health')
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       try {
-        const res = await fetch(this.url('/__admin/health'))
+        const res = await fetch(healthUrl)
         if (res.ok) return
       } catch {
         /* not up yet */
@@ -172,7 +189,10 @@ export class WireMockClient {
   ): Promise<void> {
     const actual = await this.getRequestCount(urlPathPattern, filter)
     if (actual !== expectedCount) {
-      throw new Error(`Expected ${expectedCount} calls to ${urlPathPattern}, got ${actual}`)
+      const target = filter.method
+        ? `${filter.method.toUpperCase()} ${urlPathPattern}`
+        : urlPathPattern
+      throw new Error(`Expected ${expectedCount} calls to ${target}, got ${actual}`)
     }
   }
 

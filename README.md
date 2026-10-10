@@ -16,7 +16,7 @@ Peer dependencies (install in your project):
 npm install @cucumber/cucumber @playwright/test
 ```
 
-Playwright is optional -- only needed if you use the `@ui` tagged features. It is loaded when the first `@ui` scenario starts, so suites without UI scenarios don't need it installed.
+Playwright is optional -- only needed if you use the `@ui` tagged features. It is loaded when the first `@ui` scenario starts, so suites without UI scenarios don't need it installed to run. The published type declarations still reference Playwright's types, so type-checking with `skipLibCheck: false` needs it installed.
 
 ## Project Setup
 
@@ -240,7 +240,7 @@ Manage external API stubs during scenarios.
 | `Then the {word} API at {string} was called {int} time(s)` | Verify call count for a specific path |
 | `Then the {word} API was called {int} time(s)` | Verify total calls to a provider |
 
-`the {word} API is stubbed from {word}` sends every mapping in the directory to WireMock in a single `/__admin/mappings/import` call. Mapping files can hold one mapping or WireMock's multi-mapping form, `{ "mappings": [...] }`. Requires WireMock 2.27 or later.
+`the {word} API is stubbed from {word}` sends every mapping in the directory to WireMock in a single `/__admin/mappings/import` call. Mapping files can hold one mapping or WireMock's multi-mapping form, `{ "mappings": [...] }`. Stub precedence is the same as registering each mapping in turn: for equal priorities, the last file wins. Tested against WireMock 3.9.
 
 From code, `this.wiremock` exposes the client. Its `baseUrl` is public, and `getRequestCount`, `verifyCallCount` and `findRequests` take an optional `{ method }` filter:
 

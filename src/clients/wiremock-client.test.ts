@@ -55,6 +55,14 @@ describe('WireMockClient (COMPONENT-5)', () => {
     await expect(new WireMockClient('').resetAll()).rejects.toThrow(/WireMock is not configured/)
   })
 
+  it('reports a missing URL straight away when waiting for WireMock', async () => {
+    const started = Date.now()
+    await expect(new WireMockClient('').waitForReady(5_000)).rejects.toThrow(
+      /WireMock is not configured/,
+    )
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
   it('throws when a reset fails rather than carrying on with stale stubs', async () => {
     status = 500
     const client = new WireMockClient(baseUrl)
@@ -81,6 +89,21 @@ describe('WireMockClient (COMPONENT-5)', () => {
     ])
   })
 
+  it('filters found requests by method too', async () => {
+    await new WireMockClient(baseUrl).findRequests('/vendor/.*', { method: 'get' })
+
+    expect(recorded[0]).toMatchObject({
+      url: '/__admin/requests/find',
+      body: { urlPathPattern: '/vendor/.*', method: 'GET' },
+    })
+  })
+
+  it('names the method when a filtered call count does not match', async () => {
+    await expect(
+      new WireMockClient(baseUrl).verifyCallCount('/vendor/.*', 1, { method: 'post' }),
+    ).rejects.toThrow('Expected 1 calls to POST /vendor/.*, got 3')
+  })
+
   describe('loadMappingsFromDir', () => {
     let dir: string
 
@@ -105,8 +128,10 @@ describe('WireMockClient (COMPONENT-5)', () => {
 
       expect(recorded).toHaveLength(1)
       expect(recorded[0].url).toBe('/__admin/mappings/import')
+      // Sent in reverse, so WireMock gives the last file precedence, as it
+      // did when each mapping was POSTed in turn.
       expect(recorded[0].body).toEqual({
-        mappings: [single, ...multi.mappings],
+        mappings: [single, ...multi.mappings].reverse(),
         importOptions: { duplicatePolicy: 'OVERWRITE', deleteAllNotInImport: false },
       })
     })
@@ -123,8 +148,17 @@ describe('WireMockClient (COMPONENT-5)', () => {
       status = 422
 
       await expect(new WireMockClient(baseUrl).loadMappingsFromDir(dir)).rejects.toThrow(
-        /importStubs failed \(422\)/,
+        /importStubs failed \(422\).*mappings from/,
       )
+    })
+
+    it('names the file that is not valid JSON', async () => {
+      fs.writeFileSync(path.join(dir, 'mappings', 'broken.json'), '{ not json')
+
+      await expect(new WireMockClient(baseUrl).loadMappingsFromDir(dir)).rejects.toThrow(
+        /broken\.json is not valid JSON/,
+      )
+      expect(recorded).toHaveLength(0)
     })
   })
 })
