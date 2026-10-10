@@ -6,6 +6,7 @@ export type {
   UIStateSnapshot,
   FrameworkConfig,
   FrameworkOptions,
+  AuthOptions,
 } from './types'
 
 // Support
@@ -24,6 +25,10 @@ export {
 } from './support/eventually'
 export type { EventuallyOptions, HoldsForOptions } from './support/eventually'
 export { countRows, assertSafeTableName, requireDb, queryOnce } from './support/db'
+export { sendOperation, fillPath, EMPTY_REQUEST } from './support/requests'
+export type { SendOperationOptions } from './support/requests'
+export { adoptTokens, login, requestLogin, jwtClaims, registerLoginTag } from './support/auth'
+export type { LoginResponse, LoginTagOptions } from './support/auth'
 export type { SpawnServiceOptions, SpawnServiceHandle } from './support/process'
 
 // Clients
@@ -40,6 +45,7 @@ export { BasePage } from './pages/base.page'
 // Utilities
 export { signHS256, base64UrlEncode } from './utils/jwt'
 export { assertPartialMatch } from './utils/match'
+export { valueAt } from './utils/json-path'
 export type { PartialMatchOptions } from './utils/match'
 
 // Step definitions — importing these modules registers them with Cucumber.
@@ -58,6 +64,7 @@ export * as uiSteps from './steps/ui/generic-ui.steps'
 // suite's own copies (see registerWaitingSteps).
 export { registerWaitingSteps } from './steps/waiting.steps'
 export type { WaitingStepOptions } from './steps/waiting.steps'
+export { registerRequestSteps } from './steps/request.steps'
 
 // Helpers exposed so consumers can compose their own raw-request step defs.
 export { rawRequest } from './steps/api/raw-api.steps'

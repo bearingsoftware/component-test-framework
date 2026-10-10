@@ -21,6 +21,26 @@ export interface UIStateSnapshot {
   values: Record<string, string>
 }
 
+/** How the API under test issues tokens, for the login and token steps. */
+export interface AuthOptions {
+  /**
+   * Where the access token is in a login (or token) response body, as a dot
+   * path. Default `access_token`.
+   */
+  tokenPath?: string
+  /** Where the refresh token is, if any. Default `refresh_token`. */
+  refreshTokenPath?: string
+  /** Path of the login endpoint, e.g. `/auth/login`. Needed by the login steps. */
+  loginPath?: string
+  /** HTTP method for login. Default `POST`. */
+  loginMethod?: string
+  /**
+   * The login request body for a username and password. Default
+   * `{ email: username, password }`.
+   */
+  loginBody?: (username: string, password: string) => unknown
+}
+
 /** Framework configuration — consumers provide their project-specific values. */
 export interface FrameworkConfig {
   /** Base URL of the API service under test. */
@@ -42,6 +62,8 @@ export interface FrameworkConfig {
   wiremockStubsDir?: string
   /** Consumer-provided OpenAPI operation map. */
   operationMap?: OperationMap
+  /** How the API issues tokens. See {@link AuthOptions}. */
+  auth?: AuthOptions
   /** Tables to truncate between scenarios (with CASCADE). */
   cleanupTables?: string[]
   /**

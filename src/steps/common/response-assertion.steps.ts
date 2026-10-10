@@ -3,6 +3,7 @@ import { strict as assert } from 'assert'
 import { loadFixture } from '../../support/fixtures'
 import type { ComponentTestWorld } from '../../support/world'
 import { assertPartialMatch } from '../../utils/match'
+import { valueAt } from '../../utils/json-path'
 
 Then(
   'the response status should be {int}',
@@ -28,7 +29,7 @@ Then(
   'the response body at {word} should equal {string}',
   function (this: ComponentTestWorld, jsonPath: string, expected: string) {
     assert.ok(this.lastResponse, 'No response recorded')
-    const actual = resolvePath(this.lastResponse.body as Record<string, unknown>, jsonPath)
+    const actual = valueAt(this.lastResponse.body, jsonPath)
     assert.equal(String(actual), expected)
   },
 )
@@ -37,7 +38,7 @@ Then(
   'the response body at {word} should be an integer',
   function (this: ComponentTestWorld, jsonPath: string) {
     assert.ok(this.lastResponse, 'No response recorded')
-    const actual = resolvePath(this.lastResponse.body as Record<string, unknown>, jsonPath)
+    const actual = valueAt(this.lastResponse.body, jsonPath)
     assert.ok(
       Number.isInteger(actual),
       `Expected integer at ${jsonPath}, got ${typeof actual}: ${actual}`,
@@ -49,7 +50,7 @@ Then(
   'the response body at {word} should contain {int} items',
   function (this: ComponentTestWorld, jsonPath: string, count: number) {
     assert.ok(this.lastResponse, 'No response recorded')
-    const actual = resolvePath(this.lastResponse.body as Record<string, unknown>, jsonPath)
+    const actual = valueAt(this.lastResponse.body, jsonPath)
     assert.ok(Array.isArray(actual), `Expected array at ${jsonPath}`)
     assert.equal(actual.length, count)
   },
@@ -72,16 +73,3 @@ Then(
     assert.ok(actual !== undefined, `Expected header "${header}" to be present`)
   },
 )
-
-/** Resolve a dot-separated JSON path against an object. */
-function resolvePath(obj: Record<string, unknown>, jsonPath: string): unknown {
-  const parts = jsonPath.split('.')
-  let current: unknown = obj
-  for (const part of parts) {
-    if (current === null || current === undefined || typeof current !== 'object') {
-      throw new Error(`Cannot resolve path "${jsonPath}" — hit ${typeof current} at "${part}"`)
-    }
-    current = (current as Record<string, unknown>)[part]
-  }
-  return current
-}
