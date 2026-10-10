@@ -1,6 +1,7 @@
 import { When, Then } from '@cucumber/cucumber'
 import { strict as assert } from 'assert'
 import type { ComponentTestWorld } from '../../support/world'
+import { assertPartialMatch } from '../../utils/match'
 import type { PubSubSubscription } from '../../clients/redis-client'
 
 function requireRedis(world: ComponentTestWorld): NonNullable<ComponentTestWorld['redis']> {
@@ -59,7 +60,7 @@ Then(
     } catch (err) {
       throw new Error(`expected JSON is malformed: ${(err as Error).message}`)
     }
-    assertDeepPartialMatch(actual, expected, '')
+    assertPartialMatch(actual, expected, { nullMatchesAnything: true })
   },
 )
 
@@ -123,37 +124,9 @@ Then(
     } catch (err) {
       throw new Error(`expected JSON is malformed: ${(err as Error).message}`)
     }
-    assertDeepPartialMatch(actual, expected, '')
+    assertPartialMatch(actual, expected, { nullMatchesAnything: true })
   },
 )
-
-function assertDeepPartialMatch(actual: unknown, expected: unknown, path: string): void {
-  if (expected === null || expected === undefined) return
-  if (Array.isArray(expected)) {
-    assert.ok(Array.isArray(actual), `expected array at ${path || 'root'}`)
-    assert.equal(
-      (actual as unknown[]).length,
-      expected.length,
-      `length mismatch at ${path || 'root'}`,
-    )
-    for (let i = 0; i < expected.length; i++) {
-      assertDeepPartialMatch((actual as unknown[])[i], expected[i], `${path}[${i}]`)
-    }
-    return
-  }
-  if (typeof expected === 'object') {
-    assert.ok(actual !== null && typeof actual === 'object', `expected object at ${path || 'root'}`)
-    for (const key of Object.keys(expected as Record<string, unknown>)) {
-      assertDeepPartialMatch(
-        (actual as Record<string, unknown>)[key],
-        (expected as Record<string, unknown>)[key],
-        path ? `${path}.${key}` : key,
-      )
-    }
-    return
-  }
-  assert.equal(actual, expected, `mismatch at ${path || 'root'}`)
-}
 
 // Re-exported so consumers can call the waiter from their own step modules.
 export type { PubSubSubscription }

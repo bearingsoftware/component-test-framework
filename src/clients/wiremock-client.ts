@@ -5,6 +5,16 @@ import * as path from 'path'
 export interface RequestFilter {
   /** Only match requests with this HTTP method, e.g. "POST". Matches any method when omitted. */
   method?: string
+  /**
+   * Treat the path as an exact path rather than a regular expression. Use it
+   * for paths containing regex characters such as `?`, `+` or `.`.
+   */
+  exactPath?: boolean
+  /**
+   * Only match requests whose JSON body matches this JSONPath expression,
+   * e.g. `$[?(@.status == 'active')]`.
+   */
+  bodyJsonPath?: string
 }
 
 /**
@@ -189,10 +199,9 @@ export class WireMockClient {
   ): Promise<void> {
     const actual = await this.getRequestCount(urlPathPattern, filter)
     if (actual !== expectedCount) {
-      const target = filter.method
-        ? `${filter.method.toUpperCase()} ${urlPathPattern}`
-        : urlPathPattern
-      throw new Error(`Expected ${expectedCount} calls to ${target}, got ${actual}`)
+      throw new Error(
+        `Expected ${expectedCount} calls to ${describeRequests(urlPathPattern, filter)}, got ${actual}`,
+      )
     }
   }
 
@@ -211,8 +220,19 @@ export class WireMockClient {
   }
 }
 
-function requestPattern(urlPathPattern: string, filter: RequestFilter): Record<string, string> {
-  return filter.method
-    ? { urlPathPattern, method: filter.method.toUpperCase() }
-    : { urlPathPattern }
+/** Build a WireMock request pattern from a path and a {@link RequestFilter}. */
+export function requestPattern(path: string, filter: RequestFilter = {}): Record<string, unknown> {
+  const pattern: Record<string, unknown> = filter.exactPath
+    ? { urlPath: path }
+    : { urlPathPattern: path }
+  if (filter.method) pattern.method = filter.method.toUpperCase()
+  if (filter.bodyJsonPath) pattern.bodyPatterns = [{ matchesJsonPath: filter.bodyJsonPath }]
+  return pattern
+}
+
+/** Describe a path and filter for error messages, e.g. "POST /orders matching $.id". */
+export function describeRequests(path: string, filter: RequestFilter = {}): string {
+  const method = filter.method ? `${filter.method.toUpperCase()} ` : ''
+  const body = filter.bodyJsonPath ? ` matching ${filter.bodyJsonPath}` : ''
+  return `${method}${path}${body}`
 }

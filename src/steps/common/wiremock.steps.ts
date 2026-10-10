@@ -2,6 +2,27 @@ import { Given, Then } from '@cucumber/cucumber'
 import { strict as assert } from 'assert'
 import * as path from 'path'
 import type { ComponentTestWorld } from '../../support/world'
+import { eventually, StopRetrying, waitTimeout } from '../../support/eventually'
+
+/**
+ * Wait until WireMock has received exactly `count` requests matching the
+ * pattern. Counts only grow, so overshooting fails at once.
+ */
+async function waitForExactRequestCount(
+  world: ComponentTestWorld,
+  urlPathPattern: string,
+  count: number,
+): Promise<void> {
+  await eventually(
+    async () => {
+      const actual = await world.wiremock.getRequestCount(urlPathPattern)
+      const message = `Expected ${count} calls to ${urlPathPattern}, got ${actual}`
+      if (actual > count) throw new StopRetrying(message)
+      assert.equal(actual, count, message)
+    },
+    { timeout: waitTimeout(world.config) },
+  )
+}
 
 Given(
   'the {word} API is stubbed from {word}',
@@ -81,15 +102,13 @@ Then(
     urlPathPattern: string,
     count: number,
   ) {
-    const actual = await this.wiremock.getRequestCount(urlPathPattern)
-    assert.equal(actual, count, `Expected ${count} calls to ${urlPathPattern}, got ${actual}`)
+    await waitForExactRequestCount(this, urlPathPattern, count)
   },
 )
 
 Then(
   'the {word} API was called {int} time(s)',
   async function (this: ComponentTestWorld, provider: string, count: number) {
-    const actual = await this.wiremock.getRequestCount(`/${provider}/.*`)
-    assert.equal(actual, count, `Expected ${count} calls to /${provider}/.*, got ${actual}`)
+    await waitForExactRequestCount(this, `/${provider}/.*`, count)
   },
 )

@@ -140,6 +140,7 @@ All configuration is loaded from environment variables via `loadConfig()`. Overr
 | `operationMap` | `{}` | Your API's operationId-to-path map |
 | `cleanupTables` | _(none)_ | Tables to clear after each scenario, children first |
 | `defaultStepTimeout` | _(Cucumber's 5s)_ | Timeout in ms for every step and hook. Leave unset to keep a `setDefaultTimeout` call of your own |
+| `waitTimeout` | _(see [Waiting](#waiting))_ | How long waiting steps poll before failing, in ms |
 
 ### Suites that don't use WireMock or an API
 
@@ -237,15 +238,18 @@ Manage external API stubs during scenarios.
 | `Given the {word} API returns HTTP {int}` | Override all routes for a provider with a status code |
 | `Given the {word} API at {string} returns HTTP {int}` | Override a specific path |
 | `Given the {word} API at {string} returns the response {word}` | Override a path with a fixture body |
-| `Then the {word} API at {string} was called {int} time(s)` | Verify call count for a specific path |
-| `Then the {word} API was called {int} time(s)` | Verify total calls to a provider |
+| `Then the {word} API at {string} was called {int} time(s)` | Wait until a specific path has been called exactly N times |
+| `Then the {word} API was called {int} time(s)` | Wait until a provider has been called exactly N times in total |
 
 `the {word} API is stubbed from {word}` sends every mapping in the directory to WireMock in a single `/__admin/mappings/import` call. Mapping files can hold one mapping or WireMock's multi-mapping form, `{ "mappings": [...] }`. Stub precedence is the same as registering each mapping in turn: for equal priorities, the last file wins. Tested against WireMock 3.9.
 
-From code, `this.wiremock` exposes the client. Its `baseUrl` is public, and `getRequestCount`, `verifyCallCount` and `findRequests` take an optional `{ method }` filter:
+From code, `this.wiremock` exposes the client. Its `baseUrl` is public, and `getRequestCount`, `verifyCallCount` and `findRequests` take an optional filter: `method`, `exactPath` (match the path literally rather than as a regex) and `bodyJsonPath`:
 
 ```typescript
-const posts = await this.wiremock.getRequestCount('/vendor/orders', { method: 'POST' })
+const posts = await this.wiremock.getRequestCount('/vendor/orders', {
+  method: 'POST',
+  bodyJsonPath: "$[?(@.status == 'active')]",
+})
 ```
 
 Example:
@@ -268,7 +272,12 @@ Generic steps for calling services and counting invocations. Call counts are tra
 | `When the service {word} is called with the request {word} it returns the response {word}` | Call service, compare response with fixture |
 | `Then the request to the service {word} with request {word} was called {int} time(s)` | Assert call count |
 | `Then the total calls to the service {word} should be {int}` | Assert total calls to a service |
-| `When I wait for a new record in {word} matching {string}` | Poll DB until a matching row appears (30s timeout) |
+| `When I wait for a new record in {word} matching {string}` | Poll DB until a matching row appears |
+| `When I wait for {int} record(s) in {word} matching {string}` | Poll DB until at least N matching rows exist |
+| `Then the {word} table contains {int} row(s) matching {string}` | Wait until exactly N rows match |
+| `Then the {word} table is empty` | Wait until the table is empty |
+
+The two `I wait for` steps keep their 30s default unless `waitTimeout` or `defaultStepTimeout` is set. Table names must be plain SQL identifiers. Predicates are inserted into the SQL as written, so they must come from your own feature files.
 
 ### UI Steps (Playwright)
 
@@ -283,9 +292,9 @@ Tag scenarios with `@ui` to activate Playwright browser lifecycle. All element i
 | `When I save the value of {word} on the {word} page` | Save an element's current value |
 | `Then the saved value {word} should be {string}` | Assert a previously saved value |
 | `Then the saved value {word} should not be empty` | Assert a saved value is non-empty |
-| `Then I should see {word} on the {word} page` | Assert element is visible |
-| `Then I should not see {word} on the {word} page` | Assert element is not visible |
-| `Then the {word} page should be displayed` | Assert current URL matches page |
+| `Then I should see {word} on the {word} page` | Wait for an element to be visible |
+| `Then I should not see {word} on the {word} page` | Wait for an element to be hidden or removed |
+| `Then the {word} page should be displayed` | Wait for the URL to contain the page's path |
 
 Example:
 
@@ -338,6 +347,80 @@ Before({ tags: '@ui' }, function (this: ComponentTestWorld) {
 })
 ```
 
+## Waiting
+
+Services, workers and SPAs settle asynchronously, so assertions on them wait rather than check once. Each one polls until its condition holds, and passes as soon as it does. A page or table that's already right is no slower.
+
+**How long steps wait.** In order of precedence:
+
+1. `waitTimeout`, if set.
+2. 1s less than `defaultStepTimeout`, so the step reports what it was waiting for before Cucumber's own timeout fires.
+3. Otherwise, 4s (just under Cucumber's 5s default). The DB `I wait for` steps keep their historical 30s.
+
+If your suite calls `setDefaultTimeout` itself, set `waitTimeout` too, a little below it.
+
+**Counts that can only grow fail early.** `was called {int} time(s)` fails straight away if WireMock has already received more requests than expected.
+
+### Opt-in waiting steps
+
+Several suites wrote their own waiting steps. The framework now provides them, with the same wording, but registers them only when you call `registerWaitingSteps()`. If they were registered automatically, a suite that still has its own copy would get two matching definitions, and Cucumber fails any step that matches both. Delete your copies, then:
+
+```typescript
+import { registerHooks, registerWaitingSteps, loadConfig } from '@bearingsoftware/component-test-framework'
+
+const options = { ...loadConfig(), operationMap, waitTimeout: 10_000 }
+registerHooks(options)
+registerWaitingSteps(options)
+```
+
+Each step waits up to `waitTimeout` and gets a Cucumber timeout 1s longer. Steps that watch a window you set in the feature file (`over {int} seconds`, `for {int} seconds`) have no Cucumber timeout; their own waits bound them.
+
+| Step | Description |
+|---|---|
+| `Then the {word} page should eventually be displayed` | Wait for the URL to contain the page's path |
+| `Then the URL should contain {string}` | Wait for the URL to contain a fragment |
+| `Then I should eventually see {word} on the {word} page` | Wait for an element to be visible |
+| `Then I should eventually not see {word} on the {word} page` | Wait for an element to be hidden or removed |
+| `Then I should still see {word} on the {word} page` | Assert an element is visible now, without waiting |
+| `Then I should eventually see {word} containing {string} on the {word} page` | Wait for an element's text to contain a string |
+| `Then {word} on the {word} page should eventually read {string}` | Wait for an element's trimmed text to equal a string |
+| `Then the {word} on the {word} page should have value {string}` | Wait for an input's value |
+| `When I hover over {word} on the {word} page` | Hover over an element |
+| `When I select {string} from {word} on the {word} page` | Choose an option in a select |
+| `Given I accept the next confirm dialog` | Accept the next `confirm()` |
+| `Given I dismiss the next confirm dialog` | Dismiss the next `confirm()` |
+| `Then the {word} API eventually receives {int} {word} request(s) to {string}` | Wait for at least N requests with this method to a path pattern |
+| `Then the {word} API eventually receives {int} {word} request(s) to {string} whose body matches {string}` | As above, counting only bodies that match a JSONPath |
+| `Then the {word} API receives exactly {int} {word} request(s) to {string} whose body matches {string} over {int} seconds` | Reach N, then stay at N for the window |
+| `Then the {word} API receives no further {word} requests to {string} for {int} seconds` | Once the count stops moving (at least one request must have arrived), no new requests for the window |
+| `Then the {word} table contains at least {int} row(s) matching {string}` | Wait for at least N matching rows |
+| `When I wait for exactly {int} record(s) in {word} matching {string}` | Wait for exactly N matching rows, e.g. after a delete |
+
+### In your own steps
+
+The helpers behind these steps are exported:
+
+```typescript
+import { eventually, holdsFor, StopRetrying, waitTimeout } from '@bearingsoftware/component-test-framework'
+
+Then('the export finishes', async function (this: ComponentTestWorld) {
+  await eventually(
+    async () => {
+      const job = await fetchJob()
+      if (job.state === 'failed') throw new StopRetrying('export failed') // no point waiting
+      assert.equal(job.state, 'done')
+    },
+    { timeout: waitTimeout(this.config), description: 'waiting for the export' },
+  )
+})
+```
+
+- `eventually(check, { timeout, interval?, description? })` retries `check` until it stops throwing, then returns its result. On timeout it throws the last error, prefixed with the description and the time waited.
+- `holdsFor(check, { duration, interval?, description? })` fails as soon as `check` throws during the window.
+- `countRows(world, table, predicate?)` counts rows and validates the table name.
+- `assertPartialMatch(actual, expected, { nullMatchesAnything? })` does the deep partial JSON match the response, service and Valkey steps use.
+- `requestPattern(path, filter)` builds a WireMock request pattern.
+
 ## Scenario Lifecycle
 
 Each scenario follows this lifecycle:
@@ -370,8 +453,16 @@ RedisClient           // Redis client (ioredis)
 // Pages
 BasePage              // Abstract page object base class
 
+// Waiting
+eventually(), holdsFor(), StopRetrying, waitTimeout()
+countRows(), assertSafeTableName(), requireDb()
+assertPartialMatch(), requestPattern(), describeRequests()
+
 // Steps (import to register with Cucumber)
 apiSteps, responseSteps, wiremockSteps, serviceSteps, uiSteps
+
+// Opt-in steps (registered only when called)
+registerWaitingSteps()
 ```
 
 ## Publishing

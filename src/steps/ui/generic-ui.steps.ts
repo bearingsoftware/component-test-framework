@@ -2,9 +2,10 @@ import { Given, When, Then } from '@cucumber/cucumber'
 import { strict as assert } from 'assert'
 import type { ComponentTestWorld } from '../../support/world'
 import type { BasePage } from '../../pages/base.page'
+import { eventually, waitTimeout } from '../../support/eventually'
 
 /** Resolve a page object from the world's page registry by name. */
-function getPage(world: ComponentTestWorld, pageName: string): BasePage {
+export function getPage(world: ComponentTestWorld, pageName: string): BasePage {
   const page = world.pageRegistry.get(pageName)
   if (!page) {
     throw new Error(
@@ -78,21 +79,36 @@ Then(
   },
 )
 
+// COMPONENT-6: the assertions below wait, up to the configured wait timeout,
+// rather than checking once. An SPA renders after its fetches resolve and
+// navigates client-side, so a single check races it. Each passes as soon as
+// the condition holds, so a page that's already right is no slower.
+
 Then(
   'I should see {word} on the {word} page',
   async function (this: ComponentTestWorld, testId: string, pageName: string) {
-    const pageObj = getPage(this, pageName)
-    const visible = await pageObj.isVisible(testId)
-    assert.ok(visible, `Expected element "${testId}" to be visible on ${pageName}`)
+    const timeout = waitTimeout(this.config)
+    try {
+      await getPage(this, pageName).waitForElement(testId, timeout)
+    } catch (err) {
+      throw new Error(
+        `Expected element "${testId}" to be visible on ${pageName} within ${timeout}ms: ${(err as Error).message}`,
+      )
+    }
   },
 )
 
 Then(
   'I should not see {word} on the {word} page',
   async function (this: ComponentTestWorld, testId: string, pageName: string) {
-    const pageObj = getPage(this, pageName)
-    const visible = await pageObj.isVisible(testId)
-    assert.ok(!visible, `Expected element "${testId}" to NOT be visible on ${pageName}`)
+    const timeout = waitTimeout(this.config)
+    try {
+      await getPage(this, pageName).waitForHidden(testId, timeout)
+    } catch (err) {
+      throw new Error(
+        `Expected element "${testId}" to NOT be visible on ${pageName} within ${timeout}ms: ${(err as Error).message}`,
+      )
+    }
   },
 )
 
@@ -100,8 +116,17 @@ Then(
   'the {word} page should be displayed',
   async function (this: ComponentTestWorld, pageName: string) {
     const pageObj = getPage(this, pageName)
-    assert.ok(this.page, 'No Playwright page available')
-    const url = this.page.url()
-    assert.ok(url.includes(pageObj.url), `Expected URL to contain "${pageObj.url}", got "${url}"`)
+    const page = this.page
+    assert.ok(page, 'No Playwright page available')
+    await eventually(
+      () => {
+        const url = page.url()
+        assert.ok(
+          url.includes(pageObj.url),
+          `Expected URL to contain "${pageObj.url}", got "${url}"`,
+        )
+      },
+      { timeout: waitTimeout(this.config), interval: 100 },
+    )
   },
 )
