@@ -141,6 +141,7 @@ All configuration is loaded from environment variables via `loadConfig()`. Overr
 | `cleanupTables` | _(none)_ | Tables to clear after each scenario, children first |
 | `defaultStepTimeout` | _(Cucumber's 5s)_ | Timeout in ms for every step and hook. Leave unset to keep a `setDefaultTimeout` call of your own |
 | `waitTimeout` | _(see [Waiting](#waiting))_ | How long UI and assertion waits poll before failing, in ms |
+| `auth` | _(none)_ | How the API issues tokens: `loginPath`, `tokenPath` (default `access_token`), `refreshTokenPath`, `loginMethod`, `loginBody`. See [Requests, values and login](#requests-values-and-login) |
 | `serviceWaitTimeout` | `30000` | How long waits for background work (DB record waits, opt-in WireMock and DB steps) poll, in ms |
 
 ### Suites that don't use WireMock or an API
@@ -350,6 +351,99 @@ Before({ tags: '@ui' }, function (this: ComponentTestWorld) {
 })
 ```
 
+## Requests, values and login
+
+### Saved values
+
+The world keeps named values for the scenario, so one step can save an id that a later request needs:
+
+```typescript
+this.remember('org', body.id)       // keep a value
+this.recall<number>('org')          // read it back; throws, naming what is kept, if missing
+this.uniqueId('owner')              // e.g. "owner-k3x9q2": the same all scenario, new next scenario
+```
+
+Values and unique ids are cleared before each scenario.
+
+### Sending requests from your own steps
+
+`sendOperation` is what the `I send the request … to the … operation` steps use. Call it for anything they don't cover:
+
+```typescript
+import { sendOperation } from '@bearingsoftware/component-test-framework'
+
+await sendOperation(this, 'getScan', {
+  requestFile: '_empty',                       // or a fixture name; _empty means none
+  pathParams: { oid: this.recall('org'), sid: this.recall('scan') },
+  queryParams: { page: '2' },
+  headers: { 'X-Request-Id': 'abc' },
+  auth: 'current',                             // or 'none', or { token: '…' }
+})
+```
+
+It fills every `{placeholder}` in the path (explicit values win over the fixture's `_pathParams`), keeps `_queryParams`, and records the response, headers included, as the last response. Headers you pass win over the defaults, including an `Authorization` of your own. `rawBody` and `contentType` send a body other than the fixture's JSON; a GET or HEAD can't have one.
+
+### Login
+
+Tell the framework how the API issues tokens:
+
+```typescript
+registerHooks({
+  ...loadConfig(),
+  auth: {
+    loginPath: '/auth/login',
+    tokenPath: 'token',                          // where the token is in the response; default access_token
+    loginBody: (username, password) => ({ email: username, password }), // the default
+  },
+})
+```
+
+`tokenPath` is also used by the existing `I authenticate with the request … to the … operation` step.
+
+**Logging in before tagged scenarios.** `registerLoginTag` replaces hand-written `@auth-required` hooks. Register it after `registerHooks`, so it runs after the per-scenario reset:
+
+```typescript
+registerLoginTag('@auth-required', {
+  before: (world) => seedUser(world, 'owner@example.com'),   // optional
+  credentials: { username: 'owner@example.com', password: 'Sup3rSecret!' },
+  cache: false, // true reuses the worker's first login; see below
+})
+```
+
+`cache: true` is only safe when the user, its session and everything its token refers to outlive a scenario. It isn't safe when cleanup deletes the user, when `before` seeds data the token carries (such as a household id in a claim), or when a scenario logs out or revokes the session. `clearLoginCache()` empties the cache.
+
+Helpers: `login(world, username, password)`, `requestLogin(config, username, password)` (doesn't change the world), `adoptTokens(world, body, { refresh })` and `jwtClaims(token)` (decodes without verifying). A login or adopt replaces the refresh token, clearing it when the response has none, so an earlier user's can't linger. Errors about tokens name the response's keys, never its values, so tokens stay out of CI logs.
+
+### Opt-in request steps
+
+`registerRequestSteps()` adds steps worded as secure-repo and joule-genie wrote them. Like the waiting steps, they're registered only when called: delete your own copies first, then call it once, after `registerHooks`. It registers all of them, so a suite that wants to keep its own version of one of these steps can't use it yet.
+
+**Migrating:** these steps keep values with `world.remember` and read them with `world.recall`. Your own steps that read or write those values (for example a seed step that saves an id for a later `saved as` step) must use the same methods, not their own fields such as `world.savedIds`.
+
+| Step | Description |
+|---|---|
+| `Given I capture the id as {word}` | Remember the last response's `id` |
+| `Given I capture {word} from the last response as {word}` | Remember any value, e.g. `items[0].id` |
+| `When I send the request {word} to the {word} operation with {word} saved as {word}` | Fill a placeholder from a remembered value |
+| `When I send the request {word} to the {word} operation with saved id {word}` | Fill `{id}` from a remembered value |
+| `When I send the request {word} to the {word} operation with oid from last response` | Fill any placeholder (`oid`, `sid`, …) from the last response's `id`; `with id from last response` is the existing step |
+| `When I send the request {word} to the {word} operation with {word} {word} and {word} from last response` | One placeholder from a remembered value, another from the last response's `id` |
+| `When I send an authed {word} to {string} with body {string}` | Raw request with the current token |
+| `When I log in as {string} with password {string}` | Log in; fails if refused. Doesn't change the last response |
+| `When I attempt to log in as {string} with password {string}` | Log in without failing; the response becomes the last response |
+| `When I remember the current token as {word}` / `When I use the remembered token {word}` | Keep a token aside and switch back to it |
+| `When I adopt the tokens from the last response` | Use the token pair in the last response; fails if either token is missing |
+| `Then the response body contains {string}` / `does not contain {string}` | Text anywhere in the JSON body |
+| `Then the response header {word} contains {string}` | Part of a header value |
+| `Then the response body at {word} should be a non-empty string` | A non-empty string at a path |
+| `Then the response body at {word} should not be empty` | Not null, `""`, `[]` or `{}` |
+| `Then the response body should contain {int} items` | Length of a root array |
+| `Then the response body should not have {word}` | A top-level key is absent |
+| `Then the token at {word} in the response has claim {word} equal to {string}` | A JWT claim, e.g. `access_token`, `tier`, `beta` |
+| `Then I dump the last response` | Write status and body to stderr |
+
+Response paths accept `a.b`, `items[0].id` and `items.0.id` (`valueAt`).
+
 ## Waiting
 
 Services, workers and SPAs settle asynchronously, so assertions on them wait rather than check once. Each one polls until its condition holds, and passes as soon as it does. A page or table that's already right is no slower.
@@ -450,7 +544,7 @@ Each scenario follows this lifecycle:
 
 ```typescript
 // Types
-OperationEntry, OperationMap, CallRecord, UIStateSnapshot, FrameworkConfig, FrameworkOptions, RequestFilter
+OperationEntry, OperationMap, CallRecord, UIStateSnapshot, FrameworkConfig, FrameworkOptions, AuthOptions, RequestFilter
 
 // Support
 ComponentTestWorld    // Base Cucumber World class
@@ -468,6 +562,11 @@ RedisClient           // Redis client (ioredis)
 // Pages
 BasePage              // Abstract page object base class
 
+// Requests, values and login
+sendOperation(), fillPath(), EMPTY_REQUEST, valueAt()
+login(), requestLogin(), adoptTokens(), jwtClaims(), registerLoginTag(), clearLoginCache()
+world.remember(), world.recall(), world.uniqueId()
+
 // Waiting
 eventually(), holdsFor(), StopRetrying, isStopRetrying(), waitTimeout(), serviceWaitTimeout()
 countRows(), queryOnce(), assertSafeTableName(), requireDb()
@@ -477,7 +576,7 @@ assertPartialMatch(), requestPattern(), describeRequests()
 apiSteps, responseSteps, wiremockSteps, serviceSteps, uiSteps
 
 // Opt-in steps (registered only when called)
-registerWaitingSteps()
+registerWaitingSteps(), registerRequestSteps()
 ```
 
 ## Publishing

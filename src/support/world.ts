@@ -25,6 +25,10 @@ export class ComponentTestWorld extends World {
   accessToken: string | null = null
   refreshToken: string | null = null
 
+  // --- Named values, kept for the scenario (see remember / recall) ---
+  values: Map<string, unknown> = new Map()
+  private uniqueIds: Map<string, string> = new Map()
+
   // --- Last API response ---
   lastResponse: {
     status: number
@@ -101,10 +105,43 @@ export class ComponentTestWorld extends World {
     return undefined
   }
 
+  /**
+   * Keep a value under a name for later steps in the scenario, such as an id
+   * from one response that a later request needs. Cleared between scenarios.
+   */
+  remember(name: string, value: unknown): void {
+    this.values.set(name, value)
+  }
+
+  /** A value kept with {@link remember}. Throws if there's none under `name`. */
+  recall<T = unknown>(name: string): T {
+    if (!this.values.has(name)) {
+      const known = [...this.values.keys()].join(', ') || 'none'
+      throw new Error(`Nothing remembered as "${name}". Remembered: ${known}`)
+    }
+    return this.values.get(name) as T
+  }
+
+  /**
+   * A value unique to this scenario, the same each time it's asked for under
+   * the same name, e.g. `uniqueId('owner')` → `owner-k3x9q2`. Use it for
+   * emails, names and ids that must not collide across scenarios.
+   */
+  uniqueId(name: string): string {
+    let id = this.uniqueIds.get(name)
+    if (!id) {
+      id = `${name}-${Math.random().toString(36).slice(2, 8)}${Date.now().toString(36).slice(-3)}`
+      this.uniqueIds.set(name, id)
+    }
+    return id
+  }
+
   /** Reset all per-scenario state. Called by Before hook. */
   resetScenario(): void {
     this.accessToken = null
     this.refreshToken = null
+    this.values.clear()
+    this.uniqueIds.clear()
     this.lastResponse = null
     this.lastRedisValue = undefined
     this.lastRedisMessage = undefined
