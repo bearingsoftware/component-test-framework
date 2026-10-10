@@ -1,6 +1,7 @@
 import { When, Then } from '@cucumber/cucumber'
 import { strict as assert } from 'assert'
 import { loadFixture } from '../../support/fixtures'
+import { requireApiBaseUrl } from '../../support/config'
 import type { ComponentTestWorld } from '../../support/world'
 
 When(
@@ -34,7 +35,7 @@ When(
       queryString = '?' + new URLSearchParams(_queryParams as Record<string, string>).toString()
     }
 
-    const url = `${this.config.apiBaseUrl}${resolvedPath}${queryString}`
+    const url = `${requireApiBaseUrl(this.config)}${resolvedPath}${queryString}`
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (this.accessToken) {
       headers['Authorization'] = `Bearer ${this.accessToken}`

@@ -1,4 +1,5 @@
 import { When } from '@cucumber/cucumber'
+import { requireApiBaseUrl } from '../../support/config'
 import type { ComponentTestWorld } from '../../support/world'
 
 /**
@@ -13,7 +14,7 @@ export async function rawRequest(
   path: string,
   init: { body?: string; contentType?: string; headers?: Record<string, string> } = {},
 ): Promise<void> {
-  const url = `${world.config.apiBaseUrl}${path}`
+  const url = `${requireApiBaseUrl(world.config)}${path}`
   const headers: Record<string, string> = { ...(init.headers ?? {}) }
   if (init.contentType) headers['Content-Type'] = init.contentType
   const res = await fetch(url, { method, headers, body: init.body })

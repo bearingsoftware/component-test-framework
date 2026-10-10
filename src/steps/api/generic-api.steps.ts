@@ -1,5 +1,6 @@
 import { Given, When } from '@cucumber/cucumber'
 import { loadFixture } from '../../support/fixtures'
+import { requireApiBaseUrl } from '../../support/config'
 import type { ComponentTestWorld } from '../../support/world'
 
 /**
@@ -66,7 +67,7 @@ async function sendRequest(
   >
   const resolvedPath = resolvePathParams(op.path, fixture, options.pathOverrides)
   const queryString = buildQueryString(fixture)
-  const url = `${world.config.apiBaseUrl}${resolvedPath}${queryString}`
+  const url = `${requireApiBaseUrl(world.config)}${resolvedPath}${queryString}`
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (options.withAuth) {
