@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.2](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.1...v0.3.2) (2026-10-10)
+
+
+### Bug Fixes
+
+* **COMPONENT-1:** point lockfile at public npm registry ([2fcfad3](https://github.com/bearingsoftware/component-test-framework/commit/2fcfad3f1ec365810068b2cb456671252c95b58a))
+* **COMPONENT-1:** resolve high and critical npm audit vulnerabilities ([fba9aa4](https://github.com/bearingsoftware/component-test-framework/commit/fba9aa44716f03b6231b74becd2b12f57c55e297))
+* **COMPONENT-1:** resolve high and critical npm audit vulnerabilities ([55d2604](https://github.com/bearingsoftware/component-test-framework/commit/55d2604c871648624a9e39ea5e336a2f2de070a0))
+* **COMPONENT-2:** upgrade @cucumber/cucumber dev dependency to 13 ([bb26c2a](https://github.com/bearingsoftware/component-test-framework/commit/bb26c2a3e561122be36b3d062a00e2c859026cad))
+* **COMPONENT-2:** upgrade @cucumber/cucumber dev dependency to 13 ([4f3389b](https://github.com/bearingsoftware/component-test-framework/commit/4f3389b4d5aaba53ff5186bfb6db761653c9a8cd))
+
 ## [0.3.1](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.0...v0.3.1) (2026-09-25)
 
 
