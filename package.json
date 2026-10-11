@@ -4,6 +4,9 @@
   "description": "Reusable Cucumber-based component test framework for APIs, workers, and UIs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "ctf": "dist/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -37,6 +40,10 @@
       "types": "./dist/spa.d.ts",
       "default": "./dist/spa.js"
     },
+    "./openapi": {
+      "types": "./dist/openapi.d.ts",
+      "default": "./dist/openapi.js"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -61,6 +68,9 @@
       ],
       "spa": [
         "dist/spa.d.ts"
+      ],
+      "openapi": [
+        "dist/openapi.d.ts"
       ]
     }
   },
@@ -88,12 +98,13 @@
     "test:parallel": "tsc && node -e \"for (const d of ['coverage', '.nyc_output', 'reports']) require('fs').rmSync('tests/parallel/' + d, { recursive: true, force: true })\" && node tests/parallel/prepare.js && cucumber-js --config tests/parallel/cucumber.js && node tests/parallel/check-coverage.js"
   },
   "peerDependencies": {
+    "@axe-core/playwright": ">=4.0.0",
     "@cucumber/cucumber": ">=11.0.0",
     "@playwright/test": ">=1.0.0",
     "istanbul-lib-coverage": ">=3.0.0",
     "istanbul-lib-report": ">=3.0.0",
     "istanbul-reports": ">=3.0.0",
-    "@axe-core/playwright": ">=4.0.0"
+    "typescript": ">=4.9.0"
   },
   "peerDependenciesMeta": {
     "@playwright/test": {
@@ -110,11 +121,15 @@
     },
     "@axe-core/playwright": {
       "optional": true
+    },
+    "typescript": {
+      "optional": true
     }
   },
   "dependencies": {
+    "ioredis": "^5.6.1",
     "pg": "^8.16.0",
-    "ioredis": "^5.6.1"
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
