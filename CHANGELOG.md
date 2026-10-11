@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.13](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.12...v0.3.13) (2026-10-11)
+
+
+### Bug Fixes
+
+* **spa:** answer a missing asset with a 404, not index.html ([8314a40](https://github.com/bearingsoftware/component-test-framework/commit/8314a408698b36798c8930bd5d702f17b3fb6534))
+* **spa:** answer a missing asset with a 404, not index.html ([344c83a](https://github.com/bearingsoftware/component-test-framework/commit/344c83af6b45a61bd111195f0d2b02e3f5fee3a8))
+
 ## [0.3.12](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.11...v0.3.12) (2026-10-11)
 
 
