@@ -1,9 +1,9 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
 import * as fs from 'fs'
 import * as path from 'path'
 import { AfterAll } from '@cucumber/cucumber'
 import type { Page } from '@playwright/test'
 import type { CoverageMapData } from 'istanbul-lib-coverage'
+import { requireOptional } from './optional'
 
 /** Options for {@link createCoverageCollector}. */
 export interface CoverageCollectorOptions {
@@ -49,8 +49,10 @@ const DEFAULT_REPORTERS = ['lcovonly', 'html', 'json-summary', 'text-summary']
  * loaded when the collector is created.
  */
 export function createCoverageCollector(options: CoverageCollectorOptions): CoverageCollector {
-  const { createCoverageMap } =
-    require('istanbul-lib-coverage') as typeof import('istanbul-lib-coverage')
+  const { createCoverageMap } = requireOptional<typeof import('istanbul-lib-coverage')>(
+    'istanbul-lib-coverage',
+    'Coverage collection',
+  )
   const map = createCoverageMap({})
   const counts = { collected: 0, missed: 0 }
   const loadTimeout = options.loadTimeoutMs ?? 6_000
@@ -116,8 +118,14 @@ export function createCoverageCollector(options: CoverageCollectorOptions): Cove
       }
       return
     }
-    const { createContext } = require('istanbul-lib-report') as typeof import('istanbul-lib-report')
-    const { create } = require('istanbul-reports') as typeof import('istanbul-reports')
+    const { createContext } = requireOptional<typeof import('istanbul-lib-report')>(
+      'istanbul-lib-report',
+      'The coverage report',
+    )
+    const { create } = requireOptional<typeof import('istanbul-reports')>(
+      'istanbul-reports',
+      'The coverage report',
+    )
 
     fs.mkdirSync(options.outDir, { recursive: true })
     // .nyc_output for tooling that expects it; the reports are what gates read.
