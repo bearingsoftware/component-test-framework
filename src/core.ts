@@ -100,4 +100,5 @@ export {
 } from './steps/register'
 export { registerWaitingSteps } from './steps/waiting.steps'
 export type { WaitingStepOptions } from './steps/waiting.steps'
+export type { RedisStepOptions } from './steps/common/redis.steps'
 export { registerRequestSteps } from './steps/request.steps'

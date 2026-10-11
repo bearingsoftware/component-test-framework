@@ -67,9 +67,12 @@ function requireSubscription(world: ComponentTestWorld): PubSubSubscription {
  * accepts (any message without one), and keep it as `world.lastRedisMessage`.
  * The subscription stays open for further steps; the After hook closes it.
  */
-async function receive(world: ComponentTestWorld, predicate?: MessagePredicate): Promise<void> {
+async function receive(
+  world: ComponentTestWorld,
+  timeout: number,
+  predicate?: MessagePredicate,
+): Promise<void> {
   const sub = requireSubscription(world)
-  const timeout = serviceWaitTimeout(world.config ?? {})
   const received: PubSubMessage = predicate
     ? await sub.waitForMessage(predicate, timeout)
     : await sub.waitForMessage(timeout)
@@ -86,225 +89,278 @@ async function track(
 }
 
 /**
- * Block until the named key appears, then stash its raw value on
- * `world.lastRedisValue` for subsequent assertion steps. Default 30s
- * timeout, 250ms poll — same cadence as the DB wait-for-row step.
- */
-When(
-  'I wait for the Valkey key {string} to be set',
-  async function (this: ComponentTestWorld, key: string) {
-    const value = await requireRedis(this).waitForKey(key)
-    this.lastRedisValue = value
-  },
-)
-
-Then('the Valkey key {string} exists', async function (this: ComponentTestWorld, key: string) {
-  const exists = await requireRedis(this).exists(key)
-  assert.ok(exists, `expected Valkey key "${key}" to exist`)
-})
-
-Then(
-  'the Valkey key {string} does not exist',
-  async function (this: ComponentTestWorld, key: string) {
-    const exists = await requireRedis(this).exists(key)
-    assert.ok(!exists, `expected Valkey key "${key}" to not exist`)
-  },
-)
-
-/**
- * Assert the key's value is valid JSON and every field in the supplied
- * JSON expression is present (deep partial match). Arrays are length-checked.
- * Unspecified fields in the actual are ignored — matches the semantics of
- * the generic-service fixture comparator.
- */
-Then(
-  'the Valkey key {string} contains JSON matching {string}',
-  async function (this: ComponentTestWorld, key: string, expectedJSON: string) {
-    const raw = await requireRedis(this).get(key)
-    assert.ok(raw !== null, `Valkey key "${key}" is unset`)
-    let actual: unknown
-    try {
-      actual = JSON.parse(raw)
-    } catch (err) {
-      throw new Error(`Valkey key "${key}" is not valid JSON: ${(err as Error).message}`)
-    }
-    assertPartialMatch(actual, parseExpected(expectedJSON), { nullMatchesAnything: true })
-  },
-)
-
-/**
  * The same match as the step above, retried until the key's value matches,
- * for a value a background worker writes. Polls for `serviceWaitTimeout`
- * (30s by default) and reports the last mismatch.
+ * for a value a background worker writes. Reports the last mismatch.
  */
-async function eventuallyContains(world: ComponentTestWorld, key: string, expectedJSON: string) {
+async function eventuallyContains(
+  world: ComponentTestWorld,
+  timeoutMs: number,
+  key: string,
+  expectedJSON: string,
+) {
   world.lastRedisValue = await requireRedis(world).waitForValue(
     key,
     parseExpected(expectedJSON) as object,
     {
-      timeoutMs: serviceWaitTimeout(world.config ?? {}),
+      timeoutMs,
     },
   )
 }
 
-Then(
-  'the Valkey key {string} eventually contains JSON matching {string}',
-  async function (this: ComponentTestWorld, key: string, expectedJSON: string) {
-    await eventuallyContains(this, key, expectedJSON)
-  },
-)
+/** Options for {@link defineRedisSteps}. */
+export interface RedisStepOptions {
+  /**
+   * How long the waiting steps wait, in ms: receiving a message, a key being
+   * set or matching, publishing until heard. Default 30s. Each of those steps
+   * gets a Cucumber timeout 1s longer, so a failure says what it was waiting
+   * for.
+   */
+  serviceWaitTimeout?: number
+}
 
-Then(
-  'the Valkey key {string} eventually contains JSON matching:',
-  async function (this: ComponentTestWorld, key: string, expectedJSON: string) {
-    await eventuallyContains(this, key, expectedJSON)
-  },
-)
+// Headroom between a step's own wait and its Cucumber timeout, so the step
+// fails with what it was waiting for rather than "function timed out".
+const STEP_HEADROOM = 1_000
 
-/**
- * Subscribe to the channel, then wait for a message to arrive. The message
- * body is stashed on `world.lastRedisMessage` for subsequent assertions.
- * The subscription is closed after the step.
- */
-When(
-  'I wait for a message on Valkey channel {string}',
-  async function (this: ComponentTestWorld, channel: string) {
-    const sub = await requireRedis(this).subscribe(channel)
-    try {
-      const { message } = await sub.waitForMessage(serviceWaitTimeout(this.config ?? {}))
-      this.lastRedisMessage = message
-    } finally {
-      await sub.close()
-    }
-  },
-)
+let registered = false
 
 /**
- * Start a pub/sub subscription that persists across steps. Use this when a
- * scenario needs to seed state after subscribing so it doesn't miss the
- * broadcast. Paired with the receive steps below.
+ * Register the Valkey / Redis steps, once: a second call registers nothing,
+ * so the steps can't become ambiguous. `registerRedisSteps` calls this.
  */
-When(
-  'I subscribe to Valkey channel {string}',
-  async function (this: ComponentTestWorld, channel: string) {
-    await track(this, requireRedis(this).subscribe(channel))
-  },
-)
+export function defineRedisSteps(options: RedisStepOptions = {}): void {
+  if (registered) return
+  registered = true
 
-/** As above, by glob pattern (PSUBSCRIBE), e.g. `events:user:*`. */
-When(
-  'I subscribe to Valkey pattern {string}',
-  async function (this: ComponentTestWorld, pattern: string) {
-    await track(this, requireRedis(this).psubscribe(pattern))
-  },
-)
+  const stepBudget = serviceWaitTimeout(options)
+  const serviceStep = { timeout: stepBudget + STEP_HEADROOM }
+  // The option when given; otherwise the suite's serviceWaitTimeout, capped
+  // at the step's Cucumber timeout so the wait still fails first.
+  const budget = (world: ComponentTestWorld) =>
+    options.serviceWaitTimeout !== undefined
+      ? stepBudget
+      : Math.min(serviceWaitTimeout(world.config ?? {}), stepBudget)
 
-Then(
-  'I receive a message on the subscribed Valkey channel/pattern',
-  async function (this: ComponentTestWorld) {
-    await receive(this)
-  },
-)
+  /**
+   * Block until the named key appears, then stash its raw value on
+   * `world.lastRedisValue` for subsequent assertion steps. Default 30s
+   * timeout, 250ms poll — same cadence as the DB wait-for-row step.
+   */
+  When(
+    'I wait for the Valkey key {string} to be set',
+    serviceStep,
+    async function (this: ComponentTestWorld, key: string) {
+      const value = await requireRedis(this).waitForKey(key, { timeoutMs: budget(this) })
+      this.lastRedisValue = value
+    },
+  )
 
-/**
- * Skip messages until one is JSON whose `type` field equals the given type,
- * for a channel that carries several kinds of event.
- */
-Then(
-  'I receive a message with type {string} on the subscribed Valkey channel/pattern',
-  async function (this: ComponentTestWorld, type: string) {
-    await receive(
-      this,
-      jsonMatches((json) => assert.equal((json as { type?: unknown })?.type, type)),
-    )
-  },
-)
+  Then('the Valkey key {string} exists', async function (this: ComponentTestWorld, key: string) {
+    const exists = await requireRedis(this).exists(key)
+    assert.ok(exists, `expected Valkey key "${key}" to exist`)
+  })
 
-/** Skip messages until one is JSON that partially matches, as the JSON steps match. */
-Then(
-  'I receive a message on the subscribed Valkey channel/pattern matching JSON {string}',
-  async function (this: ComponentTestWorld, expectedJSON: string) {
-    const expected = parseExpected(expectedJSON)
-    await receive(
-      this,
-      jsonMatches((json) => assertPartialMatch(json, expected, { nullMatchesAnything: true })),
-    )
-  },
-)
+  Then(
+    'the Valkey key {string} does not exist',
+    async function (this: ComponentTestWorld, key: string) {
+      const exists = await requireRedis(this).exists(key)
+      assert.ok(!exists, `expected Valkey key "${key}" to not exist`)
+    },
+  )
 
-Then(
-  'I receive a message on the subscribed Valkey channel/pattern matching JSON:',
-  async function (this: ComponentTestWorld, expectedJSON: string) {
-    const expected = parseExpected(expectedJSON)
-    await receive(
-      this,
-      jsonMatches((json) => assertPartialMatch(json, expected, { nullMatchesAnything: true })),
-    )
-  },
-)
+  /**
+   * Assert the key's value is valid JSON and every field in the supplied
+   * JSON expression is present (deep partial match). Arrays are length-checked.
+   * Unspecified fields in the actual are ignored — matches the semantics of
+   * the generic-service fixture comparator.
+   */
+  Then(
+    'the Valkey key {string} contains JSON matching {string}',
+    async function (this: ComponentTestWorld, key: string, expectedJSON: string) {
+      const raw = await requireRedis(this).get(key)
+      assert.ok(raw !== null, `Valkey key "${key}" is unset`)
+      let actual: unknown
+      try {
+        actual = JSON.parse(raw)
+      } catch (err) {
+        throw new Error(`Valkey key "${key}" is not valid JSON: ${(err as Error).message}`)
+      }
+      assertPartialMatch(actual, parseExpected(expectedJSON), { nullMatchesAnything: true })
+    },
+  )
 
-/**
- * Skip messages until one is JSON with every field in the table: a path
- * (`user.id`, `items[0].sku`) and a value, read as JSON when it parses and
- * as text otherwise.
- */
-Then(
-  'I receive a message on the subscribed Valkey channel/pattern with fields:',
-  async function (this: ComponentTestWorld, table: DataTable) {
-    const fields = Object.entries(table.rowsHash()).map(
-      ([path, cell]) => [path, cellValue(cell)] as const,
-    )
-    await receive(
-      this,
-      jsonMatches((json) => {
-        for (const [path, expected] of fields) {
-          assertPartialMatch(valueAt(json, path), expected, { nullMatchesAnything: true })
-        }
-      }),
-    )
-  },
-)
+  Then(
+    'the Valkey key {string} eventually contains JSON matching {string}',
+    serviceStep,
+    async function (this: ComponentTestWorld, key: string, expectedJSON: string) {
+      await eventuallyContains(this, budget(this), key, expectedJSON)
+    },
+  )
 
-Then(
-  'the last Valkey message matches JSON {string}',
-  function (this: ComponentTestWorld, expectedJSON: string) {
-    assert.ok(this.lastRedisMessage !== undefined, 'no Valkey message captured')
-    let actual: unknown
-    try {
-      actual = JSON.parse(this.lastRedisMessage)
-    } catch (err) {
-      throw new Error(`last Valkey message is not valid JSON: ${(err as Error).message}`)
-    }
-    assertPartialMatch(actual, parseExpected(expectedJSON), { nullMatchesAnything: true })
-  },
-)
+  Then(
+    'the Valkey key {string} eventually contains JSON matching:',
+    serviceStep,
+    async function (this: ComponentTestWorld, key: string, expectedJSON: string) {
+      await eventuallyContains(this, budget(this), key, expectedJSON)
+    },
+  )
 
-When(
-  'I publish {string} to Valkey channel {string}',
-  async function (this: ComponentTestWorld, message: string, channel: string) {
-    await requireRedis(this).publish(channel, message)
-  },
-)
+  /**
+   * Subscribe to the channel, then wait for a message to arrive. The message
+   * body is stashed on `world.lastRedisMessage` for subsequent assertions.
+   * The subscription is closed after the step.
+   */
+  When(
+    'I wait for a message on Valkey channel {string}',
+    serviceStep,
+    async function (this: ComponentTestWorld, channel: string) {
+      const sub = await requireRedis(this).subscribe(channel)
+      try {
+        const { message } = await sub.waitForMessage(budget(this))
+        this.lastRedisMessage = message
+      } finally {
+        await sub.close()
+      }
+    },
+  )
 
-When(
-  'I publish to Valkey channel {string}:',
-  async function (this: ComponentTestWorld, channel: string, message: string) {
-    await requireRedis(this).publish(channel, message)
-  },
-)
+  /**
+   * Start a pub/sub subscription that persists across steps. Use this when a
+   * scenario needs to seed state after subscribing so it doesn't miss the
+   * broadcast. Paired with the receive steps below.
+   */
+  When(
+    'I subscribe to Valkey channel {string}',
+    async function (this: ComponentTestWorld, channel: string) {
+      await track(this, requireRedis(this).subscribe(channel))
+    },
+  )
 
-/**
- * Publish every 500ms until a subscriber receives it, for a subscriber that
- * may not be listening yet. It may be delivered more than once.
- */
-When(
-  'I publish {string} to Valkey channel {string} until a subscriber hears it',
-  async function (this: ComponentTestWorld, message: string, channel: string) {
-    await requireRedis(this).publishUntilHeard(channel, message, {
-      timeoutMs: serviceWaitTimeout(this.config ?? {}),
-    })
-  },
-)
+  /** As above, by glob pattern (PSUBSCRIBE), e.g. `events:user:*`. */
+  When(
+    'I subscribe to Valkey pattern {string}',
+    async function (this: ComponentTestWorld, pattern: string) {
+      await track(this, requireRedis(this).psubscribe(pattern))
+    },
+  )
+
+  Then(
+    'I receive a message on the subscribed Valkey channel/pattern',
+    serviceStep,
+    async function (this: ComponentTestWorld) {
+      await receive(this, budget(this))
+    },
+  )
+
+  /**
+   * Skip messages until one is JSON whose `type` field equals the given type,
+   * for a channel that carries several kinds of event.
+   */
+  Then(
+    'I receive a message with type {string} on the subscribed Valkey channel/pattern',
+    serviceStep,
+    async function (this: ComponentTestWorld, type: string) {
+      await receive(
+        this,
+        budget(this),
+        jsonMatches((json) => assert.equal((json as { type?: unknown })?.type, type)),
+      )
+    },
+  )
+
+  /** Skip messages until one is JSON that partially matches, as the JSON steps match. */
+  Then(
+    'I receive a message on the subscribed Valkey channel/pattern matching JSON {string}',
+    serviceStep,
+    async function (this: ComponentTestWorld, expectedJSON: string) {
+      const expected = parseExpected(expectedJSON)
+      await receive(
+        this,
+        budget(this),
+        jsonMatches((json) => assertPartialMatch(json, expected, { nullMatchesAnything: true })),
+      )
+    },
+  )
+
+  Then(
+    'I receive a message on the subscribed Valkey channel/pattern matching JSON:',
+    serviceStep,
+    async function (this: ComponentTestWorld, expectedJSON: string) {
+      const expected = parseExpected(expectedJSON)
+      await receive(
+        this,
+        budget(this),
+        jsonMatches((json) => assertPartialMatch(json, expected, { nullMatchesAnything: true })),
+      )
+    },
+  )
+
+  /**
+   * Skip messages until one is JSON with every field in the table: a path
+   * (`user.id`, `items[0].sku`) and a value, read as JSON when it parses and
+   * as text otherwise.
+   */
+  Then(
+    'I receive a message on the subscribed Valkey channel/pattern with fields:',
+    serviceStep,
+    async function (this: ComponentTestWorld, table: DataTable) {
+      const fields = Object.entries(table.rowsHash()).map(
+        ([path, cell]) => [path, cellValue(cell)] as const,
+      )
+      await receive(
+        this,
+        budget(this),
+        jsonMatches((json) => {
+          for (const [path, expected] of fields) {
+            assertPartialMatch(valueAt(json, path), expected, { nullMatchesAnything: true })
+          }
+        }),
+      )
+    },
+  )
+
+  Then(
+    'the last Valkey message matches JSON {string}',
+    function (this: ComponentTestWorld, expectedJSON: string) {
+      assert.ok(this.lastRedisMessage !== undefined, 'no Valkey message captured')
+      let actual: unknown
+      try {
+        actual = JSON.parse(this.lastRedisMessage)
+      } catch (err) {
+        throw new Error(`last Valkey message is not valid JSON: ${(err as Error).message}`)
+      }
+      assertPartialMatch(actual, parseExpected(expectedJSON), { nullMatchesAnything: true })
+    },
+  )
+
+  When(
+    'I publish {string} to Valkey channel {string}',
+    async function (this: ComponentTestWorld, message: string, channel: string) {
+      await requireRedis(this).publish(channel, message)
+    },
+  )
+
+  When(
+    'I publish to Valkey channel {string}:',
+    async function (this: ComponentTestWorld, channel: string, message: string) {
+      await requireRedis(this).publish(channel, message)
+    },
+  )
+
+  /**
+   * Publish every 500ms until a subscriber receives it, for a subscriber that
+   * may not be listening yet. It may be delivered more than once.
+   */
+  When(
+    'I publish {string} to Valkey channel {string} until a subscriber hears it',
+    serviceStep,
+    async function (this: ComponentTestWorld, message: string, channel: string) {
+      await requireRedis(this).publishUntilHeard(channel, message, {
+        timeoutMs: budget(this),
+      })
+    },
+  )
+}
 
 // Re-exported so consumers can call the waiter from their own step modules.
 export type { PubSubSubscription }

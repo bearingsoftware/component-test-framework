@@ -6,16 +6,22 @@ type StepFn = (this: unknown, ...args: unknown[]) => unknown
 
 // Capture step definitions so the real steps run without a Cucumber runtime.
 const steps = vi.hoisted(() => new Map<string, StepFn>())
+const stepOptions = vi.hoisted(() => new Map<string, unknown>())
 
 vi.mock('@cucumber/cucumber', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@cucumber/cucumber')>()
   const register = (expression: string, optionsOrFn: unknown, maybeFn?: StepFn) => {
+    // A second definition of one expression is what Cucumber reports as ambiguous.
+    if (steps.has(expression)) throw new Error(`Registered twice: ${expression}`)
     steps.set(expression, (typeof optionsOrFn === 'function' ? optionsOrFn : maybeFn) as StepFn)
+    if (typeof optionsOrFn !== 'function') stepOptions.set(expression, optionsOrFn)
   }
   return { ...actual, Given: register, When: register, Then: register }
 })
 
-import './common/redis.steps'
+import { defineRedisSteps } from './common/redis.steps'
+
+defineRedisSteps()
 
 const run = (world: unknown, expression: string, ...args: unknown[]) => {
   const step = steps.get(expression)
@@ -203,5 +209,38 @@ describe('Valkey pub/sub steps (COMPONENT-15)', () => {
     await expect(
       run(world, 'the Valkey key {string} eventually contains JSON matching {string}', 'k', '{bad'),
     ).rejects.toThrow(/expected JSON is malformed/)
+  })
+
+  it('gives each waiting step a Cucumber timeout 1s past the 30s default wait, once', () => {
+    // Registered above with no options; a second call adds nothing.
+    defineRedisSteps({ serviceWaitTimeout: 5_000 })
+    const waiting = [
+      'I wait for the Valkey key {string} to be set',
+      'the Valkey key {string} eventually contains JSON matching {string}',
+      'the Valkey key {string} eventually contains JSON matching:',
+      'I wait for a message on Valkey channel {string}',
+      RECEIVE,
+      'I receive a message with type {string} on the subscribed Valkey channel/pattern',
+      `${RECEIVE} matching JSON {string}`,
+      `${RECEIVE} matching JSON:`,
+      `${RECEIVE} with fields:`,
+      'I publish {string} to Valkey channel {string} until a subscriber hears it',
+    ]
+    for (const expression of waiting) {
+      expect(stepOptions.get(expression), expression).toEqual({ timeout: 31_000 })
+    }
+    expect(stepOptions.has('the Valkey key {string} exists')).toBe(false)
+  })
+
+  it("caps the suite's serviceWaitTimeout at the step's budget, so the wait fails first", async () => {
+    const { world } = fakeWorld()
+    world.config = { serviceWaitTimeout: 60_000 }
+    await run(
+      world,
+      'I publish {string} to Valkey channel {string} until a subscriber hears it',
+      'x',
+      'c',
+    )
+    expect(world.redis.publishUntilHeard).toHaveBeenCalledWith('c', 'x', { timeoutMs: 30_000 })
   })
 })

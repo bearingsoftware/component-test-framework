@@ -310,7 +310,7 @@ The two `I wait for` steps and the scenario-move step poll for `serviceWaitTimeo
 
 ### Valkey / Redis Steps
 
-`registerRedisSteps()` adds steps for keys and pub/sub. They need `redisUrl`.
+`registerRedisSteps(options?)` adds steps for keys and pub/sub. They need `redisUrl`.
 
 **Keys:**
 
@@ -338,7 +338,11 @@ The two `I wait for` steps and the scenario-move step poll for `serviceWaitTimeo
 
 Subscribing in its own step, before the step that causes the message, means the message can't be missed. The waits skip messages that don't match, and those messages are gone, so a later step doesn't see them.
 
-Waits poll for `serviceWaitTimeout`, which defaults to 30s. When one times out, it says how many messages arrived that didn't match, and shows the last. "Partially" means what it does for the response steps: fields the expectation leaves out are ignored, and `null` matches any value.
+Pass the suite's options to set how long the waiting steps wait: `registerRedisSteps(options)`, the same object you give `registerHooks`. They wait for `serviceWaitTimeout`, which defaults to 30s, and each step's Cucumber timeout is 1s longer. That way a suite left on Cucumber's 5s default still gets the step's own message, not "function timed out".
+
+Only the first registration's options count. Importing the package root registers the steps with the defaults, so a suite that imports the root and wants a different wait should use the `/core` entry point. Without options, a `serviceWaitTimeout` in the config still applies, but only up to 30s.
+
+When a wait times out, it says how many messages arrived that didn't match, and shows the last. "Partially" means what it does for the response steps: fields the expectation leaves out are ignored, and `null` matches any value.
 
 A table row is a path and a value:
 

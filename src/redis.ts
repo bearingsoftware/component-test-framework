@@ -9,3 +9,4 @@ export type {
   ValueMatcher,
 } from './clients/redis-client'
 export { registerRedisSteps } from './steps/register'
+export type { RedisStepOptions } from './steps/common/redis.steps'
