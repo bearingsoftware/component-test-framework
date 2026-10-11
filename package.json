@@ -48,6 +48,10 @@
       "types": "./dist/mailpit.d.ts",
       "default": "./dist/mailpit.js"
     },
+    "./playwright-test": {
+      "types": "./dist/playwright-test.d.ts",
+      "default": "./dist/playwright-test.js"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -78,6 +82,9 @@
       ],
       "mailpit": [
         "dist/mailpit.d.ts"
+      ],
+      "playwright-test": [
+        "dist/playwright-test.d.ts"
       ]
     }
   },
@@ -102,7 +109,8 @@
     "pub": "node scripts/publish.mjs",
     "publish:restore": "node scripts/restore-after-publish.mjs",
     "test:smoke": "tsc && cucumber-js --config tests/smoke/cucumber.js",
-    "test:parallel": "tsc && node -e \"for (const d of ['coverage', '.nyc_output', 'reports']) require('fs').rmSync('tests/parallel/' + d, { recursive: true, force: true })\" && node tests/parallel/prepare.js && cucumber-js --config tests/parallel/cucumber.js && node tests/parallel/check-coverage.js"
+    "test:parallel": "tsc && node -e \"for (const d of ['coverage', '.nyc_output', 'reports']) require('fs').rmSync('tests/parallel/' + d, { recursive: true, force: true })\" && node tests/parallel/prepare.js && cucumber-js --config tests/parallel/cucumber.js && node tests/parallel/check-coverage.js",
+    "test:playwright-test": "tsc && node -e \"for (const d of ['coverage', '.nyc_output']) require('fs').rmSync('tests/playwright-test/' + d, { recursive: true, force: true })\" && playwright test -c tests/playwright-test && node tests/playwright-test/check-coverage.js"
   },
   "peerDependencies": {
     "@axe-core/playwright": ">=4.0.0",

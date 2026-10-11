@@ -111,6 +111,28 @@ jobs:
       - name: Run the parallel reference suite
         run: npm run test:parallel
 
+  playwright-test-example:
+    if: "!startsWith(github.head_ref, 'release-please--')"
+    runs-on: ubuntu-latest
+    services:
+      wiremock:
+        image: wiremock/wiremock:3.9.2
+        ports: ["58443:8080"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Wait for WireMock
+        run: timeout 60 sh -c 'until curl -sf http://localhost:58443/__admin/health; do sleep 1; done'
+      - name: Run the Playwright Test example suite
+        run: npm run test:playwright-test
+
   build:
     if: "!startsWith(github.head_ref, 'release-please--')"
     runs-on: ubuntu-latest

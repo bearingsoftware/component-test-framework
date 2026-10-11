@@ -1,0 +1,4 @@
+{
+  "request": { "method": "GET", "urlPath": "/pricing/prices/WIDGET" },
+  "response": { "status": 200, "jsonBody": { "price": 7 } }
+}

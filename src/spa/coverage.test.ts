@@ -180,3 +180,40 @@ describe('coverage under --parallel (COMPONENT-11)', () => {
     expect(summary()).toMatchObject({ covered: 1 })
   })
 })
+
+describe('coverage from a runner other than Cucumber (COMPONENT-17)', () => {
+  let dir: string
+  let outDir: string
+  const reporters = ['json-summary']
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctf-coverage-'))
+    outDir = path.join(dir, 'coverage')
+  })
+
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
+
+  it("merges the workers named by run, and drops another run's files", async () => {
+    const workers = path.join(dir, '.nyc_output', '.workers')
+    fs.mkdirSync(workers, { recursive: true })
+    fs.writeFileSync(path.join(workers, 'worker-old.run-0.json'), '{}')
+
+    const second = fileCoverage(0)
+    second['/src/app.ts'].s = { '0': 0, '1': 3 }
+    const first = createCoverageCollector({ outDir, reporters })
+    await first.collect(fakePage({ coverage: fileCoverage(1) }))
+    first.write({ key: 'run.1', worker: 0, workers: 2 })
+    const other = createCoverageCollector({ outDir, reporters })
+    await other.collect(fakePage({ coverage: second }))
+    other.write({ key: 'run.1', worker: 7, workers: 2 })
+
+    const merged = JSON.parse(fs.readFileSync(path.join(dir, '.nyc_output', 'out.json'), 'utf-8'))
+    expect(merged['/src/app.ts'].s).toEqual({ '0': 1, '1': 3 })
+    expect(fs.readdirSync(workers).sort()).toEqual(['worker-run.1-0.json', 'worker-run.1-7.json'])
+  })
+
+  it('refuses a run key that would make a bad file name', () => {
+    const collector = createCoverageCollector({ outDir, reporters })
+    expect(() => collector.write({ key: '../x', worker: 0, workers: 1 })).toThrow(/run key/)
+  })
+})
