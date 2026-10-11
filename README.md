@@ -611,6 +611,70 @@ After a scenario the order is: `onScenarioFailed` (if it failed), cleanup, `befo
 
 `wiremockBaseline` directories use WireMock's layout, `<dir>/mappings/*.json`, and need `wiremockUrl`. A missing directory, a baseline without WireMock, and `pages` without `webBaseUrl` are reported when `registerHooks` is called, not in every scenario.
 
+## Testing a single-page app
+
+The `/spa` entry point covers what SPA suites need beyond the UI steps: serving the built app, forwarding its API calls to WireMock, browser-side coverage, failure screenshots, and a few browser helpers.
+
+```typescript
+import * as path from 'node:path'
+import { registerHooks, loadConfig, registerUiSteps, registerWaitingSteps, type FrameworkOptions } from '@bearingsoftware/component-test-framework/core'
+import { registerSpaServer, registerCoverage, saveFailureArtifacts } from '@bearingsoftware/component-test-framework/spa'
+
+const SUITE = path.resolve(__dirname, '..')
+
+// Serves web/dist on WEB_PORT (default 3100): its files, index.html for
+// client-side routes, and /api/* forwarded to WireMock with /api removed.
+const spa = registerSpaServer({
+  distDir: path.resolve(SUITE, '../../dist'),
+  apiUrl: process.env.WIREMOCK_URL ?? 'http://localhost:8443',
+  runtimeEnv: { VITE_API_BASE_URL: '/api' },   // written to dist/__env.js as window.__ENV
+  buildHint: '(cd web && npm run build:coverage)',
+})
+
+const coverage = registerCoverage({ outDir: path.join(SUITE, 'coverage') })
+
+const options: FrameworkOptions = {
+  ...loadConfig({ fixturesDir: path.join(SUITE, 'fixtures'), webBaseUrl: spa.baseUrl }),
+  pages: { login: LoginPage, dashboard: DashboardPage },
+  hooks: {
+    onScenarioFailed: saveFailureArtifacts(path.join(SUITE, 'reports')),
+    beforePageClose: (world) => (world.page ? coverage.collect(world.page) : undefined),
+  },
+}
+registerHooks(options)
+registerUiSteps()
+registerWaitingSteps(options)
+```
+
+**Server** (`registerSpaServer`, or `startSpaServer` to manage it yourself):
+
+| Option | Default | |
+|---|---|---|
+| `distDir` | | The build; must contain `index.html` |
+| `apiUrl` | | Where API paths go, usually WireMock |
+| `proxyPrefixes` | `['/api']` | Path prefixes to forward; `/api` matches `/api` and `/api/…`, not `/apiary` |
+| `stripPrefix` | `true` | Remove the prefix before forwarding (`/api/v1/x` → `/v1/x`); `false` keeps the full path |
+| `runtimeEnv` | | Written to `{distDir}/__env.js` as `window.__ENV = {…}` before the server starts |
+| `mimeTypes` | | Extra content types, e.g. `.webmanifest` |
+| `buildHint` | | Named in the error when the build is missing |
+| `portEnvVar`, `defaultPort` | `WEB_PORT`, `3100` | Where the port comes from (`registerSpaServer` only) |
+
+Before starting it checks the build exists; once listening it fetches `/` to prove the app is served. Paths outside the build are refused.
+
+**Coverage** (`registerCoverage`, or `createCoverageCollector`) reads `window.__coverage__` from SPAs built with istanbul instrumentation, such as vite-plugin-istanbul. It waits for the document to load, then for the instrumented bundle to run (`loadTimeoutMs`, `evalTimeoutMs`, 6s each), so a page reloaded just before the scenario ended still counts. After the run it writes `coverage/lcov.info`, `coverage-summary.json`, the HTML report and `.nyc_output/out.json`.
+- `onMissingSample: 'throw' | 'warn'`: a page with no coverage fails the scenario (default) or is logged and counted.
+- `onNothingCollected: 'skip' | 'throw'`: a run with no coverage at all writes nothing (default) or fails, so a broken build can't report a silent 0%.
+
+It needs `istanbul-lib-coverage`, `istanbul-lib-report` and `istanbul-reports`.
+
+**Browser helpers**
+- `saveFailureArtifacts(dir)`: an `onScenarioFailed` hook saving a full-page screenshot and the HTML, named after the scenario.
+- `registerRouteBlocks(tag, routes)`: abort or answer requests to third parties in tagged scenarios (`{ url, fulfill? }`).
+- `registerWebAuthnTag(tag)`: a virtual WebAuthn authenticator for passkey flows (Chromium).
+- `registerAccessibilitySteps({ tags?, disableRules?, failOn? })`: `Then the {word} page should have no serious accessibility violations`, an axe scan failing on serious and critical violations by default. Needs `@axe-core/playwright`.
+
+Register tagged hooks after `registerHooks`, whose `@ui` hook opens the page.
+
 ## Entry points
 
 The package root works as it always has: it exports everything and registers every built-in step when it's imported. Only the entry points below can be imported: deep paths into `dist/` are no longer reachable. Alongside it are entry points that register nothing on import, so a suite loads and registers only what it uses:
@@ -622,6 +686,7 @@ The package root works as it always has: it exports everything and registers eve
 | `…/postgres` | `DbClient`, `countRows`, `queryOnce`, `registerDbSteps`, `registerServiceSteps` |
 | `…/redis` | `RedisClient`, `registerRedisSteps` |
 | `…/playwright` | `BasePage`, `registerUiSteps` |
+| `…/spa` | `registerSpaServer`, `registerCoverage`, `saveFailureArtifacts`, route blocks, WebAuthn, accessibility steps |
 | `…/preset` | `cucumberPreset()`, a profile for `cucumber.js` |
 
 The step groups are `registerApiSteps`, `registerRawApiSteps`, `registerSseSteps`, `registerResponseSteps`, `registerWiremockSteps`, `registerDbSteps`, `registerRedisSteps`, `registerServiceSteps` and `registerUiSteps`, plus the opt-in `registerWaitingSteps` and `registerRequestSteps`. Calling one twice, or after importing the root, registers nothing more.
