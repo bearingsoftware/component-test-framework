@@ -242,14 +242,18 @@ export function registerHooks(options: FrameworkOptions): void {
         hookError = err
       }
     }
-    if (this.activeSubscription) {
+    // Steps' subscriptions, and one a suite's own step left as the active one.
+    const subscriptions = new Set(this.subscriptions ?? [])
+    if (this.activeSubscription) subscriptions.add(this.activeSubscription)
+    for (const sub of subscriptions) {
       try {
-        await this.activeSubscription.close()
+        await sub.close()
       } catch {
         /* best-effort */
       }
-      this.activeSubscription = undefined
     }
+    this.subscriptions = []
+    this.activeSubscription = undefined
     if (db && config.cleanupTables && config.cleanupTables.length > 0) {
       await db.cleanTables(config.cleanupTables)
     }

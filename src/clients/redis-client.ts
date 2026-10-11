@@ -1,4 +1,10 @@
+import { strict as assert } from 'assert'
 import type Redis from 'ioredis'
+import { eventually } from '../support/eventually'
+import { assertPartialMatch } from '../utils/match'
+import { MessageQueue, type MessagePredicate, type PubSubMessage } from './message-queue'
+
+export type { MessagePredicate, PubSubMessage }
 
 /**
  * ioredis, loaded on first use rather than when this module is imported, so
@@ -71,53 +77,108 @@ export class RedisClient {
   }
 
   /**
+   * Poll until the value at `key` matches, returning the value. `expected`
+   * is one of:
+   * - a string: the exact value;
+   * - a function: returns false or throws while the value doesn't match;
+   * - anything else: the value is parsed as JSON and partially matched
+   *   against it. Extra fields are ignored, and null in `expected` matches
+   *   anything, as in the Valkey JSON step.
+   *
+   * Throws the last mismatch after `timeoutMs` (default 30s).
+   */
+  async waitForValue(
+    key: string,
+    expected: ValueMatcher,
+    { timeoutMs = 30_000, intervalMs = 250 }: { timeoutMs?: number; intervalMs?: number } = {},
+  ): Promise<string> {
+    return eventually(
+      async () => {
+        const value = await this.client.get(key)
+        if (value === null) throw new Error(`key "${key}" is unset`)
+        if (typeof expected === 'string') {
+          assert.equal(value, expected, `key "${key}" has a different value`)
+        } else if (typeof expected === 'function') {
+          if (expected(value) === false) throw new Error(`key "${key}" doesn't match: ${value}`)
+        } else {
+          let actual: unknown
+          try {
+            actual = JSON.parse(value)
+          } catch {
+            throw new Error(`key "${key}" is not valid JSON: ${value}`)
+          }
+          assertPartialMatch(actual, expected, { nullMatchesAnything: true })
+        }
+        return value
+      },
+      { timeout: timeoutMs, interval: intervalMs, description: `waiting for Redis key "${key}"` },
+    )
+  }
+
+  /**
    * Subscribe to one or more pub/sub channels and return a handle that lets
    * the caller wait for messages. Each call opens a dedicated connection so
    * SUBSCRIBE doesn't interfere with the main client's commands.
    */
   async subscribe(...channels: string[]): Promise<PubSubSubscription> {
     const subClient = new (ioredis())(this.url)
-    const buffer: { channel: string; message: string }[] = []
-    const waiters: ((msg: { channel: string; message: string }) => void)[] = []
+    const queue = new MessageQueue(channels.join(', '))
+    subClient.on('message', (channel: string, message: string) => queue.push({ channel, message }))
+    return listen(subClient, queue, () => subClient.subscribe(...channels))
+  }
 
-    subClient.on('message', (channel, message) => {
-      const entry = { channel, message }
-      const waiter = waiters.shift()
-      if (waiter) {
-        waiter(entry)
-      } else {
-        buffer.push(entry)
-      }
-    })
+  /**
+   * Subscribe to channels by glob pattern (PSUBSCRIBE), such as `events:*`,
+   * for channels whose names a feature can't know in advance. Messages carry
+   * the pattern that matched as well as the channel. Opens a dedicated
+   * connection, as {@link subscribe} does.
+   */
+  async psubscribe(...patterns: string[]): Promise<PubSubSubscription> {
+    const subClient = new (ioredis())(this.url)
+    const queue = new MessageQueue(`pattern ${patterns.join(', ')}`)
+    subClient.on('pmessage', (pattern: string, channel: string, message: string) =>
+      queue.push({ pattern, channel, message }),
+    )
+    return listen(subClient, queue, () => subClient.psubscribe(...patterns))
+  }
 
-    await subClient.subscribe(...channels)
+  /** Publish a message, returning how many subscribers received it. */
+  async publish(channel: string, message: string): Promise<number> {
+    return this.client.publish(channel, message)
+  }
 
-    return {
-      async waitForMessage(timeoutMs = 30_000) {
-        if (buffer.length > 0) {
-          return buffer.shift()!
-        }
-        return new Promise((resolve, reject) => {
-          const timer = setTimeout(() => {
-            const idx = waiters.indexOf(waiter)
-            if (idx >= 0) waiters.splice(idx, 1)
-            reject(
-              new Error(
-                `Timed out after ${timeoutMs}ms waiting for pub/sub message on ${channels.join(', ')}`,
-              ),
-            )
-          }, timeoutMs)
-          const waiter = (msg: { channel: string; message: string }) => {
-            clearTimeout(timer)
-            resolve(msg)
-          }
-          waiters.push(waiter)
-        })
-      },
-      async close() {
-        await subClient.quit()
-      },
+  /**
+   * Publish repeatedly until at least one subscriber receives the message
+   * and `until`, if given, holds. Use it for a subscriber that may not have
+   * subscribed yet, such as a worker that's still starting.
+   *
+   * Returns how many subscribers the last publish reached. Throws after
+   * `timeoutMs` (default 30s), saying how many that was. Publishing more than
+   * once can deliver the message more than once, so the subscriber must
+   * tolerate repeats.
+   */
+  async publishUntilHeard(
+    channel: string,
+    message: string,
+    {
+      timeoutMs = 30_000,
+      intervalMs = 500,
+      until,
+    }: { timeoutMs?: number; intervalMs?: number; until?: () => boolean | Promise<boolean> } = {},
+  ): Promise<number> {
+    const deadline = Date.now() + timeoutMs
+    let heard = 0
+    for (;;) {
+      heard = await this.client.publish(channel, message)
+      if (heard > 0 && (!until || (await until()))) return heard
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) break
+      await new Promise((resolve) => setTimeout(resolve, Math.min(intervalMs, remaining)))
     }
+    throw new Error(
+      `Timed out after ${timeoutMs}ms publishing to ${channel}: the last publish reached ` +
+        `${heard} subscriber(s)${until && heard > 0 ? ', but the until condition never held' : ''}`,
+    )
   }
 
   /** Close the connection. */
@@ -126,10 +187,48 @@ export class RedisClient {
   }
 }
 
-/** Handle returned by {@link RedisClient.subscribe}. */
+/** What {@link RedisClient.waitForValue} matches a value against. */
+export type ValueMatcher = string | ((value: string) => boolean | void) | object | number | boolean
+
+/** Handle returned by {@link RedisClient.subscribe} and {@link RedisClient.psubscribe}. */
 export interface PubSubSubscription {
-  /** Await the next message on any subscribed channel, or throw on timeout. */
-  waitForMessage(timeoutMs?: number): Promise<{ channel: string; message: string }>
-  /** Close the subscription's dedicated connection. */
+  /** Await the next message, or throw on timeout (default 30s). */
+  waitForMessage(timeoutMs?: number): Promise<PubSubMessage>
+  /**
+   * Await the next message `predicate` accepts, or throw on timeout (default
+   * 30s). Messages it skips are taken off the queue.
+   */
+  waitForMessage(predicate: MessagePredicate, timeoutMs?: number): Promise<PubSubMessage>
+  /** Close the subscription's dedicated connection. Closing twice is harmless. */
   close(): Promise<void>
+}
+
+/** Subscribe, closing the connection if that fails, and return the handle. */
+async function listen(
+  subClient: Redis,
+  queue: MessageQueue,
+  start: () => Promise<unknown>,
+): Promise<PubSubSubscription> {
+  try {
+    await start()
+  } catch (err) {
+    subClient.disconnect()
+    throw err
+  }
+  let closed = false
+  const waitForMessage = (
+    predicateOrTimeout?: MessagePredicate | number,
+    timeoutMs = 30_000,
+  ): Promise<PubSubMessage> =>
+    typeof predicateOrTimeout === 'function'
+      ? queue.next(predicateOrTimeout, timeoutMs)
+      : queue.next(undefined, predicateOrTimeout ?? 30_000)
+  return {
+    waitForMessage,
+    async close() {
+      if (closed) return
+      closed = true
+      await subClient.quit()
+    },
+  }
 }

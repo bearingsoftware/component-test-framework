@@ -1,14 +1,88 @@
 import { When, Then } from '@cucumber/cucumber'
+import type { DataTable } from '@cucumber/cucumber'
 import { strict as assert } from 'assert'
 import type { ComponentTestWorld } from '../../support/world'
+import { serviceWaitTimeout } from '../../support/eventually'
 import { assertPartialMatch } from '../../utils/match'
-import type { PubSubSubscription } from '../../clients/redis-client'
+import { valueAt } from '../../utils/json-path'
+import type {
+  MessagePredicate,
+  PubSubMessage,
+  PubSubSubscription,
+} from '../../clients/redis-client'
 
 function requireRedis(world: ComponentTestWorld): NonNullable<ComponentTestWorld['redis']> {
   if (!world.redis) {
     throw new Error('RedisClient is not configured — set redisUrl on FrameworkConfig')
   }
   return world.redis
+}
+
+function parseExpected(expectedJSON: string): unknown {
+  try {
+    return JSON.parse(expectedJSON)
+  } catch (err) {
+    throw new Error(`expected JSON is malformed: ${(err as Error).message}`)
+  }
+}
+
+/** A table cell as JSON when it parses (`42`, `true`, `"x"`, `{…}`), otherwise as text. */
+function cellValue(cell: string): unknown {
+  try {
+    return JSON.parse(cell)
+  } catch {
+    return cell
+  }
+}
+
+/** Partial-match `expected` against a message's JSON; a message that isn't JSON doesn't match. */
+function jsonMatches(check: (json: unknown) => void): MessagePredicate {
+  return ({ message }) => {
+    let json: unknown
+    try {
+      json = JSON.parse(message)
+    } catch {
+      return false
+    }
+    try {
+      check(json)
+      return true
+    } catch {
+      return false
+    }
+  }
+}
+
+/** The subscription the last "I subscribe to …" step opened. */
+function requireSubscription(world: ComponentTestWorld): PubSubSubscription {
+  assert.ok(
+    world.activeSubscription,
+    'no active subscription — call "I subscribe to Valkey channel …" or "… pattern …" first',
+  )
+  return world.activeSubscription
+}
+
+/**
+ * Wait for the next message on the active subscription that `predicate`
+ * accepts (any message without one), and keep it as `world.lastRedisMessage`.
+ * The subscription stays open for further steps; the After hook closes it.
+ */
+async function receive(world: ComponentTestWorld, predicate?: MessagePredicate): Promise<void> {
+  const sub = requireSubscription(world)
+  const timeout = serviceWaitTimeout(world.config ?? {})
+  const received: PubSubMessage = predicate
+    ? await sub.waitForMessage(predicate, timeout)
+    : await sub.waitForMessage(timeout)
+  world.lastRedisMessage = received.message
+}
+
+async function track(
+  world: ComponentTestWorld,
+  opening: Promise<PubSubSubscription>,
+): Promise<void> {
+  const sub = await opening
+  world.subscriptions.push(sub)
+  world.activeSubscription = sub
 }
 
 /**
@@ -54,27 +128,50 @@ Then(
     } catch (err) {
       throw new Error(`Valkey key "${key}" is not valid JSON: ${(err as Error).message}`)
     }
-    let expected: unknown
-    try {
-      expected = JSON.parse(expectedJSON)
-    } catch (err) {
-      throw new Error(`expected JSON is malformed: ${(err as Error).message}`)
-    }
-    assertPartialMatch(actual, expected, { nullMatchesAnything: true })
+    assertPartialMatch(actual, parseExpected(expectedJSON), { nullMatchesAnything: true })
   },
 )
 
 /**
- * Subscribe to the channel, then wait up to 30s for a message to arrive.
- * The message body is stashed on `world.lastRedisMessage` for subsequent
- * assertions. The subscription is closed after the step.
+ * The same match as the step above, retried until the key's value matches,
+ * for a value a background worker writes. Polls for `serviceWaitTimeout`
+ * (30s by default) and reports the last mismatch.
+ */
+async function eventuallyContains(world: ComponentTestWorld, key: string, expectedJSON: string) {
+  world.lastRedisValue = await requireRedis(world).waitForValue(
+    key,
+    parseExpected(expectedJSON) as object,
+    {
+      timeoutMs: serviceWaitTimeout(world.config ?? {}),
+    },
+  )
+}
+
+Then(
+  'the Valkey key {string} eventually contains JSON matching {string}',
+  async function (this: ComponentTestWorld, key: string, expectedJSON: string) {
+    await eventuallyContains(this, key, expectedJSON)
+  },
+)
+
+Then(
+  'the Valkey key {string} eventually contains JSON matching:',
+  async function (this: ComponentTestWorld, key: string, expectedJSON: string) {
+    await eventuallyContains(this, key, expectedJSON)
+  },
+)
+
+/**
+ * Subscribe to the channel, then wait for a message to arrive. The message
+ * body is stashed on `world.lastRedisMessage` for subsequent assertions.
+ * The subscription is closed after the step.
  */
 When(
   'I wait for a message on Valkey channel {string}',
   async function (this: ComponentTestWorld, channel: string) {
     const sub = await requireRedis(this).subscribe(channel)
     try {
-      const { message } = await sub.waitForMessage()
+      const { message } = await sub.waitForMessage(serviceWaitTimeout(this.config ?? {}))
       this.lastRedisMessage = message
     } finally {
       await sub.close()
@@ -85,26 +182,86 @@ When(
 /**
  * Start a pub/sub subscription that persists across steps. Use this when a
  * scenario needs to seed state after subscribing so it doesn't miss the
- * broadcast. Paired with the assertion step below.
+ * broadcast. Paired with the receive steps below.
  */
 When(
   'I subscribe to Valkey channel {string}',
   async function (this: ComponentTestWorld, channel: string) {
-    this.activeSubscription = await requireRedis(this).subscribe(channel)
+    await track(this, requireRedis(this).subscribe(channel))
+  },
+)
+
+/** As above, by glob pattern (PSUBSCRIBE), e.g. `events:user:*`. */
+When(
+  'I subscribe to Valkey pattern {string}',
+  async function (this: ComponentTestWorld, pattern: string) {
+    await track(this, requireRedis(this).psubscribe(pattern))
   },
 )
 
 Then(
-  'I receive a message on the subscribed Valkey channel',
+  'I receive a message on the subscribed Valkey channel/pattern',
   async function (this: ComponentTestWorld) {
-    assert.ok(this.activeSubscription, 'no active subscription — call "I subscribe to ..." first')
-    try {
-      const { message } = await this.activeSubscription.waitForMessage()
-      this.lastRedisMessage = message
-    } finally {
-      await this.activeSubscription.close()
-      this.activeSubscription = undefined
-    }
+    await receive(this)
+  },
+)
+
+/**
+ * Skip messages until one is JSON whose `type` field equals the given type,
+ * for a channel that carries several kinds of event.
+ */
+Then(
+  'I receive a message with type {string} on the subscribed Valkey channel/pattern',
+  async function (this: ComponentTestWorld, type: string) {
+    await receive(
+      this,
+      jsonMatches((json) => assert.equal((json as { type?: unknown })?.type, type)),
+    )
+  },
+)
+
+/** Skip messages until one is JSON that partially matches, as the JSON steps match. */
+Then(
+  'I receive a message on the subscribed Valkey channel/pattern matching JSON {string}',
+  async function (this: ComponentTestWorld, expectedJSON: string) {
+    const expected = parseExpected(expectedJSON)
+    await receive(
+      this,
+      jsonMatches((json) => assertPartialMatch(json, expected, { nullMatchesAnything: true })),
+    )
+  },
+)
+
+Then(
+  'I receive a message on the subscribed Valkey channel/pattern matching JSON:',
+  async function (this: ComponentTestWorld, expectedJSON: string) {
+    const expected = parseExpected(expectedJSON)
+    await receive(
+      this,
+      jsonMatches((json) => assertPartialMatch(json, expected, { nullMatchesAnything: true })),
+    )
+  },
+)
+
+/**
+ * Skip messages until one is JSON with every field in the table: a path
+ * (`user.id`, `items[0].sku`) and a value, read as JSON when it parses and
+ * as text otherwise.
+ */
+Then(
+  'I receive a message on the subscribed Valkey channel/pattern with fields:',
+  async function (this: ComponentTestWorld, table: DataTable) {
+    const fields = Object.entries(table.rowsHash()).map(
+      ([path, cell]) => [path, cellValue(cell)] as const,
+    )
+    await receive(
+      this,
+      jsonMatches((json) => {
+        for (const [path, expected] of fields) {
+          assertPartialMatch(valueAt(json, path), expected, { nullMatchesAnything: true })
+        }
+      }),
+    )
   },
 )
 
@@ -118,13 +275,34 @@ Then(
     } catch (err) {
       throw new Error(`last Valkey message is not valid JSON: ${(err as Error).message}`)
     }
-    let expected: unknown
-    try {
-      expected = JSON.parse(expectedJSON)
-    } catch (err) {
-      throw new Error(`expected JSON is malformed: ${(err as Error).message}`)
-    }
-    assertPartialMatch(actual, expected, { nullMatchesAnything: true })
+    assertPartialMatch(actual, parseExpected(expectedJSON), { nullMatchesAnything: true })
+  },
+)
+
+When(
+  'I publish {string} to Valkey channel {string}',
+  async function (this: ComponentTestWorld, message: string, channel: string) {
+    await requireRedis(this).publish(channel, message)
+  },
+)
+
+When(
+  'I publish to Valkey channel {string}:',
+  async function (this: ComponentTestWorld, channel: string, message: string) {
+    await requireRedis(this).publish(channel, message)
+  },
+)
+
+/**
+ * Publish every 500ms until a subscriber receives it, for a subscriber that
+ * may not be listening yet. It may be delivered more than once.
+ */
+When(
+  'I publish {string} to Valkey channel {string} until a subscriber hears it',
+  async function (this: ComponentTestWorld, message: string, channel: string) {
+    await requireRedis(this).publishUntilHeard(channel, message, {
+      timeoutMs: serviceWaitTimeout(this.config ?? {}),
+    })
   },
 )
 

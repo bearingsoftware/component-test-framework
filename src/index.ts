@@ -80,7 +80,12 @@ export {
 } from './clients/wiremock-client'
 export { DbClient } from './clients/db-client'
 export { RedisClient } from './clients/redis-client'
-export type { PubSubSubscription } from './clients/redis-client'
+export type {
+  PubSubSubscription,
+  PubSubMessage,
+  MessagePredicate,
+  ValueMatcher,
+} from './clients/redis-client'
 
 // Pages
 export { BasePage } from './pages/base.page'
