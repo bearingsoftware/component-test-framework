@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.10](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.9...v0.3.10) (2026-10-11)
+
+
+### Features
+
+* **COMPONENT-11:** parallel-safe mode, isolating WireMock, Postgres and Redis per worker ([55aeb45](https://github.com/bearingsoftware/component-test-framework/commit/55aeb45d45981c8009ff82acf985b679edf6f95a))
+* **COMPONENT-11:** parallel-safe mode, isolating WireMock, Postgres and Redis per worker ([ca18333](https://github.com/bearingsoftware/component-test-framework/commit/ca1833334fa33b1a5f33f8b40d775494e19f037b))
+
+
+### Bug Fixes
+
+* **COMPONENT-11:** address review of parallel-safe mode ([db0e734](https://github.com/bearingsoftware/component-test-framework/commit/db0e7343c630f17a5147574653023241de807ef1))
+
 ## [0.3.9](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.8...v0.3.9) (2026-10-11)
 
 
