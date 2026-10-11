@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.7](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.6...v0.3.7) (2026-10-11)
+
+
+### Features
+
+* **COMPONENT-9:** core entry point, adapters and lifecycle hooks ([6641b8b](https://github.com/bearingsoftware/component-test-framework/commit/6641b8b7b16d8448e695ef843b5c093e313cdf6a))
+* **COMPONENT-9:** core entry point, adapters and lifecycle hooks ([f052062](https://github.com/bearingsoftware/component-test-framework/commit/f052062c3aa24ac74fd80882e6f1f1c5e9e482a2))
+
+
+### Bug Fixes
+
+* **COMPONENT-9:** address review findings ([e793ad1](https://github.com/bearingsoftware/component-test-framework/commit/e793ad104b2c35f548b4baa624ffba27a1c6eb4e))
+
 ## [0.3.6](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.5...v0.3.6) (2026-10-10)
 
 
