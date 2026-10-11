@@ -80,6 +80,37 @@ export interface AuthOptions {
   loginBody?: (username: string, password: string) => unknown
 }
 
+/**
+ * What `registerHooks` keeps apart between Cucumber `--parallel` workers.
+ * Each part takes effect only in a parallel run: run serially, a suite with
+ * these set behaves exactly as without them.
+ */
+export interface WorkerIsolationOptions {
+  /**
+   * Share one WireMock between workers, each under its own path prefix
+   * (`/__worker-<n>`): the worker's stubs match only under its prefix, and
+   * the per-scenario reset removes only its own stubs and requests. The
+   * service under test, or the SPA server, must call WireMock at
+   * `workerWiremockUrl(url)`.
+   */
+  wiremock?: boolean
+  /**
+   * Give each worker its own database, `<name>_w<n>`, created before the
+   * first scenario as a copy of the configured database (or of `template`).
+   * The service under test must use `workerDatabaseUrl(url)`, and should
+   * await `prepareWorkerDatabase(url)` before it starts.
+   */
+  database?: boolean | { template?: string }
+  /**
+   * Give each worker its own Redis database index: the URL's index plus the
+   * worker number. The per-scenario flush then empties only the worker's
+   * own. The service under test must use `workerRedisUrl(url)`. Pub/sub
+   * channels are shared across databases, so workers must not rely on
+   * channel names alone being theirs.
+   */
+  redis?: boolean
+}
+
 /** Framework configuration — consumers provide their project-specific values. */
 export interface FrameworkConfig {
   /** Base URL of the API service under test. */
@@ -126,6 +157,12 @@ export interface FrameworkConfig {
   cleanup?: (world: ComponentTestWorld) => unknown | Promise<unknown>
   /** Tables to truncate between scenarios (with CASCADE). */
   cleanupTables?: string[]
+  /**
+   * Keep Cucumber `--parallel` workers apart: WireMock by path prefix,
+   * Postgres by database, Redis by database index. Opt-in, and only used in
+   * a parallel run. See {@link WorkerIsolationOptions}.
+   */
+  workerIsolation?: WorkerIsolationOptions
   /**
    * Default timeout in milliseconds for every step and hook, applied through
    * Cucumber's `setDefaultTimeout`. Cucumber's own default is 5s. Leave unset

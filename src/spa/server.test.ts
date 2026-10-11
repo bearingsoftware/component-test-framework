@@ -221,11 +221,40 @@ describe('SPA server (COMPONENT-10)', () => {
     })
   })
 
-  it('writes the runtime config the SPA reads', async () => {
-    await start({ runtimeEnv: { VITE_API_BASE_URL: '/api', VITE_TURNSTILE_SITE_KEY: '' } })
-    expect(fs.readFileSync(path.join(dist, '__env.js'), 'utf8')).toBe(
-      'window.__ENV = {\n  "VITE_API_BASE_URL": "/api",\n  "VITE_TURNSTILE_SITE_KEY": ""\n};\n',
-    )
+  it('serves the runtime config the SPA reads, without writing it into the build', async () => {
+    const { baseUrl } = await start({
+      runtimeEnv: { VITE_API_BASE_URL: '/api', VITE_TURNSTILE_SITE_KEY: '' },
+    })
+    expect(await get(baseUrl, '/__env.js')).toMatchObject({
+      status: 200,
+      type: 'application/javascript; charset=utf-8',
+      body: 'window.__ENV = {\n  "VITE_API_BASE_URL": "/api",\n  "VITE_TURNSTILE_SITE_KEY": ""\n};\n',
+    })
+    expect(fs.existsSync(path.join(dist, '__env.js'))).toBe(false)
+  })
+
+  it('puts the path in apiUrl in front of forwarded paths, and takes it off redirects', async () => {
+    const seen: string[] = []
+    const prefixed = http.createServer((req, res) => {
+      seen.push(req.url ?? '')
+      const self = `http://127.0.0.1:${(prefixed.address() as AddressInfo).port}`
+      if (req.url?.endsWith('/start'))
+        res.writeHead(302, { Location: `${self}/__worker-2/v1/next` })
+      else res.writeHead(200)
+      res.end()
+    })
+    await new Promise<void>((resolve) => prefixed.listen(0, '127.0.0.1', resolve))
+    const { baseUrl } = await start({
+      apiUrl: `http://127.0.0.1:${(prefixed.address() as AddressInfo).port}/__worker-2/`,
+    })
+    try {
+      await fetch(`${baseUrl}/api/v1/items?x=1`)
+      const redirect = await fetch(`${baseUrl}/api/v1/start`, { redirect: 'manual' })
+      expect(seen).toEqual(['/__worker-2/v1/items?x=1', '/__worker-2/v1/start'])
+      expect(redirect.headers.get('location')).toBe('/api/v1/next')
+    } finally {
+      await new Promise((resolve) => prefixed.close(resolve))
+    }
   })
 
   it('names the build command when there is no build', async () => {
@@ -395,7 +424,7 @@ describe('SPA server (COMPONENT-10)', () => {
       })
       expect(busy).toEqual({ port: busyPort, baseUrl: `http://localhost:${busyPort}` })
       await expect(hooks.beforeAll[0].call({})).rejects.toThrow(
-        `Port ${busyPort} is in use (CTF_TEST_PORT). Is another run still going? The SPA server uses one fixed port, so it can't run under Cucumber --parallel.`,
+        `Port ${busyPort} is in use (CTF_TEST_PORT). Is another run still going?`,
       )
     } finally {
       await new Promise((resolve) => blocker.close(resolve))
@@ -404,5 +433,23 @@ describe('SPA server (COMPONENT-10)', () => {
     expect((await get(`http://localhost:${busyPort}`, '/')).status).toBe(200)
     await hooks.afterAll[0].call({})
     await expect(get(`http://localhost:${busyPort}`, '/')).rejects.toThrow()
+  })
+
+  it('listens on the port plus the worker number under --parallel', () => {
+    Object.assign(process.env, {
+      CUCUMBER_PARALLEL: 'true',
+      CUCUMBER_WORKER_ID: '3',
+      CUCUMBER_TOTAL_WORKERS: '4',
+    })
+    try {
+      expect(registerSpaServer({ distDir: dist, apiUrl, defaultPort: 4100 })).toEqual({
+        port: 4103,
+        baseUrl: 'http://localhost:4103',
+      })
+    } finally {
+      delete process.env.CUCUMBER_PARALLEL
+      delete process.env.CUCUMBER_WORKER_ID
+      delete process.env.CUCUMBER_TOTAL_WORKERS
+    }
   })
 })

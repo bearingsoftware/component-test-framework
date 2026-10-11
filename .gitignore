@@ -4,3 +4,8 @@ coverage
 generated
 .env
 package.json.orig
+
+# The parallel reference suite's output
+tests/parallel/coverage/
+tests/parallel/.nyc_output/
+tests/parallel/reports/

@@ -9,6 +9,7 @@ export type {
   AuthOptions,
   LifecycleHooks,
   PageClass,
+  WorkerIsolationOptions,
 } from './types'
 
 // Support
@@ -31,6 +32,18 @@ export {
   serviceWaitTimeout,
 } from './support/eventually'
 export type { EventuallyOptions, HoldsForOptions } from './support/eventually'
+export {
+  currentWorker,
+  workerPort,
+  workerFile,
+  wiremockNamespace,
+  workerWiremockUrl,
+  workerDatabaseUrl,
+  workerRedisUrl,
+} from './support/worker'
+export type { WorkerInfo } from './support/worker'
+export { prepareWorkerDatabase } from './support/worker-database'
+export type { WorkerDatabaseOptions } from './support/worker-database'
 export { countRows, assertSafeTableName, requireDb, queryOnce } from './support/db'
 export { sendOperation, fillPath, EMPTY_REQUEST } from './support/requests'
 export type { SendOperationOptions } from './support/requests'
@@ -54,7 +67,8 @@ export type {
 // Clients
 export { WireMockClient } from './clients/wiremock-client'
 export { requestPattern, describeRequests } from './clients/wiremock-client'
-export type { RequestFilter } from './clients/wiremock-client'
+export type { RequestFilter, WireMockClientOptions } from './clients/wiremock-client'
+export { namespaceStub, namespaceUrlMatcher, namespaceId } from './clients/wiremock-client'
 export { DbClient } from './clients/db-client'
 export { RedisClient } from './clients/redis-client'
 export type { PubSubSubscription } from './clients/redis-client'

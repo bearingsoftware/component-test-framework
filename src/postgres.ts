@@ -4,3 +4,5 @@
 export { DbClient } from './clients/db-client'
 export { countRows, assertSafeTableName, requireDb, queryOnce } from './support/db'
 export { registerDbSteps, registerServiceSteps } from './steps/register'
+export { prepareWorkerDatabase } from './support/worker-database'
+export type { WorkerDatabaseOptions } from './support/worker-database'

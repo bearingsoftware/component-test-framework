@@ -4,6 +4,7 @@ import * as https from 'https'
 import * as path from 'path'
 import { AddressInfo } from 'net'
 import { BeforeAll, AfterAll } from '@cucumber/cucumber'
+import { workerPort } from '../support/worker'
 
 /** Options for {@link startSpaServer}. */
 export interface SpaServerOptions {
@@ -13,7 +14,8 @@ export interface SpaServerOptions {
   port?: number
   /**
    * Where API requests go, usually WireMock. Requests whose path starts with
-   * one of `proxyPrefixes` are forwarded here.
+   * one of `proxyPrefixes` are forwarded here. A path in the URL is put in
+   * front of every forwarded path, as `workerWiremockUrl` uses.
    */
   apiUrl: string
   /** Path prefixes forwarded to `apiUrl`. Default `['/api']`. */
@@ -25,8 +27,9 @@ export interface SpaServerOptions {
    */
   stripPrefix?: boolean
   /**
-   * Runtime configuration the SPA reads from `window.__ENV`, written to
-   * `{distDir}/__env.js` before the server starts. Omit for an SPA that has
+   * Runtime configuration the SPA reads from `window.__ENV`, served as
+   * `/__env.js`. It's served from memory rather than written into the build,
+   * so parallel workers can each serve their own. Omit for an SPA that has
    * its settings built in.
    */
   runtimeEnv?: Record<string, string>
@@ -76,9 +79,8 @@ function matchPrefix(pathname: string, prefixes: string[]): string | undefined {
  * other path so client-side routes load, and API paths forwarded to
  * WireMock (or any `apiUrl`).
  *
- * Before listening it checks the build exists and writes `__env.js` when
- * `runtimeEnv` is given; once listening it fetches `/` to prove the SPA is
- * served.
+ * Before listening it checks the build exists; once listening it fetches
+ * `/` to prove the SPA is served. `runtimeEnv` is served as `/__env.js`.
  */
 export async function startSpaServer(options: SpaServerOptions): Promise<SpaServer> {
   const root = path.resolve(options.distDir)
@@ -94,11 +96,10 @@ export async function startSpaServer(options: SpaServerOptions): Promise<SpaServ
         `runtimeEnvGlobal must be a JavaScript identifier, not ${JSON.stringify(global)}`,
       )
     }
-    fs.writeFileSync(
-      path.join(root, '__env.js'),
-      `window.${global} = ${JSON.stringify(options.runtimeEnv, null, 2)};\n`,
-    )
   }
+  const envScript = options.runtimeEnv
+    ? `window.${options.runtimeEnvGlobal ?? '__ENV'} = ${JSON.stringify(options.runtimeEnv, null, 2)};\n`
+    : undefined
 
   // '/auth/' and '/auth' mean the same prefix.
   const prefixes = (options.proxyPrefixes ?? ['/api']).map((p) => p.replace(/\/+$/, '') || '/')
@@ -116,6 +117,11 @@ export async function startSpaServer(options: SpaServerOptions): Promise<SpaServ
       const rest = url.slice(prefix.length)
       const forwardPath = stripPrefix ? (rest.startsWith('/') ? rest : `/${rest}`) : url
       forward(req, res, { api, path: forwardPath, prefix, stripPrefix, live })
+      return
+    }
+    if (envScript !== undefined && pathname === '/__env.js') {
+      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' })
+      res.end(envScript)
       return
     }
     let decoded: string
@@ -212,7 +218,15 @@ function rewriteLocation(location: string | undefined, f: Forwarding): string | 
     return location
   }
   if (target.origin !== f.api.origin) return location
-  return `${f.stripPrefix ? f.prefix : ''}${target.pathname}${target.search}${target.hash}`
+  const base = apiBasePath(f.api)
+  if (base && target.pathname !== base && !target.pathname.startsWith(`${base}/`)) return location
+  const rest = target.pathname.slice(base.length) || '/'
+  return `${f.stripPrefix ? f.prefix : ''}${rest}${target.search}${target.hash}`
+}
+
+/** The path in `apiUrl`, without a trailing slash: '' for `http://host:8443`. */
+function apiBasePath(api: URL): string {
+  return api.pathname.replace(/\/+$/, '')
 }
 
 /** Forward a request to the API, streaming the body both ways. */
@@ -224,7 +238,7 @@ function forward(req: http.IncomingMessage, res: http.ServerResponse, f: Forward
       hostname: f.api.hostname,
       port: f.api.port || (f.api.protocol === 'https:' ? 443 : 80),
       method: req.method,
-      path: f.path,
+      path: `${apiBasePath(f.api)}${f.path}`,
       headers: { ...endToEnd(req.headers), host: f.api.host },
     },
     (upstreamRes) => {
@@ -284,15 +298,19 @@ function serveFile(
 export interface RegisterSpaServerOptions extends Omit<SpaServerOptions, 'port'> {
   /** Environment variable holding the port. Default `WEB_PORT`. */
   portEnvVar?: string
-  /** Port when the variable isn't set. Default 3100. */
+  /**
+   * Port when the variable isn't set. Default 3100. Under Cucumber
+   * `--parallel`, worker n listens on the port plus n.
+   */
   defaultPort?: number
 }
 
 /**
  * Start the SPA server before the suite and stop it after. The port, and so
  * the base URL, is known at once, so it can be given to `registerHooks` as
- * `webBaseUrl`. It uses one fixed port, so it suits serial runs, not
- * Cucumber `--parallel`.
+ * `webBaseUrl`. Under Cucumber `--parallel`, each worker runs its own
+ * server, on the port plus the worker's number (see `workerPort`); give it
+ * `apiUrl: workerWiremockUrl(…)` to keep each worker's API traffic apart.
  *
  * @example
  * const spa = registerSpaServer({
@@ -308,14 +326,15 @@ export function registerSpaServer(options: RegisterSpaServerOptions): {
 } {
   const portEnvVar = options.portEnvVar ?? 'WEB_PORT'
   const fromEnv = process.env[portEnvVar]
-  const port = Number(fromEnv ? fromEnv : (options.defaultPort ?? 3100))
+  const basePort = Number(fromEnv ? fromEnv : (options.defaultPort ?? 3100))
   // The base URL is needed before the server starts, so the port can't be
   // picked by the system.
-  if (!Number.isInteger(port) || port <= 0) {
+  if (!Number.isInteger(basePort) || basePort <= 0) {
     throw new Error(
       `registerSpaServer needs a fixed port; ${portEnvVar}=${String(fromEnv)} isn't one.`,
     )
   }
+  const port = workerPort(basePort)
   let server: SpaServer | null = null
 
   BeforeAll({ timeout: 30_000 }, async function () {
@@ -324,8 +343,8 @@ export function registerSpaServer(options: RegisterSpaServerOptions): {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
         throw new Error(
-          `Port ${port} is in use (${portEnvVar}). Is another run still going? The SPA server ` +
-            `uses one fixed port, so it can't run under Cucumber --parallel.`,
+          `Port ${port} is in use (${portEnvVar}${port === basePort ? '' : ` plus the worker number`}). ` +
+            `Is another run still going?`,
         )
       }
       throw err

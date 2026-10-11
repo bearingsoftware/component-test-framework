@@ -1,3 +1,4 @@
+import { createHash } from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
 
@@ -17,6 +18,23 @@ export interface RequestFilter {
   bodyJsonPath?: string
 }
 
+/** Options for {@link WireMockClient}. */
+export interface WireMockClientOptions {
+  /**
+   * A path prefix, such as `/__worker-2`, that keeps this client's stubs and
+   * requests apart from other clients' on the same WireMock. Every stub it
+   * registers matches only under the prefix, request counts and searches
+   * look only under it, and resets remove only its own stubs and requests.
+   * The service under test must call WireMock under the same prefix (see
+   * `workerWiremockUrl`). `registerHooks` sets it with
+   * `workerIsolation.wiremock` under Cucumber `--parallel`.
+   */
+  namespace?: string
+}
+
+/** The metadata key that marks which namespace registered a stub. */
+const NAMESPACE_KEY = 'componentTestNamespace'
+
 /**
  * Client for WireMock's Admin API (/__admin/).
  * Manages stub mappings, resets state, and verifies request counts.
@@ -33,7 +51,13 @@ export class WireMockClient {
   constructor(
     readonly baseUrl: string,
     private readonly requestTimeout = 10_000,
+    private readonly options: WireMockClientOptions = {},
   ) {}
+
+  /** The namespace prefix, or undefined when this client has WireMock to itself. */
+  get namespace(): string | undefined {
+    return this.options.namespace
+  }
 
   /** `fetch` with this client's request timeout. */
   private fetch(url: string, init: RequestInit = {}): Promise<Response> {
@@ -56,15 +80,37 @@ export class WireMockClient {
     }
   }
 
-  /** Reset all stubs and request logs. */
+  /**
+   * Reset all stubs and request logs. With a namespace, only this client's:
+   * its stubs (and so their scenarios) and the requests under its prefix.
+   */
   async resetAll(): Promise<void> {
-    const res = await this.fetch(this.url('/__admin/reset'), { method: 'POST' })
-    await this.expectOk(res, 'resetAll')
+    const ns = this.options.namespace
+    if (!ns) {
+      const res = await this.fetch(this.url('/__admin/reset'), { method: 'POST' })
+      return this.expectOk(res, 'resetAll')
+    }
+    const res = await this.fetch(this.url('/__admin/mappings/remove-by-metadata'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ matchesJsonPath: { expression: `$.${NAMESPACE_KEY}`, equalTo: ns } }),
+    })
+    await this.expectOk(res, 'resetAll (stubs)')
+    await this.resetRequests()
   }
 
-  /** Reset only the request journal (keep stubs). */
+  /** Reset only the request journal (keep stubs). With a namespace, only requests under it. */
   async resetRequests(): Promise<void> {
-    const res = await this.fetch(this.url('/__admin/requests'), { method: 'DELETE' })
+    const ns = this.options.namespace
+    if (!ns) {
+      const res = await this.fetch(this.url('/__admin/requests'), { method: 'DELETE' })
+      return this.expectOk(res, 'resetRequests')
+    }
+    const res = await this.fetch(this.url('/__admin/requests/remove'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ urlPathPattern: `${escapeRegex(ns)}(/.*)?` }),
+    })
     await this.expectOk(res, 'resetRequests')
   }
 
@@ -113,11 +159,16 @@ export class WireMockClient {
         // When two stubs have the same priority, WireMock serves the one added
         // most recently. One POST at a time, that's the last one; an import
         // gives precedence to the first. Reversing keeps "last one wins".
-        mappings: [...mappings].reverse(),
+        mappings: [...mappings].reverse().map((m) => this.scoped(m)),
         importOptions: { duplicatePolicy: 'OVERWRITE', deleteAllNotInImport: false },
       }),
     })
     await this.expectOk(res, 'importStubs')
+  }
+
+  /** A mapping as this client registers it: unchanged, or moved under its namespace. */
+  private scoped(mapping: Record<string, unknown>): Record<string, unknown> {
+    return this.options.namespace ? namespaceStub(mapping, this.options.namespace) : mapping
   }
 
   /** Register a single stub mapping. */
@@ -125,7 +176,7 @@ export class WireMockClient {
     const res = await this.fetch(this.url('/__admin/mappings'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(mapping),
+      body: JSON.stringify(this.scoped(mapping)),
     })
     if (!res.ok) {
       const body = await res.text()
@@ -184,7 +235,9 @@ export class WireMockClient {
 
   /** Remove a stub mapping by its UUID. */
   async removeStub(id: string): Promise<void> {
-    const res = await this.fetch(this.url(`/__admin/mappings/${id}`), { method: 'DELETE' })
+    const ns = this.options.namespace
+    const scopedId = ns ? namespaceId(id, ns) : id
+    const res = await this.fetch(this.url(`/__admin/mappings/${scopedId}`), { method: 'DELETE' })
     // Removing a stub that's already gone is not an error.
     if (res.status === 404) return
     await this.expectOk(res, 'removeStub')
@@ -195,7 +248,7 @@ export class WireMockClient {
     const res = await this.fetch(this.url('/__admin/requests/count'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestPattern(urlPathPattern, filter)),
+      body: JSON.stringify(this.pattern(urlPathPattern, filter)),
     })
     if (!res.ok) {
       throw new Error(`WireMock request count failed: ${res.status}`)
@@ -223,13 +276,22 @@ export class WireMockClient {
     const res = await this.fetch(this.url('/__admin/requests/find'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestPattern(urlPathPattern, filter)),
+      body: JSON.stringify(this.pattern(urlPathPattern, filter)),
     })
     if (!res.ok) {
       throw new Error(`WireMock find requests failed: ${res.status}`)
     }
     const data = (await res.json()) as { requests: unknown[] }
-    return data.requests
+    const ns = this.options.namespace
+    // Requests are reported as the service sent them, without the prefix.
+    return ns ? data.requests.map((r) => withoutNamespace(r, ns)) : data.requests
+  }
+
+  /** A request pattern for a path, under the namespace if there is one. */
+  private pattern(urlPathPattern: string, filter: RequestFilter): Record<string, unknown> {
+    const pattern = requestPattern(urlPathPattern, filter)
+    const ns = this.options.namespace
+    return ns ? { ...pattern, ...namespaceUrlMatcher(pattern, ns) } : pattern
   }
 }
 
@@ -248,4 +310,86 @@ export function describeRequests(path: string, filter: RequestFilter = {}): stri
   const method = filter.method ? `${filter.method.toUpperCase()} ` : ''
   const body = filter.bodyJsonPath ? ` matching ${filter.bodyJsonPath}` : ''
   return `${method}${path}${body}`
+}
+
+const URL_KEYS = ['url', 'urlPath', 'urlPathTemplate', 'urlPattern', 'urlPathPattern'] as const
+
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * The URL matcher of a request pattern, moved under `ns`. Exact paths get
+ * the prefix in front; patterns get it in front of the regex (after a
+ * leading `^`); a pattern with no URL matcher, which matched any URL, now
+ * matches any URL under the prefix.
+ */
+export function namespaceUrlMatcher(
+  request: Record<string, unknown>,
+  ns: string,
+): Record<string, unknown> {
+  const key = URL_KEYS.find((k) => typeof request[k] === 'string')
+  if (!key) return { urlPathPattern: `${escapeRegex(ns)}(/.*)?` }
+  const value = request[key] as string
+  if (key === 'urlPattern' || key === 'urlPathPattern') {
+    // The pattern goes in a group, so a top-level `|` can't reach outside
+    // the prefix, and the prefix must end at a `/` or the end of the path,
+    // so worker 1's `.*/items` can't match worker 10's `/__worker-10/items`.
+    const rest = value.startsWith('^') ? value.slice(1) : value
+    return { [key]: `${escapeRegex(ns)}(?=/|$|\\?)(?:${rest})` }
+  }
+  return { [key]: `${ns}${value}` }
+}
+
+/**
+ * A stable id for a stub id under a namespace, so the same stub file loaded
+ * by two workers is two stubs, not one overwriting the other.
+ */
+export function namespaceId(id: string, ns: string): string {
+  const hex = createHash('sha256').update(`${ns}\0${id}`).digest('hex')
+  // Laid out as a UUID, which WireMock requires of stub ids.
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+}
+
+/**
+ * A stub mapping moved under a namespace: its URL matcher, its id and its
+ * scenario name, with metadata marking it as the namespace's own, so a
+ * reset can remove exactly the namespace's stubs.
+ */
+export function namespaceStub(
+  mapping: Record<string, unknown>,
+  ns: string,
+): Record<string, unknown> {
+  const request = { ...((mapping.request as Record<string, unknown> | undefined) ?? {}) }
+  for (const key of URL_KEYS) delete request[key]
+  const scoped: Record<string, unknown> = {
+    ...mapping,
+    request: {
+      ...request,
+      ...namespaceUrlMatcher((mapping.request as Record<string, unknown> | undefined) ?? {}, ns),
+    },
+    metadata: {
+      ...((mapping.metadata as Record<string, unknown> | undefined) ?? {}),
+      [NAMESPACE_KEY]: ns,
+    },
+  }
+  for (const key of ['id', 'uuid'] as const) {
+    if (typeof mapping[key] === 'string') scoped[key] = namespaceId(mapping[key] as string, ns)
+  }
+  if (typeof mapping.scenarioName === 'string')
+    scoped.scenarioName = `${ns}:${mapping.scenarioName}`
+  return scoped
+}
+
+/** A logged request with the namespace taken off its URL. */
+function withoutNamespace(logged: unknown, ns: string): unknown {
+  const entry = logged as { request?: Record<string, unknown> } & Record<string, unknown>
+  const request = (entry.request ?? entry) as Record<string, unknown>
+  const strip = (value: unknown) =>
+    typeof value === 'string'
+      ? value.replace(new RegExp(`^((?:[a-z]+://[^/]+)?)${escapeRegex(ns)}(?=/|$|\\?)`), '$1') ||
+        '/'
+      : value
+  const fixed = { ...request, url: strip(request.url), absoluteUrl: strip(request.absoluteUrl) }
+  return entry.request ? { ...entry, request: fixed } : fixed
 }

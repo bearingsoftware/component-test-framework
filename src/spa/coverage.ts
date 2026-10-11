@@ -2,12 +2,18 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { AfterAll } from '@cucumber/cucumber'
 import type { Page } from '@playwright/test'
-import type { CoverageMapData } from 'istanbul-lib-coverage'
+import type { CoverageMap, CoverageMapData } from 'istanbul-lib-coverage'
+import { isMainThread } from 'worker_threads'
 import { requireOptional } from './optional'
+import { currentWorker } from '../support/worker'
 
 /** Options for {@link createCoverageCollector}. */
 export interface CoverageCollectorOptions {
-  /** Where the reports go, e.g. `<suite>/coverage`. Raw data goes to `{outDir}/../.nyc_output/out.json`. */
+  /**
+   * Where the reports go, e.g. `<suite>/coverage`. Raw data goes to
+   * `{outDir}/../.nyc_output/out.json`. Under `--parallel`, each worker also
+   * saves its own coverage there, and the reports merge every worker's.
+   */
   outDir: string
   /** istanbul reporters. Default lcovonly, html, json-summary and text-summary. */
   reporters?: string[]
@@ -108,16 +114,16 @@ export function createCoverageCollector(options: CoverageCollectorOptions): Cove
     counts.collected++
   }
 
-  function write(): void {
-    if (counts.collected === 0) {
-      if (options.onNothingCollected === 'throw') {
-        throw new Error(
-          `[coverage] No coverage was collected from any page (${counts.missed} missed). ` +
-            'Refusing to report a silent 0%: is the SPA built with coverage instrumentation?',
-        )
-      }
-      return
+  function nothingCollected(missed: number): void {
+    if (options.onNothingCollected === 'throw') {
+      throw new Error(
+        `[coverage] No coverage was collected from any page (${missed} missed). ` +
+          'Refusing to report a silent 0%: is the SPA built with coverage instrumentation?',
+      )
     }
+  }
+
+  function report(merged: CoverageMap): void {
     const { createContext } = requireOptional<typeof import('istanbul-lib-report')>(
       'istanbul-lib-report',
       'The coverage report',
@@ -129,17 +135,101 @@ export function createCoverageCollector(options: CoverageCollectorOptions): Cove
 
     fs.mkdirSync(options.outDir, { recursive: true })
     // .nyc_output for tooling that expects it; the reports are what gates read.
-    const nycOutput = path.join(options.outDir, '..', '.nyc_output')
-    fs.mkdirSync(nycOutput, { recursive: true })
-    fs.writeFileSync(path.join(nycOutput, 'out.json'), JSON.stringify(map.toJSON()))
+    fs.writeFileSync(path.join(nycOutput, 'out.json'), JSON.stringify(merged.toJSON()))
 
-    const context = createContext({ dir: options.outDir, coverageMap: map })
+    const context = createContext({ dir: options.outDir, coverageMap: merged })
     for (const reporter of options.reporters ?? DEFAULT_REPORTERS) {
       create(reporter as Parameters<typeof create>[0]).execute(context)
     }
   }
 
+  const nycOutput = path.join(options.outDir, '..', '.nyc_output')
+
+  function write(): void {
+    const worker = currentWorker()
+    if (!worker.parallel) {
+      if (counts.collected === 0) return nothingCollected(counts.missed)
+      fs.mkdirSync(nycOutput, { recursive: true })
+      return report(map)
+    }
+
+    // Under --parallel each worker has only its own scenarios' coverage. It
+    // saves that to a file of its own, then, holding a lock, merges every
+    // worker's file from this run and rewrites the reports. Whichever
+    // worker finishes last writes the report with everyone's coverage. The
+    // workers' files go in a folder of their own: nyc reads every .json
+    // directly in .nyc_output as raw coverage, which these aren't.
+    const workers = path.join(nycOutput, '.workers')
+    fs.mkdirSync(workers, { recursive: true })
+    const run = runKey()
+    const mine: WorkerCoverage = { counts, coverage: map.toJSON() }
+    fs.writeFileSync(path.join(workers, `worker-${run}-${worker.id}.json`), JSON.stringify(mine))
+    withLock(path.join(workers, '.lock'), () => {
+      const merged = createCoverageMap({})
+      const totals = { collected: 0, missed: 0 }
+      let reported = 0
+      for (const file of fs.readdirSync(workers)) {
+        const match = /^worker-(\d+)-\d+\.json$/.exec(file)
+        if (!match) continue
+        if (match[1] !== run) {
+          // Left by an earlier run.
+          fs.rmSync(path.join(workers, file), { force: true })
+          continue
+        }
+        const saved = JSON.parse(
+          fs.readFileSync(path.join(workers, file), 'utf-8'),
+        ) as WorkerCoverage
+        merged.merge(saved.coverage)
+        totals.collected += saved.counts.collected
+        totals.missed += saved.counts.missed
+        reported++
+      }
+      if (totals.collected > 0) report(merged)
+      // Only once every worker has reported can the run have collected nothing.
+      else if (reported >= worker.total) nothingCollected(totals.missed)
+    })
+  }
+
   return { collect, write, counts }
+}
+
+/** What each worker saves under --parallel. */
+interface WorkerCoverage {
+  counts: { collected: number; missed: number }
+  coverage: CoverageMapData
+}
+
+/**
+ * Identifies the run, so files a previous run left behind are told apart:
+ * the coordinator's pid. Cucumber 13's workers are threads of the
+ * coordinator; earlier versions' are its child processes.
+ */
+function runKey(): string {
+  return String(isMainThread ? process.ppid : process.pid)
+}
+
+/** Run `fn` holding a lock directory, so only one worker writes the reports at a time. */
+function withLock(lock: string, fn: () => void): void {
+  const deadline = Date.now() + 30_000
+  const pause = new Int32Array(new SharedArrayBuffer(4))
+  for (;;) {
+    try {
+      fs.mkdirSync(lock)
+      break
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+      // A lock older than the deadline was left by a worker that died holding it.
+      const age = Date.now() - (fs.statSync(lock, { throwIfNoEntry: false })?.mtimeMs ?? Date.now())
+      if (age > 30_000) fs.rmSync(lock, { recursive: true, force: true })
+      else if (Date.now() > deadline) throw new Error(`[coverage] Timed out waiting for ${lock}`)
+      else Atomics.wait(pause, 0, 0, 50)
+    }
+  }
+  try {
+    fn()
+  } finally {
+    fs.rmSync(lock, { recursive: true, force: true })
+  }
 }
 
 /**
