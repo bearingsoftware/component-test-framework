@@ -652,20 +652,20 @@ registerWaitingSteps(options)
 |---|---|---|
 | `distDir` | | The build; must contain `index.html` |
 | `apiUrl` | | Where API paths go, usually WireMock |
-| `proxyPrefixes` | `['/api']` | Path prefixes to forward; `/api` matches `/api` and `/api/…`, not `/apiary` |
+| `proxyPrefixes` | `['/api']` | Path prefixes to forward; `/api` matches `/api` and `/api/…`, not `/apiary` (a trailing slash makes no difference) |
 | `stripPrefix` | `true` | Remove the prefix before forwarding (`/api/v1/x` → `/v1/x`); `false` keeps the full path |
 | `runtimeEnv` | | Written to `{distDir}/__env.js` as `window.__ENV = {…}` before the server starts |
 | `mimeTypes` | | Extra content types, e.g. `.webmanifest` |
 | `buildHint` | | Named in the error when the build is missing |
 | `portEnvVar`, `defaultPort` | `WEB_PORT`, `3100` | Where the port comes from (`registerSpaServer` only) |
 
-Before starting it checks the build exists; once listening it fetches `/` to prove the app is served. Paths outside the build are refused.
+Before starting it checks the build exists; once listening it fetches `/` to prove the app is served. Paths outside the build are refused. If the API drops a connection mid-response, the browser's is dropped too, rather than left waiting, and stopping the server closes any proxied streams still open. `registerSpaServer` needs a fixed port, since the base URL is worked out before the server starts.
 
 **Coverage** (`registerCoverage`, or `createCoverageCollector`) reads `window.__coverage__` from SPAs built with istanbul instrumentation, such as vite-plugin-istanbul. It waits for the document to load, then for the instrumented bundle to run (`loadTimeoutMs`, `evalTimeoutMs`, 6s each), so a page reloaded just before the scenario ended still counts. After the run it writes `coverage/lcov.info`, `coverage-summary.json`, the HTML report and `.nyc_output/out.json`.
 - `onMissingSample: 'throw' | 'warn'`: a page with no coverage fails the scenario (default) or is logged and counted.
 - `onNothingCollected: 'skip' | 'throw'`: a run with no coverage at all writes nothing (default) or fails, so a broken build can't report a silent 0%.
 
-It needs `istanbul-lib-coverage`, `istanbul-lib-report` and `istanbul-reports`.
+It needs `istanbul-lib-coverage`, `istanbul-lib-report` and `istanbul-reports`. `collect` can wait up to `loadTimeoutMs + evalTimeoutMs` (12s by default) inside the framework's `@ui` After hook, so give the suite a step timeout above that, such as `setDefaultTimeout(30_000)`; under Cucumber's 5s default a missing sample shows as a timeout instead of the diagnostic message.
 
 **Browser helpers**
 - `saveFailureArtifacts(dir)`: an `onScenarioFailed` hook saving a full-page screenshot and the HTML, named after the scenario.

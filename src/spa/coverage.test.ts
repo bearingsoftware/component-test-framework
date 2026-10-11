@@ -47,7 +47,11 @@ describe('coverage collector (COMPONENT-10)', () => {
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }))
 
   it('merges coverage across pages and writes the reports gates read', async () => {
-    const collector = createCoverageCollector({ outDir })
+    // Without text-summary, which prints to stdout.
+    const collector = createCoverageCollector({
+      outDir,
+      reporters: ['lcovonly', 'html', 'json-summary'],
+    })
     await collector.collect(fakePage({ coverage: fileCoverage(1) }))
     await collector.collect(fakePage({ coverage: fileCoverage(2) }))
     collector.write()

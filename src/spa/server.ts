@@ -59,6 +59,11 @@ const MIME_TYPES: Record<string, string> = {
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
   '.map': 'application/json; charset=utf-8',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.txt': 'text/plain; charset=utf-8',
+  '.webmanifest': 'application/manifest+json',
 }
 
 /** The prefix a request path falls under, if any: `/api` matches `/api` and `/api/…`, not `/apiary`. */
@@ -90,7 +95,8 @@ export async function startSpaServer(options: SpaServerOptions): Promise<SpaServ
     )
   }
 
-  const prefixes = options.proxyPrefixes ?? ['/api']
+  // '/auth/' and '/auth' mean the same prefix.
+  const prefixes = (options.proxyPrefixes ?? ['/api']).map((p) => p.replace(/\/+$/, '') || '/')
   const stripPrefix = options.stripPrefix ?? true
   const api = new URL(options.apiUrl)
   const mimeTypes = { ...MIME_TYPES, ...options.mimeTypes }
@@ -100,10 +106,20 @@ export async function startSpaServer(options: SpaServerOptions): Promise<SpaServ
     const pathname = url.split('?')[0]
     const prefix = matchPrefix(pathname, prefixes)
     if (prefix) {
-      forward(req, res, api, stripPrefix ? url.slice(prefix.length) || '/' : url)
+      // What follows the prefix, made a path again: '/api?x=1' forwards as '/?x=1'.
+      const rest = url.slice(prefix.length)
+      forward(req, res, api, stripPrefix ? (rest.startsWith('/') ? rest : `/${rest}`) : url)
       return
     }
-    serveFile(res, root, pathname === '/' ? '/index.html' : pathname, indexHtml, mimeTypes)
+    let decoded: string
+    try {
+      decoded = decodeURIComponent(pathname)
+    } catch {
+      res.writeHead(400)
+      res.end('bad request')
+      return
+    }
+    serveFile(res, root, decoded === '/' ? '/index.html' : decoded, indexHtml, mimeTypes)
   })
 
   await new Promise<void>((resolve, reject) => {
@@ -112,7 +128,12 @@ export async function startSpaServer(options: SpaServerOptions): Promise<SpaServ
   })
   const port = (server.address() as AddressInfo).port
   const baseUrl = `http://localhost:${port}`
-  const close = () => new Promise<void>((resolve) => server.close(() => resolve()))
+  const close = () =>
+    new Promise<void>((resolve) => {
+      server.close(() => resolve())
+      // An open proxied stream (SSE, a long poll) would otherwise keep close waiting.
+      server.closeAllConnections()
+    })
 
   try {
     const res = await fetch(`${baseUrl}/`)
@@ -144,10 +165,19 @@ function forward(
     (upstreamRes) => {
       res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers)
       upstreamRes.pipe(res)
+      // The API dropping the connection mid-response (as WireMock's fault
+      // stubs do) drops the browser's too, rather than leaving it waiting.
+      upstreamRes.on('close', () => {
+        if (!upstreamRes.complete) res.destroy()
+      })
     },
   )
   upstream.on('error', (err) => {
-    if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain' })
+    if (res.headersSent) {
+      res.destroy()
+      return
+    }
+    res.writeHead(502, { 'Content-Type': 'text/plain' })
     res.end(`proxy error: ${err.message}`)
   })
   req.pipe(upstream)
@@ -171,7 +201,9 @@ function serveFile(
   const file = fs.existsSync(resolved) && fs.statSync(resolved).isFile() ? resolved : indexHtml
   const type = mimeTypes[path.extname(file)] ?? 'application/octet-stream'
   res.writeHead(200, { 'Content-Type': type })
-  fs.createReadStream(file).pipe(res)
+  fs.createReadStream(file)
+    .on('error', () => res.destroy())
+    .pipe(res)
 }
 
 /** Options for {@link registerSpaServer}: {@link SpaServerOptions} with the port taken from the environment. */
@@ -200,7 +232,15 @@ export function registerSpaServer(options: RegisterSpaServerOptions): {
   baseUrl: string
 } {
   const portEnvVar = options.portEnvVar ?? 'WEB_PORT'
-  const port = Number(process.env[portEnvVar] ?? options.defaultPort ?? 3100)
+  const fromEnv = process.env[portEnvVar]
+  const port = Number(fromEnv ? fromEnv : (options.defaultPort ?? 3100))
+  // The base URL is needed before the server starts, so the port can't be
+  // picked by the system.
+  if (!Number.isInteger(port) || port <= 0) {
+    throw new Error(
+      `registerSpaServer needs a fixed port; ${portEnvVar}=${String(fromEnv)} isn't one.`,
+    )
+  }
   let server: SpaServer | null = null
 
   BeforeAll({ timeout: 30_000 }, async function () {

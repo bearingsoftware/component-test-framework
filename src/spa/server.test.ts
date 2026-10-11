@@ -4,7 +4,7 @@ import * as http from 'http'
 import * as os from 'os'
 import * as path from 'path'
 import type { AddressInfo } from 'net'
-import { startSpaServer, type SpaServer, type SpaServerOptions } from './server'
+import { registerSpaServer, startSpaServer, type SpaServer, type SpaServerOptions } from './server'
 
 interface Received {
   method: string
@@ -12,19 +12,30 @@ interface Received {
   body: string
 }
 
+interface Got {
+  status: number
+  body: string
+  type?: string
+  /** False when the connection was cut before the response ended. */
+  complete: boolean
+}
+
 /** A GET with the path sent exactly as given, so /../x reaches the server unnormalised. */
-function get(
-  baseUrl: string,
-  requestPath: string,
-): Promise<{ status: number; body: string; type?: string }> {
+function get(baseUrl: string, requestPath: string): Promise<Got> {
   const { hostname, port } = new URL(baseUrl)
   return new Promise((resolve, reject) => {
     http
       .request({ hostname, port, path: requestPath, method: 'GET' }, (res) => {
         let body = ''
         res.on('data', (chunk) => (body += chunk))
-        res.on('end', () =>
-          resolve({ status: res.statusCode ?? 0, body, type: res.headers['content-type'] }),
+        res.on('error', () => {})
+        res.on('close', () =>
+          resolve({
+            status: res.statusCode ?? 0,
+            body,
+            type: res.headers['content-type'],
+            complete: res.complete,
+          }),
         )
       })
       .on('error', reject)
@@ -126,6 +137,69 @@ describe('SPA server (COMPONENT-10)', () => {
     expect(received.map((r) => r.url)).toEqual(['/rapi/read?day=1', '/wapi'])
   })
 
+  it('forwards a bare prefix with a query string as a path', async () => {
+    const { baseUrl } = await start()
+    await fetch(`${baseUrl}/api?x=1`)
+    await fetch(`${baseUrl}/api`)
+    expect(received.map((r) => r.url)).toEqual(['/?x=1', '/'])
+  })
+
+  it('treats a prefix with a trailing slash like one without', async () => {
+    const { baseUrl } = await start({ proxyPrefixes: ['/auth/'], stripPrefix: false })
+    await fetch(`${baseUrl}/auth/login`)
+    expect(received.map((r) => r.url)).toEqual(['/auth/login'])
+  })
+
+  it('decodes file names, and still refuses encoded paths out of the build', async () => {
+    fs.writeFileSync(path.join(dist, 'assets', 'my file.txt'), 'spaced')
+    const { baseUrl } = await start()
+    expect(await get(baseUrl, '/assets/my%20file.txt')).toMatchObject({
+      status: 200,
+      body: 'spaced',
+      type: 'text/plain; charset=utf-8',
+    })
+    expect(await get(baseUrl, '/..%2fdist-old/secret.txt')).toMatchObject({ status: 403 })
+    expect(await get(baseUrl, '/%E0%A4%A')).toMatchObject({ status: 400 })
+  })
+
+  it('drops the browser connection when the API drops mid-response', async () => {
+    const dropping = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/plain' })
+      res.write('partial')
+      setTimeout(() => res.socket?.destroy(), 50)
+    })
+    await new Promise<void>((resolve) => dropping.listen(0, '127.0.0.1', resolve))
+    const { baseUrl } = await start({
+      apiUrl: `http://127.0.0.1:${(dropping.address() as AddressInfo).port}`,
+    })
+    try {
+      expect(await get(baseUrl, '/api/stream')).toMatchObject({ body: 'partial', complete: false })
+    } finally {
+      dropping.closeAllConnections()
+      await new Promise((resolve) => dropping.close(resolve))
+    }
+  })
+
+  it('closes promptly while a proxied stream is still open', async () => {
+    const streaming = http.createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      res.write('data: hello\n\n')
+    })
+    await new Promise<void>((resolve) => streaming.listen(0, '127.0.0.1', resolve))
+    const server = await startSpaServer({
+      distDir: dist,
+      apiUrl: `http://127.0.0.1:${(streaming.address() as AddressInfo).port}`,
+    })
+    const req = http.get(`${server.baseUrl}/api/events`)
+    req.on('error', () => {})
+    await new Promise((resolve) => req.on('response', resolve))
+    const started = Date.now()
+    await server.close()
+    expect(Date.now() - started).toBeLessThan(1_000)
+    streaming.closeAllConnections()
+    await new Promise((resolve) => streaming.close(resolve))
+  })
+
   it('answers 502 when the API is unreachable', async () => {
     const { baseUrl } = await start({ apiUrl: 'http://127.0.0.1:9' })
     expect(await get(baseUrl, '/api/x')).toMatchObject({
@@ -149,5 +223,11 @@ describe('SPA server (COMPONENT-10)', () => {
         buildHint: 'npm run build:coverage',
       }),
     ).rejects.toThrow(/index.html is missing\)\. Build it first: npm run build:coverage/)
+  })
+
+  it('needs a fixed port to register, since its base URL is known up front', () => {
+    expect(() => registerSpaServer({ distDir: dist, apiUrl, defaultPort: 0 })).toThrow(
+      /registerSpaServer needs a fixed port/,
+    )
   })
 })
