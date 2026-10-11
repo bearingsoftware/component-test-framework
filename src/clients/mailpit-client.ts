@@ -231,11 +231,17 @@ export function emailLinks(message: Pick<MailpitMessage, 'Text' | 'HTML'>): stri
   return [...new Set(links)]
 }
 
+// Tags that start a new line or cell where the email is read: each becomes a
+// space, so `<p>Hello</p><p>World</p>` reads "Hello World". Inline tags (b,
+// span, a, …) join the text either side, as they do on screen.
+const BLOCK_TAG =
+  /<\/?(?:p|div|br|tr|td|th|li|h[1-6]|table|ul|ol|section|header|footer|blockquote|hr)\b[^>]*>/gi
+
 function visibleText(html: string): string {
   return decodeEntities(
     html
       .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
-      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(BLOCK_TAG, ' ')
       .replace(/<[^>]*>/g, ''),
   )
     .replace(/\s+/g, ' ')

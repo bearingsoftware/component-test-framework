@@ -40,7 +40,9 @@ let registered = false
  * - `an email to {string} eventually arrives containing {string}`
  * - `that email contains {string}`
  * - `that email has a link matching {string}`
- * - `exactly {int} email(s) arrive(s) for {string} within {int}s`
+ * - `exactly {int} email(s) arrive(s) for {string} within {int}s`: counts all
+ *   mail to that address, including any that arrived before the window, so
+ *   use a recipient unique to the scenario
  *
  * The email a step finds is kept as `world.recall<MailpitMessage>('lastEmail')`,
  * and a matched link as `world.recall<string>('lastEmailLink')`. Calling this
@@ -111,6 +113,11 @@ export function registerMailpitSteps(options: MailpitStepOptions = {}): void {
     },
   )
 
+  /**
+   * Counts all mail to that address, including any that arrived before the
+   * window, not only arrivals during it, so use a recipient unique to the
+   * scenario.
+   */
   Then(
     'exactly {int} email(s) arrive(s) for {string} within {int}s',
     { timeout: NO_STEP_TIMEOUT },

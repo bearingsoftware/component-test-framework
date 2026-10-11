@@ -945,11 +945,11 @@ registerMailpitSteps({
 | `Then an email to {string} eventually arrives containing {string}` | The same, by its body |
 | `Then that email contains {string}` | The plain-text body, the HTML, or the HTML's visible text contains it |
 | `Then that email has a link matching {string}` | A regular expression; the first matching link is kept |
-| `Then exactly {int} email(s) arrive(s) for {string} within {int}s` | Fails as soon as one too many arrives |
+| `Then exactly {int} email(s) arrive(s) for {string} within {int}s` | Counts all mail to that address, so use a recipient unique to the scenario. Fails as soon as one too many arrives |
 
 The email the steps find is kept as `world.recall<MailpitMessage>('lastEmail')` and a matched link as `world.recall<string>('lastEmailLink')`, so a step of your own can follow a magic link. Where several emails match, the newest is used.
 
-Mailpit keeps every scenario's mail, and the steps never clear it, so give each scenario its own recipient, such as `` `${world.uniqueId('owner')}@example.test` ``. That also keeps parallel workers apart. The count in "exactly … arrive" includes emails to that address from earlier in the scenario. A recipient matches exactly, ignoring case, in To, Cc or Bcc.
+Mailpit keeps every scenario's mail, and the steps never clear it, so give each scenario its own recipient, such as `` `${world.uniqueId('owner')}@example.test` ``. That also keeps parallel workers apart. The count in "exactly … arrive" includes every email to that address, not only those arriving during the window. A recipient matches exactly, ignoring case, in To, Cc or Bcc.
 
 `MailpitClient` is the same API for your own steps: `search(query)`, `messagesTo(address)`, `message(id)`, `headers(id)`, `waitForMessage({ to, subjectContains, bodyContains, timeoutMs })` and `deleteMessages(query?)`. Without a query, `deleteMessages` deletes every message, other workers' too.
 

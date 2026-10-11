@@ -194,6 +194,15 @@ describe('emailContains', () => {
     expect(emailContains(message, 'Spike')).toBe(false)
   })
 
+  it('reads block tags as breaks and inline tags as joined', () => {
+    const blocks = { Text: '', HTML: '<p>Hello</p><p>World</p>' }
+    expect(emailContains(blocks, 'Hello World')).toBe(true)
+    const cells = { Text: '', HTML: '<table><tr><td>Total</td><td>£5</td></tr></table>' }
+    expect(emailContains(cells, 'Total £5')).toBe(true)
+    const inline = { Text: '', HTML: '<p>Tom &amp;<b> Jerry</b>, <span>re</span><i>set</i></p>' }
+    expect(emailContains(inline, 'Tom & Jerry, reset')).toBe(true)
+  })
+
   it("ignores scripts and styles in the HTML's text", () => {
     const message = { Text: '', HTML: '<style>p { color: red }</style><p>Hi</p>' }
     expect(emailContains(message, 'color')).toBe(true) // in the raw HTML
