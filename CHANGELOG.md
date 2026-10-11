@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.12](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.11...v0.3.12) (2026-10-11)
+
+
+### Features
+
+* **COMPONENT-14:** move and check WireMock scenario state ([2ec0420](https://github.com/bearingsoftware/component-test-framework/commit/2ec04202fdc18352f6e8a6041ebdf6749e1d7b39))
+* **COMPONENT-14:** move and check WireMock scenario state ([dd83160](https://github.com/bearingsoftware/component-test-framework/commit/dd831609cc6c05193a9634d3720b0946c0cffa5e))
+* **COMPONENT-15:** Redis pattern subscriptions, publish, and eventually-matching JSON ([0c31a84](https://github.com/bearingsoftware/component-test-framework/commit/0c31a84b0cbf360b39b4cde2618a690f1b1f0e64))
+* **COMPONENT-15:** Redis pattern subscriptions, publish, and eventually-matching JSON ([ef4b99e](https://github.com/bearingsoftware/component-test-framework/commit/ef4b99e2b6eab33e6336e0749d059b77dfa5c343))
+* **COMPONENT-16:** Mailpit client and email steps ([1822738](https://github.com/bearingsoftware/component-test-framework/commit/1822738258229f32aab82ba0f9d73514c7989d88))
+* **COMPONENT-16:** Mailpit client and email steps ([5820f3d](https://github.com/bearingsoftware/component-test-framework/commit/5820f3dcd3e4b2609462f8fe5171692802ca570d))
+* **COMPONENT-17:** Playwright Test fixtures for the SPA server, WireMock, logins and coverage ([5f58cdb](https://github.com/bearingsoftware/component-test-framework/commit/5f58cdb6f8efd2730d9c84cc4404461d17fbe06c))
+* **COMPONENT-17:** Playwright Test fixtures for the SPA server, WireMock, logins and coverage ([5e4aa44](https://github.com/bearingsoftware/component-test-framework/commit/5e4aa44837f808c29c3ee9170c0e46883ecda8c7))
+
+
+### Bug Fixes
+
+* **COMPONENT-15:** give the Redis waiting steps a Cucumber timeout ([a7d4b60](https://github.com/bearingsoftware/component-test-framework/commit/a7d4b60023b365510c62ac8351c22d26bae53848))
+* **COMPONENT-16:** read block tags as breaks in an email's visible text ([3800262](https://github.com/bearingsoftware/component-test-framework/commit/3800262098eb905f121b7e09e5d05d8d9a1aa258))
+* **COMPONENT-17:** reset WireMock before every test by default ([acce54c](https://github.com/bearingsoftware/component-test-framework/commit/acce54c22e002adb1a51dd1d51341854aa803e98))
+
 ## [0.3.11](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.10...v0.3.11) (2026-10-11)
 
 
