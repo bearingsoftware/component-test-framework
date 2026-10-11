@@ -1,6 +1,6 @@
 // `@bearingsoftware/component-test-framework/openapi`: the code behind the
 // `ctf` CLI, for scripts that want it directly. Registers nothing on import.
-export { loadSpec, routeKey } from './openapi/spec'
+export { loadSpec, findOperation } from './openapi/spec'
 export type { SpecOperation, LoadSpecOptions } from './openapi/spec'
 export { readOperationMap } from './openapi/map-file'
 export type { MapEntry, MapFile } from './openapi/map-file'

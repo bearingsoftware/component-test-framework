@@ -12,8 +12,6 @@ export interface GenerateOptions {
   include?: RegExp
   /** Leave out operations whose name matches. */
   exclude?: RegExp
-  /** The command that regenerates the file, for the header comment. */
-  command?: string
 }
 
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/
@@ -61,7 +59,7 @@ export function generateOperationMap(
   )
   const quote = (text: string) => `'${text.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
   const lines = [
-    `// Generated from ${options.specLabel} by ${options.command ?? 'ctf generate-operation-map'}.`,
+    `// Generated from ${options.specLabel} by ctf generate-operation-map.`,
     '// Regenerate it rather than editing it; ctf check-operation-map checks it against the spec.',
     `import type { OperationMap } from ${quote(options.importFrom ?? '@bearingsoftware/component-test-framework/core')}`,
     '',
@@ -70,7 +68,13 @@ export function generateOperationMap(
   for (const op of named) {
     if (op.summary)
       lines.push(`  /** ${op.summary.replace(/\*\//g, '*\\/').replace(/\s+/g, ' ').trim()} */`)
-    const key = IDENTIFIER.test(op.name) ? op.name : quote(op.name)
+    // A bare or quoted __proto__ would set the object's prototype instead.
+    const key =
+      op.name === '__proto__'
+        ? `['__proto__']`
+        : IDENTIFIER.test(op.name)
+          ? op.name
+          : quote(op.name)
     lines.push(`  ${key}: { method: ${quote(op.method)}, path: ${quote(op.path)} },`)
   }
   lines.push(

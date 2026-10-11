@@ -37,9 +37,21 @@ export function readOperationMap(file: string, exportName = 'operationMap'): Map
     )
   }
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true)
+  // A file that doesn't parse can yield entries that aren't what it says.
+  const syntax =
+    (source as unknown as { parseDiagnostics?: TS.Diagnostic[] }).parseDiagnostics ?? []
+  if (syntax.length > 0) {
+    const first = syntax[0]
+    const line =
+      first.start === undefined ? 0 : source.getLineAndCharacterOfPosition(first.start).line + 1
+    throw new Error(`${file}:${line}: ${ts.flattenDiagnosticMessageText(first.messageText, ' ')}`)
+  }
   const literal = findMapLiteral(ts, source, exportName)
   if (!literal) {
-    throw new Error(`${file} has no object literal named ${exportName}`)
+    throw new Error(
+      `${file} has no top-level object literal named ${exportName}: the map must be ` +
+        `\`const ${exportName} = { … }\` (exported or not), or pass --export-name`,
+    )
   }
 
   const lineOf = (node: TS.Node) => source.getLineAndCharacterOfPosition(node.getStart()).line + 1
@@ -71,6 +83,19 @@ export function readOperationMap(file: string, exportName = 'operationMap'): Map
       line: lineOf(prop),
     })
   }
+  // At runtime the last of two entries with one key wins, so the earlier one
+  // would be checked for nothing.
+  const lastLine = new Map(result.entries.map((e) => [e.key, e.line]))
+  for (const entry of result.entries) {
+    if (lastLine.get(entry.key) !== entry.line) {
+      result.unreadable.push({
+        key: entry.key,
+        line: entry.line,
+        reason: `duplicate key: the entry on line ${lastLine.get(entry.key)} replaces it`,
+      })
+    }
+  }
+  result.entries = result.entries.filter((e) => lastLine.get(e.key) === e.line)
   return result
 }
 
@@ -100,27 +125,21 @@ function unwrap(ts: typeof TS, node: TS.Expression): TS.Expression {
   return node
 }
 
+/** The object literal assigned to `exportName` by a top-level declaration. */
 function findMapLiteral(
   ts: typeof TS,
   source: TS.SourceFile,
   exportName: string,
 ): TS.ObjectLiteralExpression | undefined {
-  let found: TS.ObjectLiteralExpression | undefined
-  const visit = (node: TS.Node) => {
-    if (found) return
-    if (
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === exportName &&
-      node.initializer
-    ) {
-      const value = unwrap(ts, node.initializer)
-      if (ts.isObjectLiteralExpression(value)) found = value
+  for (const statement of source.statements) {
+    if (!ts.isVariableStatement(statement)) continue
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== exportName) continue
+      const value = declaration.initializer && unwrap(ts, declaration.initializer)
+      if (value && ts.isObjectLiteralExpression(value)) return value
     }
-    ts.forEachChild(node, visit)
   }
-  visit(source)
-  return found
+  return undefined
 }
 
 function propertyName(ts: typeof TS, name: TS.PropertyName): string | undefined {

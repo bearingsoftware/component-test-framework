@@ -22,8 +22,10 @@ Commands:
 
   check-operation-map [<map> <spec>]  Fail when operation maps and specs disagree
       --complete                    Every spec operation must be in the map too
-      --pair <map>=<spec>           Check another map (repeatable)
-      --complete-pair <map>=<spec>  Check another map that must cover its whole spec
+      --pair <map>=<spec>[=<base>]  Check another map (repeatable); <base> is
+                                    that spec's base path, in place of --base-path
+      --complete-pair <map>=<spec>[=<base>]
+                                    Check another map that must cover its whole spec
       --allowlist <file>            Known gaps, one name or "METHOD /path" per line;
                                     an entry that matches nothing fails as stale
 
@@ -35,6 +37,9 @@ Commands:
       --fail-on-gaps                Exit 1 when any operation is unexercised
       --json                        Print the result as JSON
 
+Exit status: 0 when all is well, 1 when a check finds problems (or the audit
+finds gaps with --fail-on-gaps), 2 when the command can't run.
+
 Shared options:
   --base-path <path>    Put in front of every spec path (default: from the spec's servers)
   --export-name <name>  The map's exported constant (default operationMap)
@@ -44,9 +49,11 @@ Shared options:
 class UsageError extends Error {}
 
 function pairOf(value: string, complete: boolean): CheckPair {
-  const at = value.lastIndexOf('=')
-  if (at <= 0) throw new UsageError(`expected <map>=<spec>, got ${value}`)
-  return { map: value.slice(0, at), spec: value.slice(at + 1), complete }
+  const [map, spec, basePath, ...rest] = value.split('=')
+  if (!map || !spec || rest.length > 0) {
+    throw new UsageError(`expected <map>=<spec> or <map>=<spec>=<base path>, got ${value}`)
+  }
+  return { map, spec, complete, basePath }
 }
 
 function regex(value: string | undefined): RegExp | undefined {
@@ -77,19 +84,25 @@ function generate(args: string[]): number {
   if (values.check && !values.out) throw new UsageError('--check needs --out')
 
   const output = generateOperationMap(loadSpec(spec, { basePath: values['base-path'] }), {
-    specLabel: spec,
+    // Relative to the file it's written into, so the header (and --check)
+    // doesn't depend on where the command runs.
+    specLabel: path
+      .relative(values.out ? path.dirname(path.resolve(values.out)) : process.cwd(), spec)
+      .split(path.sep)
+      .join('/'),
     importFrom: values['import-from'],
     exportName: values['export-name'],
     include: regex(values.include),
     exclude: regex(values.exclude),
-    command: `ctf generate-operation-map ${[spec, ...(values.out ? ['--out', values.out] : [])].join(' ')}`,
   })
   if (!values.out) {
     process.stdout.write(output)
     return 0
   }
   if (values.check) {
-    const current = fs.existsSync(values.out) ? fs.readFileSync(values.out, 'utf-8') : ''
+    const current = fs.existsSync(values.out)
+      ? fs.readFileSync(values.out, 'utf-8').replace(/\r\n/g, '\n')
+      : ''
     if (current === output) {
       console.log(`${values.out} is up to date with ${spec}`)
       return 0
@@ -194,9 +207,13 @@ function audit(args: string[]): number {
 export function main(argv: string[]): number {
   const [command, ...rest] = argv
   try {
-    if (!command || command === '--help' || command === 'help' || rest.includes('--help')) {
+    if (!command) {
+      process.stderr.write(HELP)
+      return 2
+    }
+    if (command === '--help' || command === 'help' || rest.includes('--help')) {
       process.stdout.write(HELP)
-      return command ? 0 : 2
+      return 0
     }
     if (command === 'generate-operation-map') return generate(rest)
     if (command === 'check-operation-map') return check(rest)
@@ -206,7 +223,8 @@ export function main(argv: string[]): number {
     const usage =
       err instanceof UsageError || (err as { code?: string }).code?.startsWith('ERR_PARSE_ARGS')
     console.error(`ctf: ${(err as Error).message}${usage ? '\nRun ctf --help for usage.' : ''}`)
-    return usage ? 2 : 1
+    // Couldn't run, as distinct from ran and found problems.
+    return 2
   }
 }
 

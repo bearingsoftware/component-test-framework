@@ -12,6 +12,8 @@ export interface CheckPair {
    * suite's subset.
    */
   complete?: boolean
+  /** A base path for this pair's spec, in place of {@link CheckOptions.basePath}. */
+  basePath?: string
 }
 
 /** Options for {@link checkOperationMaps}. */
@@ -54,7 +56,7 @@ export interface CheckResult {
 export function checkOperationMaps(pairs: CheckPair[], options: CheckOptions = {}): CheckResult {
   const found: Problem[] = []
   for (const pair of pairs) {
-    const spec = loadSpec(pair.spec, { basePath: options.basePath })
+    const spec = loadSpec(pair.spec, { basePath: pair.basePath ?? options.basePath })
     found.push(...checkPair(pair, spec, options.exportName))
   }
 
@@ -96,11 +98,17 @@ function checkPair(pair: CheckPair, spec: SpecOperation[], exportName?: string):
     const named = byId.get(entry.key)
     if (named) {
       mapped.add(named)
-      if (!findOperation([named], entry.method, entry.path)) {
+      // Where the request actually goes: a more specific route may take it.
+      const routed = findOperation(spec, entry.method, entry.path)
+      if (routed !== named) {
+        const target = routed?.operationId ? `'${routed.operationId}' ` : ''
         problems.push({
           key: entry.key,
           where: at(entry.line),
-          message: `'${entry.key}' is ${describe(entry)} in the map but ${describe(named)} in ${pair.spec}`,
+          message: routed
+            ? `'${entry.key}' is ${describe(entry)} in the map, which ${pair.spec} routes to ` +
+              `${target}(${describe(routed)}), not to '${entry.key}' (${describe(named)})`
+            : `'${entry.key}' is ${describe(entry)} in the map but ${describe(named)} in ${pair.spec}`,
         })
       }
       continue

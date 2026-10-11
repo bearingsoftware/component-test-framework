@@ -20,8 +20,10 @@ export interface SpecOperation {
 export interface LoadSpecOptions {
   /**
    * Put in front of every path, e.g. `/api/v1`. Default: the path of the
-   * spec's first server URL (`servers: [{ url: /api/v1 }]` gives `/api/v1`,
-   * `http://localhost:8080` gives nothing), or `basePath` in Swagger 2.
+   * spec's first server URL, with its variables' defaults filled in
+   * (`servers: [{ url: /api/v1 }]` gives `/api/v1`, `http://localhost:8080`
+   * gives nothing), or `basePath` in Swagger 2. Servers set on a path or an
+   * operation aren't used.
    */
   basePath?: string
 }
@@ -30,48 +32,68 @@ const METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'tr
 
 type Json = Record<string, unknown>
 
-function readDocument(file: string): Json {
+function readDocument(file: string, cache: Map<string, Json>): Json {
+  const cached = cache.get(file)
+  if (cached) return cached
   const text = fs.readFileSync(file, 'utf-8')
-  const doc = file.endsWith('.json') ? JSON.parse(text) : parseYaml(text)
+  let doc: unknown
+  try {
+    doc = file.endsWith('.json') ? JSON.parse(text) : parseYaml(text, { merge: true })
+  } catch (err) {
+    throw new Error(`${file} can't be parsed: ${(err as Error).message}`)
+  }
   if (!doc || typeof doc !== 'object') throw new Error(`${file} is not an OpenAPI document`)
+  cache.set(file, doc as Json)
   return doc as Json
 }
 
-/** Follow a `$ref` (`#/a/b`, `other.yaml`, or `other.yaml#/a/b`) from `file`. */
-function resolveRef(
-  ref: string,
-  file: string,
-  root: Json,
-): { value: Json; file: string; root: Json } {
-  const [target, pointer = ''] = ref.split('#')
-  let doc = root
-  let docFile = file
-  if (target) {
-    docFile = path.resolve(path.dirname(file), target)
-    doc = readDocument(docFile)
+/** Follow a `$ref` (`#/a/b`, `other.yaml`, or `other.yaml#/a/b`), and any it leads to, from `file`. */
+function resolveRef(ref: string, file: string, root: Json, cache: Map<string, Json>): Json {
+  const seen = new Set<string>()
+  for (;;) {
+    const [target, pointer = ''] = ref.split('#')
+    const docFile = target ? path.resolve(path.dirname(file), target) : file
+    if (seen.has(`${docFile}#${pointer}`)) throw new Error(`$ref cycle at ${ref} in ${file}`)
+    seen.add(`${docFile}#${pointer}`)
+    const doc = target ? readDocument(docFile, cache) : root
+    let value: unknown = doc
+    for (const part of pointer.split('/').filter(Boolean)) {
+      const key = decodeURIComponent(part).replace(/~1/g, '/').replace(/~0/g, '~')
+      value = (value as Json | undefined)?.[key]
+    }
+    if (!value || typeof value !== 'object')
+      throw new Error(`Can't resolve $ref ${ref} from ${file}`)
+    const next = (value as Json).$ref
+    if (typeof next !== 'string') return value as Json
+    ref = next
+    file = docFile
+    root = doc
   }
-  let value: unknown = doc
-  for (const part of pointer.split('/').filter(Boolean)) {
-    const key = decodeURIComponent(part).replace(/~1/g, '/').replace(/~0/g, '~')
-    value = (value as Json | undefined)?.[key]
-  }
-  if (!value || typeof value !== 'object') throw new Error(`Can't resolve $ref ${ref} from ${file}`)
-  return { value: value as Json, file: docFile, root: doc }
 }
 
 function basePathOf(doc: Json): string {
   if (typeof doc.basePath === 'string') return doc.basePath
-  const servers = doc.servers as { url?: unknown }[] | undefined
-  const url = servers?.[0]?.url
-  if (typeof url !== 'string') return ''
-  // A relative server URL is itself the base path; an absolute one has one.
-  const pathname = /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? new URL(url).pathname : url
-  return pathname.replace(/\{[^}]*\}/g, '').replace(/\/+$/, '')
+  const server = (doc.servers as { url?: unknown; variables?: Json }[] | undefined)?.[0]
+  if (typeof server?.url !== 'string') return ''
+  // Variables take their defaults, as a client would without other values.
+  const url = server.url.replace(/\{([^}]*)\}/g, (_, name: string) => {
+    const variable = server.variables?.[name] as { default?: unknown } | undefined
+    return variable?.default !== undefined ? String(variable.default) : ''
+  })
+  // Relative URLs (`/api/v1`, `api/v1`, `./`) resolve against the host.
+  let pathname: string
+  try {
+    pathname = new URL(url, 'http://server.invalid/').pathname
+  } catch {
+    return ''
+  }
+  return decodeURI(pathname).replace(/\/+$/, '')
 }
 
 /** A spec's operations, in the order the spec lists them. */
 export function loadSpec(file: string, options: LoadSpecOptions = {}): SpecOperation[] {
-  const doc = readDocument(file)
+  const cache = new Map<string, Json>()
+  const doc = readDocument(file, cache)
   if (!doc.paths || typeof doc.paths !== 'object') {
     throw new Error(`${file} has no paths: is it an OpenAPI or Swagger document?`)
   }
@@ -79,7 +101,7 @@ export function loadSpec(file: string, options: LoadSpecOptions = {}): SpecOpera
   const operations: SpecOperation[] = []
   for (const [route, raw] of Object.entries(doc.paths as Json)) {
     let item = raw as Json
-    if (typeof item?.$ref === 'string') item = resolveRef(item.$ref, file, doc).value
+    if (typeof item?.$ref === 'string') item = resolveRef(item.$ref, file, doc, cache)
     for (const method of METHODS) {
       const op = item?.[method] as Json | undefined
       if (!op || typeof op !== 'object') continue
@@ -95,45 +117,69 @@ export function loadSpec(file: string, options: LoadSpecOptions = {}): SpecOpera
   return operations
 }
 
-/** A path with its parameter names dropped, so `/a/{id}` and `/a/{projectId}` compare equal. */
-export function routeKey(method: string, route: string): string {
-  return `${method.toUpperCase()} ${route.replace(/\{[^}]*\}/g, '{}').replace(/\/+$/, '') || '/'}`
+/** A path's segments, without its query string; a trailing slash is an empty last segment. */
+function segments(route: string): string[] {
+  return route.split(/[?#]/)[0].split('/').slice(1)
 }
 
-function segments(route: string): string[] {
-  return route.split('?')[0].replace(/\/+$/, '').split('/').slice(1)
+/** A map's own `{param}`, which stands for any value. */
+const PLACEHOLDER = '\u0000'
+
+interface CompiledSegment {
+  pattern: RegExp
+  /** Parameters in the segment. */
+  params: number
+}
+
+function compile(segment: string): CompiledSegment {
+  let params = 0
+  const source = segment
+    .split(/(\{[^}]*\})/)
+    .map((part) => {
+      if (/^\{[^}]*\}$/.test(part)) {
+        params++
+        return '[^/]+'
+      }
+      return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    })
+    .join('')
+  return { pattern: new RegExp(`^${source}$`), params }
 }
 
 /**
  * The spec operation a request goes to: the same method, and a path that
- * matches segment by segment, where a spec `{param}` matches any value. A map
- * path may carry concrete values (`/orgs/acme`) or a query string; both
- * still match, as does the map's own `{param}` against a spec parameter.
- * Where several match, the one with fewest parameters wins, as a router
- * would choose `/orgs/me` over `/orgs/{id}`.
+ * matches segment by segment, where a spec `{param}`, alone in a segment or
+ * part of one (`{name}.json`), matches any value. A map path may carry
+ * concrete values (`/orgs/acme`) or a query string; both still match, as
+ * does the map's own `{param}` against a spec parameter. A trailing slash
+ * is significant, as it is to most routers. Where several match, the one
+ * with fewest parameters wins, and then the one whose first parameter
+ * comes latest, as a router would choose `/orgs/me` over `/orgs/{id}`.
  */
 export function findOperation<T extends Pick<SpecOperation, 'method' | 'path'>>(
   operations: T[],
   method: string,
   route: string,
 ): T | undefined {
-  const wanted = segments(route)
-  let best: { op: T; params: number } | undefined
+  const wanted = segments(route).map((s) => s.replace(/\{[^}]*\}/g, PLACEHOLDER))
+  let best: { op: T; params: number; firstParam: number } | undefined
   for (const op of operations) {
     if (op.method !== method.toUpperCase()) continue
     const candidate = segments(op.path)
     if (candidate.length !== wanted.length) continue
     let params = 0
+    let firstParam = candidate.length
     const fits = candidate.every((segment, i) => {
-      if (/^\{[^}]*\}$/.test(segment)) {
-        params++
-        return wanted[i] !== ''
-      }
-      // A map's own {param} stands for any value, so only a spec parameter
-      // can match it: /orders/{id} isn't /orders/mine.
-      return segment === wanted[i]
+      const compiled = compile(segment)
+      if (compiled.params === 0) return segment === wanted[i]
+      params += compiled.params
+      firstParam = Math.min(firstParam, i)
+      return compiled.pattern.test(wanted[i])
     })
-    if (fits && (!best || params < best.params)) best = { op, params }
+    if (!fits) continue
+    if (!best || params < best.params || (params === best.params && firstParam > best.firstParam)) {
+      best = { op, params, firstParam }
+    }
   }
   return best?.op
 }
