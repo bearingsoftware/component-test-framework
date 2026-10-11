@@ -659,7 +659,12 @@ registerWaitingSteps(options)
 | `buildHint` | | Named in the error when the build is missing |
 | `portEnvVar`, `defaultPort` | `WEB_PORT`, `3100` | Where the port comes from (`registerSpaServer` only) |
 
-Before starting it checks the build exists; once listening it fetches `/` to prove the app is served. Paths outside the build are refused. If the API drops a connection mid-response, the browser's is dropped too, rather than left waiting, and stopping the server closes any proxied streams still open. `registerSpaServer` needs a fixed port, since the base URL is worked out before the server starts.
+Before starting it checks the build exists; once listening it fetches `/` to prove the app is served.
+- **Paths:** paths outside the build are refused.
+- **Connections:** if the API drops a connection mid-response, the browser's is dropped too, rather than left waiting. When the browser abandons a request (navigating away from a stream, say), the API request ends too. Stopping the server ends any proxied requests still open.
+- **Headers and redirects:** connection-level headers aren't passed on. A redirect from the API to its own address is pointed back through the server.
+- **WebSockets:** upgrades aren't proxied; they get a 501.
+- **Port and parallel runs:** `registerSpaServer` needs a fixed port, since the base URL is worked out before the server starts. So it suits serial runs, not Cucumber `--parallel`: workers would compete for the port, and each would write the coverage report over the others'.
 
 **Coverage** (`registerCoverage`, or `createCoverageCollector`) reads `window.__coverage__` from SPAs built with istanbul instrumentation, such as vite-plugin-istanbul. It waits for the document to load, then for the instrumented bundle to run (`loadTimeoutMs`, `evalTimeoutMs`, 6s each), so a page reloaded just before the scenario ended still counts. After the run it writes `coverage/lcov.info`, `coverage-summary.json`, the HTML report and `.nyc_output/out.json`.
 - `onMissingSample: 'throw' | 'warn'`: a page with no coverage fails the scenario (default) or is logged and counted.

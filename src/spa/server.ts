@@ -89,6 +89,11 @@ export async function startSpaServer(options: SpaServerOptions): Promise<SpaServ
   }
   if (options.runtimeEnv) {
     const global = options.runtimeEnvGlobal ?? '__ENV'
+    if (!/^[A-Za-z_$][\w$]*$/.test(global)) {
+      throw new Error(
+        `runtimeEnvGlobal must be a JavaScript identifier, not ${JSON.stringify(global)}`,
+      )
+    }
     fs.writeFileSync(
       path.join(root, '__env.js'),
       `window.${global} = ${JSON.stringify(options.runtimeEnv, null, 2)};\n`,
@@ -101,6 +106,7 @@ export async function startSpaServer(options: SpaServerOptions): Promise<SpaServ
   const api = new URL(options.apiUrl)
   const mimeTypes = { ...MIME_TYPES, ...options.mimeTypes }
 
+  const live = new Set<http.ClientRequest>()
   const server = http.createServer((req, res) => {
     const url = req.url ?? '/'
     const pathname = url.split('?')[0]
@@ -108,7 +114,8 @@ export async function startSpaServer(options: SpaServerOptions): Promise<SpaServ
     if (prefix) {
       // What follows the prefix, made a path again: '/api?x=1' forwards as '/?x=1'.
       const rest = url.slice(prefix.length)
-      forward(req, res, api, stripPrefix ? (rest.startsWith('/') ? rest : `/${rest}`) : url)
+      const forwardPath = stripPrefix ? (rest.startsWith('/') ? rest : `/${rest}`) : url
+      forward(req, res, { api, path: forwardPath, prefix, stripPrefix, live })
       return
     }
     let decoded: string
@@ -122,17 +129,29 @@ export async function startSpaServer(options: SpaServerOptions): Promise<SpaServ
     serveFile(res, root, decoded === '/' ? '/index.html' : decoded, indexHtml, mimeTypes)
   })
 
+  // WebSocket upgrades aren't proxied; say so rather than leave the client waiting.
+  server.on('upgrade', (_req, socket) => {
+    socket.end(
+      'HTTP/1.1 501 Not Implemented\r\nConnection: close\r\n\r\nWebSocket upgrades are not proxied',
+    )
+  })
+
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(options.port ?? 0, () => resolve())
+    server.listen(options.port ?? 0, () => {
+      server.off('error', reject)
+      resolve()
+    })
   })
   const port = (server.address() as AddressInfo).port
   const baseUrl = `http://localhost:${port}`
   const close = () =>
     new Promise<void>((resolve) => {
       server.close(() => resolve())
-      // An open proxied stream (SSE, a long poll) would otherwise keep close waiting.
+      // An open proxied stream (SSE, a long poll) would otherwise keep close
+      // waiting, and its upstream side would keep the process alive.
       server.closeAllConnections()
+      for (const upstream of live) upstream.destroy()
     })
 
   try {
@@ -145,25 +164,73 @@ export async function startSpaServer(options: SpaServerOptions): Promise<SpaServ
   return { port, baseUrl, close }
 }
 
+// Headers that belong to one connection, not to the request or response, so
+// aren't passed on (RFC 9110 section 7.6.1), plus any the Connection header names.
+const HOP_BY_HOP = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+])
+
+function endToEnd(headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {
+  const named = String(headers.connection ?? '')
+    .split(',')
+    .map((h) => h.trim().toLowerCase())
+  const out: http.OutgoingHttpHeaders = {}
+  for (const [name, value] of Object.entries(headers)) {
+    if (!HOP_BY_HOP.has(name) && !named.includes(name)) out[name] = value
+  }
+  return out
+}
+
+/** How a request maps onto the API: where it goes, and how its redirects come back. */
+interface Forwarding {
+  api: URL
+  path: string
+  /** The prefix it matched, put back on redirects when it was stripped. */
+  prefix: string
+  stripPrefix: boolean
+  /** Upstream requests in flight, so the server can end them when it stops. */
+  live: Set<http.ClientRequest>
+}
+
+/**
+ * A redirect to the API's own address would send the browser straight to
+ * WireMock, cross-origin. Point it back through this server instead.
+ */
+function rewriteLocation(location: string | undefined, f: Forwarding): string | undefined {
+  if (!location) return location
+  let target: URL
+  try {
+    target = new URL(location, f.api)
+  } catch {
+    return location
+  }
+  if (target.origin !== f.api.origin) return location
+  return `${f.stripPrefix ? f.prefix : ''}${target.pathname}${target.search}${target.hash}`
+}
+
 /** Forward a request to the API, streaming the body both ways. */
-function forward(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
-  api: URL,
-  forwardPath: string,
-): void {
-  const client = api.protocol === 'https:' ? https : http
+function forward(req: http.IncomingMessage, res: http.ServerResponse, f: Forwarding): void {
+  const client = f.api.protocol === 'https:' ? https : http
   const upstream = client.request(
     {
-      protocol: api.protocol,
-      hostname: api.hostname,
-      port: api.port || (api.protocol === 'https:' ? 443 : 80),
+      protocol: f.api.protocol,
+      hostname: f.api.hostname,
+      port: f.api.port || (f.api.protocol === 'https:' ? 443 : 80),
       method: req.method,
-      path: forwardPath,
-      headers: { ...req.headers, host: api.host },
+      path: f.path,
+      headers: { ...endToEnd(req.headers), host: f.api.host },
     },
     (upstreamRes) => {
-      res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers)
+      const headers = endToEnd(upstreamRes.headers)
+      if (headers.location) headers.location = rewriteLocation(String(headers.location), f)
+      res.writeHead(upstreamRes.statusCode ?? 502, headers)
       upstreamRes.pipe(res)
       // The API dropping the connection mid-response (as WireMock's fault
       // stubs do) drops the browser's too, rather than leaving it waiting.
@@ -172,6 +239,13 @@ function forward(
       })
     },
   )
+  f.live.add(upstream)
+  upstream.on('close', () => f.live.delete(upstream))
+  // The browser giving up (navigating away from a stream, a cancelled fetch)
+  // ends the upstream request too, rather than leaving it open on WireMock.
+  res.on('close', () => {
+    if (!res.writableFinished) upstream.destroy()
+  })
   upstream.on('error', (err) => {
     if (res.headersSent) {
       res.destroy()
@@ -217,7 +291,8 @@ export interface RegisterSpaServerOptions extends Omit<SpaServerOptions, 'port'>
 /**
  * Start the SPA server before the suite and stop it after. The port, and so
  * the base URL, is known at once, so it can be given to `registerHooks` as
- * `webBaseUrl`.
+ * `webBaseUrl`. It uses one fixed port, so it suits serial runs, not
+ * Cucumber `--parallel`.
  *
  * @example
  * const spa = registerSpaServer({
@@ -244,7 +319,17 @@ export function registerSpaServer(options: RegisterSpaServerOptions): {
   let server: SpaServer | null = null
 
   BeforeAll({ timeout: 30_000 }, async function () {
-    server = await startSpaServer({ ...options, port })
+    try {
+      server = await startSpaServer({ ...options, port })
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+        throw new Error(
+          `Port ${port} is in use (${portEnvVar}). Is another run still going? The SPA server ` +
+            `uses one fixed port, so it can't run under Cucumber --parallel.`,
+        )
+      }
+      throw err
+    }
   })
   AfterAll({ timeout: 15_000 }, async function () {
     await server?.close()

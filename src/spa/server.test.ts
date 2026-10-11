@@ -1,9 +1,22 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest'
 import * as fs from 'fs'
 import * as http from 'http'
 import * as os from 'os'
 import * as path from 'path'
+import * as net from 'net'
 import type { AddressInfo } from 'net'
+type HookFn = (this: unknown) => unknown
+// Capture registerSpaServer's hooks so a test can run them.
+const hooks = vi.hoisted(() => ({ beforeAll: [] as HookFn[], afterAll: [] as HookFn[] }))
+vi.mock('@cucumber/cucumber', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@cucumber/cucumber')>()
+  return {
+    ...actual,
+    BeforeAll: (_options: unknown, fn: HookFn) => void hooks.beforeAll.push(fn),
+    AfterAll: (_options: unknown, fn: HookFn) => void hooks.afterAll.push(fn),
+  }
+})
+
 import { registerSpaServer, startSpaServer, type SpaServer, type SpaServerOptions } from './server'
 
 interface Received {
@@ -229,5 +242,167 @@ describe('SPA server (COMPONENT-10)', () => {
     expect(() => registerSpaServer({ distDir: dist, apiUrl, defaultPort: 0 })).toThrow(
       /registerSpaServer needs a fixed port/,
     )
+  })
+
+  it('ends the upstream request when the browser gives up on it', async () => {
+    let upstreamClosed = false
+    const streaming = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      res.write('data: hello\n\n')
+      req.socket.on('close', () => (upstreamClosed = true))
+    })
+    await new Promise<void>((resolve) => streaming.listen(0, '127.0.0.1', resolve))
+    const { baseUrl } = await start({
+      apiUrl: `http://127.0.0.1:${(streaming.address() as AddressInfo).port}`,
+    })
+    try {
+      const req = http.get(`${baseUrl}/api/events`)
+      req.on('error', () => {})
+      await new Promise((resolve) => req.on('response', resolve))
+      req.destroy()
+      const deadline = Date.now() + 2_000
+      while (!upstreamClosed && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20))
+      expect(upstreamClosed).toBe(true)
+    } finally {
+      streaming.closeAllConnections()
+      await new Promise((resolve) => streaming.close(resolve))
+    }
+  })
+
+  it('ends open upstream requests when it stops', async () => {
+    let upstreamClosed = false
+    const streaming = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      res.write('data: hello\n\n')
+      req.socket.on('close', () => (upstreamClosed = true))
+    })
+    await new Promise<void>((resolve) => streaming.listen(0, '127.0.0.1', resolve))
+    const server = await startSpaServer({
+      distDir: dist,
+      apiUrl: `http://127.0.0.1:${(streaming.address() as AddressInfo).port}`,
+    })
+    try {
+      const req = http.get(`${server.baseUrl}/api/events`)
+      req.on('error', () => {})
+      await new Promise((resolve) => req.on('response', resolve))
+      await server.close()
+      const deadline = Date.now() + 2_000
+      while (!upstreamClosed && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20))
+      expect(upstreamClosed).toBe(true)
+    } finally {
+      streaming.closeAllConnections()
+      await new Promise((resolve) => streaming.close(resolve))
+    }
+  })
+
+  it('does not pass on connection-level headers, either way', async () => {
+    let seen: http.IncomingHttpHeaders = {}
+    const echo = http.createServer((req, res) => {
+      seen = req.headers
+      // Node adds its own Keep-Alive to keep-alive responses, so the check uses a
+      // header the upstream names as connection-level.
+      res.writeHead(200, {
+        Connection: 'X-Upstream-Private',
+        'X-Upstream-Private': '1',
+        'X-Stub': 'yes',
+      })
+      res.end('ok')
+    })
+    await new Promise<void>((resolve) => echo.listen(0, '127.0.0.1', resolve))
+    const { baseUrl } = await start({
+      apiUrl: `http://127.0.0.1:${(echo.address() as AddressInfo).port}`,
+    })
+    try {
+      const { hostname, port } = new URL(baseUrl)
+      const response = await new Promise<http.IncomingMessage>((resolve, reject) =>
+        http
+          .request(
+            {
+              hostname,
+              port,
+              path: '/api/x',
+              headers: { Connection: 'keep-alive, X-Private', 'X-Private': '1', 'X-Kept': '1' },
+            },
+            resolve,
+          )
+          .on('error', reject)
+          .end(),
+      )
+      response.resume()
+      expect(seen['x-private']).toBeUndefined()
+      expect(seen['x-kept']).toBe('1')
+      expect(response.headers['x-upstream-private']).toBeUndefined()
+      expect(response.headers['x-stub']).toBe('yes')
+    } finally {
+      echo.closeAllConnections()
+      await new Promise((resolve) => echo.close(resolve))
+    }
+  })
+
+  it("points the API's own redirects back through the server", async () => {
+    const redirecting = http.createServer((req, res) => {
+      const self = `http://127.0.0.1:${(redirecting.address() as AddressInfo).port}`
+      const to = req.url === '/elsewhere' ? 'https://example.com/x' : `${self}/v1/next?page=2`
+      res.writeHead(302, { Location: to })
+      res.end()
+    })
+    await new Promise<void>((resolve) => redirecting.listen(0, '127.0.0.1', resolve))
+    const apiUrl = `http://127.0.0.1:${(redirecting.address() as AddressInfo).port}`
+    const { baseUrl } = await start({ apiUrl })
+    try {
+      const own = await fetch(`${baseUrl}/api/v1/start`, { redirect: 'manual' })
+      expect(own.headers.get('location')).toBe('/api/v1/next?page=2')
+      const other = await fetch(`${baseUrl}/api/elsewhere`, { redirect: 'manual' })
+      expect(other.headers.get('location')).toBe('https://example.com/x')
+    } finally {
+      await new Promise((resolve) => redirecting.close(resolve))
+    }
+  })
+
+  it('answers a WebSocket upgrade with 501 instead of hanging', async () => {
+    const { baseUrl } = await start()
+    const { hostname, port } = new URL(baseUrl)
+    const status = await new Promise<string>((resolve, reject) => {
+      const socket = net.connect(Number(port), hostname, () => {
+        socket.write(
+          'GET /api/ws HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n',
+        )
+      })
+      socket.on('data', (data: Buffer) => resolve(data.toString().split('\r\n')[0]))
+      socket.on('error', reject)
+    })
+    expect(status).toBe('HTTP/1.1 501 Not Implemented')
+  })
+
+  it('rejects a runtimeEnvGlobal that is not an identifier', async () => {
+    await expect(
+      start({ runtimeEnv: { A: '1' }, runtimeEnvGlobal: 'x; alert(1)' }),
+    ).rejects.toThrow(/runtimeEnvGlobal must be a JavaScript identifier/)
+  })
+
+  it('registers hooks that start and stop the server on the configured port, and explains a port in use', async () => {
+    hooks.beforeAll.length = 0
+    hooks.afterAll.length = 0
+    const blocker = http.createServer()
+    await new Promise<void>((resolve) => blocker.listen(0, resolve))
+    const busyPort = (blocker.address() as AddressInfo).port
+    try {
+      const busy = registerSpaServer({
+        distDir: dist,
+        apiUrl,
+        portEnvVar: 'CTF_TEST_PORT',
+        defaultPort: busyPort,
+      })
+      expect(busy).toEqual({ port: busyPort, baseUrl: `http://localhost:${busyPort}` })
+      await expect(hooks.beforeAll[0].call({})).rejects.toThrow(
+        `Port ${busyPort} is in use (CTF_TEST_PORT). Is another run still going? The SPA server uses one fixed port, so it can't run under Cucumber --parallel.`,
+      )
+    } finally {
+      await new Promise((resolve) => blocker.close(resolve))
+    }
+    await hooks.beforeAll[0].call({})
+    expect((await get(`http://localhost:${busyPort}`, '/')).status).toBe(200)
+    await hooks.afterAll[0].call({})
+    await expect(get(`http://localhost:${busyPort}`, '/')).rejects.toThrow()
   })
 })

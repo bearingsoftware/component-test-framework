@@ -32,7 +32,7 @@ import {
   saveFailureArtifacts,
 } from './browser'
 
-const scenario = (name: string) => ({ pickle: { name } }) as never
+const scenario = (name: string) => ({ pickle: { name, id: 'a1b2c3d4-0000' } }) as never
 
 describe('failure artefacts (COMPONENT-10)', () => {
   it('saves a screenshot and the HTML, named after the scenario', async () => {
@@ -46,8 +46,8 @@ describe('failure artefacts (COMPONENT-10)', () => {
     await saveFailureArtifacts(dir)({ page } as never, scenario('Log in: wrong "password"'))
 
     expect(fs.readdirSync(dir).sort()).toEqual([
-      'Log_in_wrong_password_.html',
-      'Log_in_wrong_password_.png',
+      'Log_in_wrong_password_-a1b2c3d4.html',
+      'Log_in_wrong_password_-a1b2c3d4.png',
     ])
     expect(page.screenshot).toHaveBeenCalledWith(expect.objectContaining({ fullPage: true }))
     expect(errors).toHaveBeenCalledWith(
@@ -131,7 +131,11 @@ describe('accessibility step (COMPONENT-10)', () => {
   }
 
   it('passes an accessible page and fails one with serious violations, naming them', async (ctx) => {
-    if (!browser) ctx.skip()
+    // In CI, where Chromium is installed, a launch failure is a failure, not a skip.
+    if (!browser) {
+      if (process.env.CI) throw new Error('Chromium could not be launched')
+      ctx.skip()
+    }
     await check(
       '<html lang="en"><head><title>Home</title></head><body><main><h1>Hi</h1></main></body></html>',
     )

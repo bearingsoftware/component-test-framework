@@ -1,10 +1,10 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
 import * as fs from 'fs'
 import * as path from 'path'
 import { Before, Then } from '@cucumber/cucumber'
 import type { ITestCaseHookParameter } from '@cucumber/cucumber'
 import type { Page, Route } from '@playwright/test'
 import type { ComponentTestWorld } from '../support/world'
+import { requireOptional } from './optional'
 
 /**
  * An `onScenarioFailed` hook that saves the page as it stood when the
@@ -22,7 +22,9 @@ export function saveFailureArtifacts(
     const page = world.page
     if (!page) return
     const name = scenario.pickle.name
-    const safe = name.replace(/[^\w-]+/g, '_').slice(0, 60)
+    // The pickle id keeps Outline rows, and scenarios that share a name,
+    // from overwriting each other's files.
+    const safe = `${name.replace(/[^\w-]+/g, '_').slice(0, 60)}-${scenario.pickle.id.slice(0, 8)}`
     console.error(`[failure] scenario "${name}" — page url = ${page.url()}`)
     try {
       fs.mkdirSync(dir, { recursive: true })
@@ -115,7 +117,12 @@ let accessibilityRegistered = false
  * Needs `@axe-core/playwright`, loaded when the step first runs.
  */
 export function registerAccessibilitySteps(options: AccessibilityOptions = {}): void {
-  if (accessibilityRegistered) return
+  if (accessibilityRegistered) {
+    console.warn(
+      "[component-test-framework] registerAccessibilitySteps was called twice; the first call's options apply.",
+    )
+    return
+  }
   accessibilityRegistered = true
   const failOn = options.failOn ?? ['serious', 'critical']
 
@@ -124,8 +131,10 @@ export function registerAccessibilitySteps(options: AccessibilityOptions = {}): 
     { timeout: 30_000 },
     async function (this: ComponentTestWorld, _pageName: string) {
       if (!this.page) throw new Error('No Playwright page available')
-      const { default: AxeBuilder } =
-        require('@axe-core/playwright') as typeof import('@axe-core/playwright')
+      const { default: AxeBuilder } = requireOptional<typeof import('@axe-core/playwright')>(
+        '@axe-core/playwright',
+        'The accessibility step',
+      )
       let builder = new AxeBuilder({ page: this.page }).withTags(
         options.tags ?? ['wcag2a', 'wcag2aa'],
       )
