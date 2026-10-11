@@ -124,10 +124,12 @@ When(
 
 /**
  * Move a WireMock scenario, then wait for a new row matching the predicate.
- * The count is taken before the move, so a row written by work that began
- * under the old state, such as a poll already in flight, satisfies the wait
- * only if it lands before the move; anything after must be new. Needs both
- * WireMock and the database configured (COMPONENT-14).
+ * The count is taken just before the move, so rows written earlier under the
+ * old state don't satisfy the wait, as they would for a plain "a record
+ * exists" check. It can't tell which state a later row came from: a poll
+ * already in flight when the step runs can still land after the count, so
+ * make the predicate specific to the new state's behaviour where you can.
+ * Needs both WireMock and the database configured (COMPONENT-14).
  */
 When(
   'the WireMock scenario {string} is moved to state {string} and a new row appears in {word} matching {string}',
