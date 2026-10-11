@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.8](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.7...v0.3.8) (2026-10-11)
+
+
+### Features
+
+* **COMPONENT-10:** SPA support: static server, coverage, failure artefacts ([ba45744](https://github.com/bearingsoftware/component-test-framework/commit/ba45744a5526daf838a4dfc5f3a2c10aa88576ad))
+* **COMPONENT-10:** SPA support: static server, coverage, failure artefacts ([17052aa](https://github.com/bearingsoftware/component-test-framework/commit/17052aa68edf36982dd94f0652ad46fdd6a7a8f1))
+
+
+### Bug Fixes
+
+* **COMPONENT-10:** address review findings on the SPA server ([ad20b80](https://github.com/bearingsoftware/component-test-framework/commit/ad20b801eb3112d3b8e636de38bc862a823e84cf))
+
 ## [0.3.7](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.6...v0.3.7) (2026-10-11)
 
 
