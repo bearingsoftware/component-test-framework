@@ -188,15 +188,35 @@ describe('a namespaced client', () => {
     expect(namespaceUrlMatcher({ urlPathTemplate: '/a/{id}' }, ns)).toEqual({
       urlPathTemplate: '/__worker-2/a/{id}',
     })
-    expect(namespaceUrlMatcher({ urlPathPattern: '/a/.*' }, ns)).toEqual({
-      urlPathPattern: '/__worker-2/a/.*',
-    })
-    expect(namespaceUrlMatcher({ urlPattern: '^/a\\?.*' }, ns)).toEqual({
-      urlPattern: '^/__worker-2/a\\?.*',
-    })
     expect(namespaceUrlMatcher({ method: 'GET' }, ns)).toEqual({
       urlPathPattern: '/__worker-2(/.*)?',
     })
+  })
+
+  // WireMock matches a pattern against the whole path, as these do.
+  const matches = (pattern: string, ns: string, path: string) =>
+    new RegExp(
+      `^(?:${Object.values(namespaceUrlMatcher({ urlPathPattern: pattern }, ns))[0]})$`,
+    ).test(path)
+
+  it('keeps a regex pattern inside its namespace', () => {
+    expect(matches('/a/.*', ns, '/__worker-2/a/x')).toBe(true)
+    expect(matches('/a/.*', ns, '/a/x')).toBe(false)
+    expect(matches('^/a/.*', ns, '/__worker-2/a/x')).toBe(true)
+    expect(matches('.*', ns, '/__worker-2/anything')).toBe(true)
+    expect(matches('/a\\?.*', ns, '/__worker-2/a?b=1')).toBe(true)
+  })
+
+  it("doesn't let a top-level alternation reach outside the namespace", () => {
+    expect(matches('/a|/b', ns, '/__worker-2/b')).toBe(true)
+    expect(matches('/a|/b', ns, '/b')).toBe(false)
+    expect(matches('/a|/b', ns, '/__worker-3/b')).toBe(false)
+  })
+
+  it("doesn't let worker 1's pattern match worker 10's paths", () => {
+    expect(matches('.*/items', '/__worker-1', '/__worker-1/items')).toBe(true)
+    expect(matches('.*/items', '/__worker-1', '/__worker-10/items')).toBe(false)
+    expect(matches('.*', '/__worker-1', '/__worker-10/items')).toBe(false)
   })
 
   it("gives a stub a namespaced id and scenario, and marks it as the namespace's", () => {
@@ -267,7 +287,7 @@ describe('a namespaced client', () => {
         {
           url: '/__admin/requests/count',
           method: 'POST',
-          body: { urlPathPattern: '/__worker-2/orders/.*', method: 'POST' },
+          body: { urlPathPattern: '/__worker-2(?=/|$|\\?)(?:/orders/.*)', method: 'POST' },
         },
         { url: '/__admin/requests/find', method: 'POST', body: { urlPath: '/__worker-2/orders' } },
         {

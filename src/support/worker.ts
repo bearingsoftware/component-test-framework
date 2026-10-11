@@ -61,7 +61,8 @@ export function wiremockNamespace(id = currentWorker().id): string {
 /**
  * The base URL a service under test (or the SPA server) should call WireMock
  * at: unchanged when not running in parallel, otherwise with this worker's
- * prefix, e.g. `http://localhost:8443/__worker-2`. With
+ * prefix, e.g. `http://localhost:8443/__worker-2`. Pass WireMock's root URL,
+ * as for `wiremockUrl`: the prefix goes at the root. With
  * `workerIsolation.wiremock`, the framework registers this worker's stubs
  * under the same prefix, so one WireMock serves every worker.
  */
@@ -94,6 +95,9 @@ export function workerRedisUrl(url: string): string {
   const { id, parallel } = currentWorker()
   if (!parallel) return url
   const parsed = new URL(url)
+  if (parsed.protocol !== 'redis:' && parsed.protocol !== 'rediss:') {
+    throw new Error(`workerRedisUrl needs a redis:// or rediss:// URL, not ${url}`)
+  }
   const db = Number(parsed.pathname.replace(/^\//, '') || '0')
   if (!Number.isInteger(db)) throw new Error(`Redis URL has a database that isn't a number: ${url}`)
   parsed.pathname = `/${db + id}`

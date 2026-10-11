@@ -332,9 +332,11 @@ export function namespaceUrlMatcher(
   if (!key) return { urlPathPattern: `${escapeRegex(ns)}(/.*)?` }
   const value = request[key] as string
   if (key === 'urlPattern' || key === 'urlPathPattern') {
-    return value.startsWith('^')
-      ? { [key]: `^${escapeRegex(ns)}${value.slice(1)}` }
-      : { [key]: `${escapeRegex(ns)}${value}` }
+    // The pattern goes in a group, so a top-level `|` can't reach outside
+    // the prefix, and the prefix must end at a `/` or the end of the path,
+    // so worker 1's `.*/items` can't match worker 10's `/__worker-10/items`.
+    const rest = value.startsWith('^') ? value.slice(1) : value
+    return { [key]: `${escapeRegex(ns)}(?=/|$|\\?)(?:${rest})` }
   }
   return { [key]: `${ns}${value}` }
 }

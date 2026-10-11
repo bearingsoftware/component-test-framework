@@ -84,12 +84,12 @@ Maps each OpenAPI `operationId` from your spec to its HTTP method and path:
 import type { OperationMap } from 'component-test-framework'
 
 export const operationMap: OperationMap = {
-  login: { method: 'POST', path: '/auth/login' },
-  register: { method: 'POST', path: '/auth/register' },
-  listIntegrations: { method: 'GET', path: '/integrations' },
-  createIntegration: { method: 'POST', path: '/integrations' },
-  deleteIntegration: { method: 'DELETE', path: '/integrations/{id}' },
-  dashboardSummary: { method: 'GET', path: '/dashboard/summary' },
+  login:              { method: 'POST', path: '/auth/login' },
+  register:           { method: 'POST', path: '/auth/register' },
+  listIntegrations:   { method: 'GET',  path: '/integrations' },
+  createIntegration:  { method: 'POST', path: '/integrations' },
+  deleteIntegration:  { method: 'DELETE', path: '/integrations/{id}' },
+  dashboardSummary:   { method: 'GET',  path: '/dashboard/summary' },
   // ...
 }
 ```
@@ -123,30 +123,30 @@ module.exports = {
 
 All configuration is loaded from environment variables via `loadConfig()`. Override any value by passing a partial config object.
 
-| Environment Variable | Default                   | Description                                                                                              |
-| -------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `API_BASE_URL`       | `http://localhost:8080`   | Base URL of the API under test                                                                           |
-| `WEB_BASE_URL`       | `http://localhost:3000`   | Base URL of the web UI under test                                                                        |
-| `WIREMOCK_URL`       | `http://localhost:8443`   | WireMock admin API base URL                                                                              |
-| `DATABASE_URL`       | _(none)_                  | PostgreSQL connection string                                                                             |
-| `REDIS_URL`          | _(none)_                  | Redis connection string                                                                                  |
-| `FIXTURES_DIR`       | `./fixtures`              | Path to your fixtures directory                                                                          |
+| Environment Variable | Default | Description |
+|---|---|---|
+| `API_BASE_URL` | `http://localhost:8080` | Base URL of the API under test |
+| `WEB_BASE_URL` | `http://localhost:3000` | Base URL of the web UI under test |
+| `WIREMOCK_URL` | `http://localhost:8443` | WireMock admin API base URL |
+| `DATABASE_URL` | _(none)_ | PostgreSQL connection string |
+| `REDIS_URL` | _(none)_ | Redis connection string |
+| `FIXTURES_DIR` | `./fixtures` | Path to your fixtures directory |
 | `WIREMOCK_STUBS_DIR` | `{FIXTURES_DIR}/wiremock` | Root for `the WireMock stub {string} is registered`. A warning is logged at start-up if it doesn't exist |
 
 ### Options only available in code
 
-| Option               | Default                     | Description                                                                                                                                                                                |
-| -------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `operationMap`       | `{}`                        | Your API's operationId-to-path map                                                                                                                                                         |
-| `cleanupTables`      | _(none)_                    | Tables to clear after each scenario, children first                                                                                                                                        |
-| `defaultStepTimeout` | _(Cucumber's 5s)_           | Timeout in ms for every step and hook. Leave unset to keep a `setDefaultTimeout` call of your own                                                                                          |
-| `waitTimeout`        | _(see [Waiting](#waiting))_ | How long UI and assertion waits poll before failing, in ms                                                                                                                                 |
-| `auth`               | _(none)_                    | How the API issues tokens: `loginPath`, `tokenPath` (default `access_token`), `refreshTokenPath`, `loginMethod`, `loginBody`. See [Requests, values and login](#requests-values-and-login) |
-| `hooks`              | _(none)_                    | Suite code at fixed points: `afterReset`, `onScenarioFailed`, `beforePageClose`. See [Lifecycle hooks](#lifecycle-hooks)                                                                   |
-| `pages`              | _(none)_                    | Page object classes by name, created for every `@ui` scenario. Needs `webBaseUrl`                                                                                                          |
-| `wiremockBaseline`   | _(none)_                    | WireMock stub directories, relative to `fixturesDir`, loaded after every reset                                                                                                             |
-| `cleanup`            | _(none)_                    | Cleanup after each scenario for what `cleanupTables` doesn't cover                                                                                                                         |
-| `serviceWaitTimeout` | `30000`                     | How long waits for background work (DB record waits, opt-in WireMock and DB steps) poll, in ms                                                                                             |
+| Option | Default | Description |
+|---|---|---|
+| `operationMap` | `{}` | Your API's operationId-to-path map |
+| `cleanupTables` | _(none)_ | Tables to clear after each scenario, children first |
+| `defaultStepTimeout` | _(Cucumber's 5s)_ | Timeout in ms for every step and hook. Leave unset to keep a `setDefaultTimeout` call of your own |
+| `waitTimeout` | _(see [Waiting](#waiting))_ | How long UI and assertion waits poll before failing, in ms |
+| `auth` | _(none)_ | How the API issues tokens: `loginPath`, `tokenPath` (default `access_token`), `refreshTokenPath`, `loginMethod`, `loginBody`. See [Requests, values and login](#requests-values-and-login) |
+| `hooks` | _(none)_ | Suite code at fixed points: `afterReset`, `onScenarioFailed`, `beforePageClose`. See [Lifecycle hooks](#lifecycle-hooks) |
+| `pages` | _(none)_ | Page object classes by name, created for every `@ui` scenario. Needs `webBaseUrl` |
+| `wiremockBaseline` | _(none)_ | WireMock stub directories, relative to `fixturesDir`, loaded after every reset |
+| `cleanup` | _(none)_ | Cleanup after each scenario for what `cleanupTables` doesn't cover |
+| `serviceWaitTimeout` | `30000` | How long waits for background work (DB record waits, opt-in WireMock and DB steps) poll, in ms |
 
 ### Suites that don't use WireMock or an API
 
@@ -202,12 +202,12 @@ Given an operation with path `/integrations/{id}`, this produces:
 
 Driven by the operation map. The `{word}` parameters are fixture file paths (without `.json`) and operationIds.
 
-| Step                                                                             | Description                                  |
-| -------------------------------------------------------------------------------- | -------------------------------------------- |
-| `Given I send the request {word} to the {word} operation`                        | Send authenticated request to an operation   |
-| `Given I send the request {word} to the {word} operation with token {word}`      | Send with explicit token                     |
-| `Given I send the request {word} to the {word} operation without authentication` | Send without auth header                     |
-| `When I authenticate with the request {word} to the {word} operation`            | Send login request and store tokens in world |
+| Step | Description |
+|---|---|
+| `Given I send the request {word} to the {word} operation` | Send authenticated request to an operation |
+| `Given I send the request {word} to the {word} operation with token {word}` | Send with explicit token |
+| `Given I send the request {word} to the {word} operation without authentication` | Send without auth header |
+| `When I authenticate with the request {word} to the {word} operation` | Send login request and store tokens in world |
 
 Example:
 
@@ -222,15 +222,15 @@ Scenario: Successful login
 
 Assert against the last API response stored in the world.
 
-| Step                                                                 | Description                                   |
-| -------------------------------------------------------------------- | --------------------------------------------- |
-| `Then the response status should be {int}`                           | Assert HTTP status code                       |
-| `Then the response body should match {word}`                         | Deep partial match against a response fixture |
-| `Then the response body at {word} should equal {string}`             | Assert a dot-path value in the response       |
-| `Then the response body at {word} should be an integer`              | Assert a field is an integer                  |
-| `Then the response body at {word} should contain {int} items`        | Assert array length at a path                 |
-| `Then the response should contain header {word} with value {string}` | Assert a response header value                |
-| `Then the response should contain header {word}`                     | Assert a response header exists               |
+| Step | Description |
+|---|---|
+| `Then the response status should be {int}` | Assert HTTP status code |
+| `Then the response body should match {word}` | Deep partial match against a response fixture |
+| `Then the response body at {word} should equal {string}` | Assert a dot-path value in the response |
+| `Then the response body at {word} should be an integer` | Assert a field is an integer |
+| `Then the response body at {word} should contain {int} items` | Assert array length at a path |
+| `Then the response should contain header {word} with value {string}` | Assert a response header value |
+| `Then the response should contain header {word}` | Assert a response header exists |
 
 The `match` step uses **partial matching**: every key in the expected fixture must exist in the actual response with the same value, but extra keys in the response are ignored.
 
@@ -238,14 +238,14 @@ The `match` step uses **partial matching**: every key in the expected fixture mu
 
 Manage external API stubs during scenarios.
 
-| Step                                                           | Description                                                    |
-| -------------------------------------------------------------- | -------------------------------------------------------------- |
-| `Given the {word} API is stubbed from {word}`                  | Load WireMock mappings from a fixture directory                |
-| `Given the {word} API returns HTTP {int}`                      | Override all routes for a provider with a status code          |
-| `Given the {word} API at {string} returns HTTP {int}`          | Override a specific path                                       |
-| `Given the {word} API at {string} returns the response {word}` | Override a path with a fixture body                            |
-| `Then the {word} API at {string} was called {int} time(s)`     | Wait until a specific path has been called exactly N times     |
-| `Then the {word} API was called {int} time(s)`                 | Wait until a provider has been called exactly N times in total |
+| Step | Description |
+|---|---|
+| `Given the {word} API is stubbed from {word}` | Load WireMock mappings from a fixture directory |
+| `Given the {word} API returns HTTP {int}` | Override all routes for a provider with a status code |
+| `Given the {word} API at {string} returns HTTP {int}` | Override a specific path |
+| `Given the {word} API at {string} returns the response {word}` | Override a path with a fixture body |
+| `Then the {word} API at {string} was called {int} time(s)` | Wait until a specific path has been called exactly N times |
+| `Then the {word} API was called {int} time(s)` | Wait until a provider has been called exactly N times in total |
 
 `the {word} API is stubbed from {word}` sends every mapping in the directory to WireMock in a single `/__admin/mappings/import` call. Mapping files can hold one mapping or WireMock's multi-mapping form, `{ "mappings": [...] }`. Stub precedence is the same as registering each mapping in turn: for equal priorities, the last file wins. Tested against WireMock 3.9.
 
@@ -275,15 +275,15 @@ Scenario: Handle vendor API failure
 
 Generic steps for calling services and counting invocations. Call counts are tracked in the Cucumber world and persist across steps within a scenario.
 
-| Step                                                                                       | Description                                  |
-| ------------------------------------------------------------------------------------------ | -------------------------------------------- |
-| `When the service {word} is called with the request {word} it returns the response {word}` | Call service, compare response with fixture  |
-| `Then the request to the service {word} with request {word} was called {int} time(s)`      | Assert call count                            |
-| `Then the total calls to the service {word} should be {int}`                               | Assert total calls to a service              |
-| `When I wait for a new record in {word} matching {string}`                                 | Poll DB until a matching row appears         |
-| `When I wait for {int} record(s) in {word} matching {string}`                              | Poll DB until at least N matching rows exist |
-| `Then the {word} table contains {int} row(s) matching {string}`                            | Wait until exactly N rows match              |
-| `Then the {word} table is empty`                                                           | Wait until the table is empty                |
+| Step | Description |
+|---|---|
+| `When the service {word} is called with the request {word} it returns the response {word}` | Call service, compare response with fixture |
+| `Then the request to the service {word} with request {word} was called {int} time(s)` | Assert call count |
+| `Then the total calls to the service {word} should be {int}` | Assert total calls to a service |
+| `When I wait for a new record in {word} matching {string}` | Poll DB until a matching row appears |
+| `When I wait for {int} record(s) in {word} matching {string}` | Poll DB until at least N matching rows exist |
+| `Then the {word} table contains {int} row(s) matching {string}` | Wait until exactly N rows match |
+| `Then the {word} table is empty` | Wait until the table is empty |
 
 The two `I wait for` steps poll for `serviceWaitTimeout` (30s by default, as they always have). Table names must be plain SQL identifiers, such as `jobs`, not `schema.jobs`. Predicates are inserted into the SQL as written, so they must come from your own feature files. A query error fails the step at once rather than being retried.
 
@@ -291,18 +291,18 @@ The two `I wait for` steps poll for `serviceWaitTimeout` (30s by default, as the
 
 Tag scenarios with `@ui` to activate Playwright browser lifecycle. All element interaction uses `data-testid` attributes.
 
-| Step                                                                           | Description                                 |
-| ------------------------------------------------------------------------------ | ------------------------------------------- |
-| `Given I navigate to the {word} page`                                          | Navigate to a registered page               |
+| Step | Description |
+|---|---|
+| `Given I navigate to the {word} page` | Navigate to a registered page |
 | `When I click on the {word} on the {word} page, then save the value of {word}` | Click element, save another element's value |
-| `When I click on the {word} on the {word} page`                                | Click an element                            |
-| `When I fill {word} with {string} on the {word} page`                          | Type into an input                          |
-| `When I save the value of {word} on the {word} page`                           | Save an element's current value             |
-| `Then the saved value {word} should be {string}`                               | Assert a previously saved value             |
-| `Then the saved value {word} should not be empty`                              | Assert a saved value is non-empty           |
-| `Then I should see {word} on the {word} page`                                  | Wait for an element to be visible           |
-| `Then I should not see {word} on the {word} page`                              | Wait for an element to be hidden or removed |
-| `Then the {word} page should be displayed`                                     | Wait for the URL to contain the page's path |
+| `When I click on the {word} on the {word} page` | Click an element |
+| `When I fill {word} with {string} on the {word} page` | Type into an input |
+| `When I save the value of {word} on the {word} page` | Save an element's current value |
+| `Then the saved value {word} should be {string}` | Assert a previously saved value |
+| `Then the saved value {word} should not be empty` | Assert a saved value is non-empty |
+| `Then I should see {word} on the {word} page` | Wait for an element to be visible |
+| `Then I should not see {word} on the {word} page` | Wait for an element to be hidden or removed |
+| `Then the {word} page should be displayed` | Wait for the URL to contain the page's path |
 
 Example:
 
@@ -329,18 +329,14 @@ export class LoginPage extends BasePage {
   constructor(page: Page, baseUrl: string) {
     super(page, baseUrl)
   }
-  get url() {
-    return '/login'
-  }
+  get url() { return '/login' }
 }
 
 export class DashboardPage extends BasePage {
   constructor(page: Page, baseUrl: string) {
     super(page, baseUrl)
   }
-  get url() {
-    return '/'
-  }
+  get url() { return '/' }
 }
 ```
 
@@ -366,9 +362,9 @@ Before({ tags: '@ui' }, function (this: ComponentTestWorld) {
 The world keeps named values for the scenario, so one step can save an id that a later request needs:
 
 ```typescript
-this.remember('org', body.id) // keep a value
-this.recall<number>('org') // read it back; throws, naming what is kept, if missing
-this.uniqueId('owner') // e.g. "owner-k3x9q2": the same all scenario, new next scenario
+this.remember('org', body.id)       // keep a value
+this.recall<number>('org')          // read it back; throws, naming what is kept, if missing
+this.uniqueId('owner')              // e.g. "owner-k3x9q2": the same all scenario, new next scenario
 ```
 
 Values and unique ids are cleared before each scenario.
@@ -381,11 +377,11 @@ Values and unique ids are cleared before each scenario.
 import { sendOperation } from '@bearingsoftware/component-test-framework'
 
 await sendOperation(this, 'getScan', {
-  requestFile: '_empty', // or a fixture name; _empty means none
+  requestFile: '_empty',                       // or a fixture name; _empty means none
   pathParams: { oid: this.recall('org'), sid: this.recall('scan') },
   queryParams: { page: '2' },
   headers: { 'X-Request-Id': 'abc' },
-  auth: 'current', // or 'none', or { token: '…' }
+  auth: 'current',                             // or 'none', or { token: '…' }
 })
 ```
 
@@ -400,7 +396,7 @@ registerHooks({
   ...loadConfig(),
   auth: {
     loginPath: '/auth/login',
-    tokenPath: 'token', // where the token is in the response; default access_token
+    tokenPath: 'token',                          // where the token is in the response; default access_token
     loginBody: (username, password) => ({ email: username, password }), // the default
   },
 })
@@ -412,7 +408,7 @@ registerHooks({
 
 ```typescript
 registerLoginTag('@auth-required', {
-  before: (world) => seedUser(world, 'owner@example.com'), // optional
+  before: (world) => seedUser(world, 'owner@example.com'),   // optional
   credentials: { username: 'owner@example.com', password: 'Sup3rSecret!' },
   cache: false, // true reuses the worker's first login; see below
 })
@@ -428,27 +424,27 @@ Helpers: `login(world, username, password)`, `requestLogin(config, username, pas
 
 **Migrating:** these steps keep values with `world.remember` and read them with `world.recall`. Your own steps that read or write those values (for example a seed step that saves an id for a later `saved as` step) must use the same methods, not their own fields such as `world.savedIds`.
 
-| Step                                                                                                      | Description                                                                                                             |
-| --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `Given I capture the id as {word}`                                                                        | Remember the last response's `id`                                                                                       |
-| `Given I capture {word} from the last response as {word}`                                                 | Remember any value, e.g. `items[0].id`                                                                                  |
-| `When I send the request {word} to the {word} operation with {word} saved as {word}`                      | Fill a placeholder from a remembered value                                                                              |
-| `When I send the request {word} to the {word} operation with saved id {word}`                             | Fill `{id}` from a remembered value                                                                                     |
-| `When I send the request {word} to the {word} operation with oid from last response`                      | Fill any placeholder (`oid`, `sid`, …) from the last response's `id`; `with id from last response` is the existing step |
-| `When I send the request {word} to the {word} operation with {word} {word} and {word} from last response` | One placeholder from a remembered value, another from the last response's `id`                                          |
-| `When I send an authed {word} to {string} with body {string}`                                             | Raw request with the current token                                                                                      |
-| `When I log in as {string} with password {string}`                                                        | Log in; fails if refused. Doesn't change the last response                                                              |
-| `When I attempt to log in as {string} with password {string}`                                             | Log in without failing; the response becomes the last response                                                          |
-| `When I remember the current token as {word}` / `When I use the remembered token {word}`                  | Keep a token aside and switch back to it                                                                                |
-| `When I adopt the tokens from the last response`                                                          | Use the token pair in the last response; fails if either token is missing                                               |
-| `Then the response body contains {string}` / `does not contain {string}`                                  | Text anywhere in the JSON body                                                                                          |
-| `Then the response header {word} contains {string}`                                                       | Part of a header value                                                                                                  |
-| `Then the response body at {word} should be a non-empty string`                                           | A non-empty string at a path                                                                                            |
-| `Then the response body at {word} should not be empty`                                                    | Not null, `""`, `[]` or `{}`                                                                                            |
-| `Then the response body should contain {int} items`                                                       | Length of a root array                                                                                                  |
-| `Then the response body should not have {word}`                                                           | A top-level key is absent                                                                                               |
-| `Then the token at {word} in the response has claim {word} equal to {string}`                             | A JWT claim, e.g. `access_token`, `tier`, `beta`                                                                        |
-| `Then I dump the last response`                                                                           | Write status and body to stderr                                                                                         |
+| Step | Description |
+|---|---|
+| `Given I capture the id as {word}` | Remember the last response's `id` |
+| `Given I capture {word} from the last response as {word}` | Remember any value, e.g. `items[0].id` |
+| `When I send the request {word} to the {word} operation with {word} saved as {word}` | Fill a placeholder from a remembered value |
+| `When I send the request {word} to the {word} operation with saved id {word}` | Fill `{id}` from a remembered value |
+| `When I send the request {word} to the {word} operation with oid from last response` | Fill any placeholder (`oid`, `sid`, …) from the last response's `id`; `with id from last response` is the existing step |
+| `When I send the request {word} to the {word} operation with {word} {word} and {word} from last response` | One placeholder from a remembered value, another from the last response's `id` |
+| `When I send an authed {word} to {string} with body {string}` | Raw request with the current token |
+| `When I log in as {string} with password {string}` | Log in; fails if refused. Doesn't change the last response |
+| `When I attempt to log in as {string} with password {string}` | Log in without failing; the response becomes the last response |
+| `When I remember the current token as {word}` / `When I use the remembered token {word}` | Keep a token aside and switch back to it |
+| `When I adopt the tokens from the last response` | Use the token pair in the last response; fails if either token is missing |
+| `Then the response body contains {string}` / `does not contain {string}` | Text anywhere in the JSON body |
+| `Then the response header {word} contains {string}` | Part of a header value |
+| `Then the response body at {word} should be a non-empty string` | A non-empty string at a path |
+| `Then the response body at {word} should not be empty` | Not null, `""`, `[]` or `{}` |
+| `Then the response body should contain {int} items` | Length of a root array |
+| `Then the response body should not have {word}` | A top-level key is absent |
+| `Then the token at {word} in the response has claim {word} equal to {string}` | A JWT claim, e.g. `access_token`, `tier`, `beta` |
+| `Then I dump the last response` | Write status and body to stderr |
 
 Response paths accept `a.b`, `items[0].id` and `items.0.id` (`valueAt`).
 
@@ -470,11 +466,7 @@ If your suite calls `setDefaultTimeout` itself, set `waitTimeout` too, a little 
 Several suites wrote their own waiting steps. The framework now provides them, with the same wording, but registers them only when you call `registerWaitingSteps()`. If they were registered automatically, a suite that still has its own copy would get two matching definitions, and Cucumber fails any step that matches both. Delete your copies, then:
 
 ```typescript
-import {
-  registerHooks,
-  registerWaitingSteps,
-  loadConfig,
-} from '@bearingsoftware/component-test-framework'
+import { registerHooks, registerWaitingSteps, loadConfig } from '@bearingsoftware/component-test-framework'
 
 const options = { ...loadConfig(), operationMap, waitTimeout: 10_000 }
 registerHooks(options)
@@ -485,46 +477,41 @@ UI steps wait up to `waitTimeout`; WireMock and DB steps up to `serviceWaitTimeo
 
 **Migrating.** Keep the waits your copies used, or flakes they fixed can come back:
 
-| Suite                                          | Copies waited | Set                                           |
-| ---------------------------------------------- | ------------- | --------------------------------------------- |
-| joule-genie web                                | 25s (JG-829)  | `waitTimeout: 25_000`                         |
-| joule-genie admin, secure-repo web, health-web | 10s           | `waitTimeout: 10_000`                         |
-| joule-genie worker                             | 30s           | nothing: `serviceWaitTimeout` defaults to 30s |
+| Suite | Copies waited | Set |
+|---|---|---|
+| joule-genie web | 25s (JG-829) | `waitTimeout: 25_000` |
+| joule-genie admin, secure-repo web, health-web | 10s | `waitTimeout: 10_000` |
+| joule-genie worker | 30s | nothing: `serviceWaitTimeout` defaults to 30s |
 
 health-web words some steps differently (`WireMock has received …`, `I accept the next confirmation on …`), so it keeps those.
 
-| Step                                                                                                                      | Description                                                                                                                                 |
-| ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Then the {word} page should eventually be displayed`                                                                     | Wait for the URL to end with the page's path. A query string, `#hash` or trailing `/` after it doesn't match, as with the steps it replaces |
-| `Then the URL should contain {string}`                                                                                    | Wait for the URL to contain a fragment                                                                                                      |
-| `Then I should eventually see {word} on the {word} page`                                                                  | Wait for an element to be visible                                                                                                           |
-| `Then I should eventually not see {word} on the {word} page`                                                              | Wait for an element to be removed from the page                                                                                             |
-| `Then I should still see {word} on the {word} page`                                                                       | Assert an element is visible now, without waiting                                                                                           |
-| `Then I should eventually see {word} containing {string} on the {word} page`                                              | Wait for an element's text to contain a string                                                                                              |
-| `Then {word} on the {word} page should eventually read {string}`                                                          | Wait for an element's trimmed text to equal a string                                                                                        |
-| `Then the {word} on the {word} page should have value {string}`                                                           | Wait for an input's value                                                                                                                   |
-| `When I hover over {word} on the {word} page`                                                                             | Hover over an element                                                                                                                       |
-| `When I select {string} from {word} on the {word} page`                                                                   | Choose an option in a select                                                                                                                |
-| `Given I accept the next confirm dialog`                                                                                  | Accept the next `confirm()`                                                                                                                 |
-| `Given I dismiss the next confirm dialog`                                                                                 | Dismiss the next `confirm()`                                                                                                                |
-| `Then the {word} API eventually receives {int} {word} request(s) to {string}`                                             | Wait for at least N requests with this method to a path pattern                                                                             |
-| `Then the {word} API eventually receives {int} {word} request(s) to {string} whose body matches {string}`                 | As above, counting only bodies that match a JSONPath                                                                                        |
-| `Then the {word} API receives exactly {int} {word} request(s) to {string} whose body matches {string} over {int} seconds` | Reach N, then stay at N for the window                                                                                                      |
-| `Then the {word} API receives no further {word} requests to {string} for {int} seconds`                                   | Let the count settle (up to 7 reads 2s apart), require at least one request, then no new requests for the window                            |
-| `Then the {word} table contains at least {int} row(s) matching {string}`                                                  | Wait for at least N matching rows                                                                                                           |
-| `When I wait for exactly {int} record(s) in {word} matching {string}`                                                     | Wait for exactly N matching rows, e.g. after a delete                                                                                       |
+| Step | Description |
+|---|---|
+| `Then the {word} page should eventually be displayed` | Wait for the URL to end with the page's path. A query string, `#hash` or trailing `/` after it doesn't match, as with the steps it replaces |
+| `Then the URL should contain {string}` | Wait for the URL to contain a fragment |
+| `Then I should eventually see {word} on the {word} page` | Wait for an element to be visible |
+| `Then I should eventually not see {word} on the {word} page` | Wait for an element to be removed from the page |
+| `Then I should still see {word} on the {word} page` | Assert an element is visible now, without waiting |
+| `Then I should eventually see {word} containing {string} on the {word} page` | Wait for an element's text to contain a string |
+| `Then {word} on the {word} page should eventually read {string}` | Wait for an element's trimmed text to equal a string |
+| `Then the {word} on the {word} page should have value {string}` | Wait for an input's value |
+| `When I hover over {word} on the {word} page` | Hover over an element |
+| `When I select {string} from {word} on the {word} page` | Choose an option in a select |
+| `Given I accept the next confirm dialog` | Accept the next `confirm()` |
+| `Given I dismiss the next confirm dialog` | Dismiss the next `confirm()` |
+| `Then the {word} API eventually receives {int} {word} request(s) to {string}` | Wait for at least N requests with this method to a path pattern |
+| `Then the {word} API eventually receives {int} {word} request(s) to {string} whose body matches {string}` | As above, counting only bodies that match a JSONPath |
+| `Then the {word} API receives exactly {int} {word} request(s) to {string} whose body matches {string} over {int} seconds` | Reach N, then stay at N for the window |
+| `Then the {word} API receives no further {word} requests to {string} for {int} seconds` | Let the count settle (up to 7 reads 2s apart), require at least one request, then no new requests for the window |
+| `Then the {word} table contains at least {int} row(s) matching {string}` | Wait for at least N matching rows |
+| `When I wait for exactly {int} record(s) in {word} matching {string}` | Wait for exactly N matching rows, e.g. after a delete |
 
 ### In your own steps
 
 The helpers behind these steps are exported:
 
 ```typescript
-import {
-  eventually,
-  holdsFor,
-  StopRetrying,
-  waitTimeout,
-} from '@bearingsoftware/component-test-framework'
+import { eventually, holdsFor, StopRetrying, waitTimeout } from '@bearingsoftware/component-test-framework'
 
 Then('the export finishes', async function (this: ComponentTestWorld) {
   await eventually(
@@ -559,14 +546,14 @@ const api = registerServiceUnderTest({
   cwd: BACKEND_ROOT,
   cmd: 'go',
   args: ['run', './cmd/api'],
-  binaryEnvVar: 'API_BIN', // run this prebuilt binary instead, when set
-  skipEnvVar: 'SKIP_API_SPAWN', // =1: it's already running, leave it alone
-  beforeStart: clearSettings, // before every start, restarts included
+  binaryEnvVar: 'API_BIN',          // run this prebuilt binary instead, when set
+  skipEnvVar: 'SKIP_API_SPAWN',     // =1: it's already running, leave it alone
+  beforeStart: clearSettings,       // before every start, restarts included
   env: { ...process.env, LISTEN_ADDR: ':18080', DATABASE_URL },
   logFile: path.join(__dirname, '..', '.api.log'),
   readyCheck: { url: 'http://localhost:18080/health' }, // or { probe: async () => boolean }
   healthTimeoutMs: 60_000,
-  stopGraceMs: 15_000, // SIGINT, then SIGKILL after this
+  stopGraceMs: 15_000,              // SIGINT, then SIGKILL after this
 })
 
 // Settings read once at start-up: restart with them changed for tagged
@@ -586,7 +573,6 @@ api.restartForTag('@actuation-locked', { ACTUATION_DISABLED: 'true' })
 For more control, `startService(options)` does the same without registering hooks and returns a handle with `restart(envOverrides)` and `stop()`. `stopServices(a, b)` stops several at once. The older `spawnServiceUnderTest` still works, and also takes `binaryEnvVar`, `stopGraceMs` and `appendLog`; its handle gains `restart`.
 
 **Patterns that keep runs fast and reliable:**
-
 - **Build the binary once in CI** (`go build -cover`) and pass it with `binaryEnvVar`, rather than `go run` per job. Set `GOCOVERDIR`, and give `stopGraceMs` time (15s is safe) for coverage to be written on exit.
 - **Shorten background intervals through the environment** (tick, poll and backoff settings), so scenarios don't wait on a schedule. Set them to 0 where the service supports turning the work off.
 - **Point every vendor URL at WireMock** in the service's environment.
@@ -600,8 +586,8 @@ Suites used to add their own `Before`/`After` hooks and rely on the order Cucumb
 registerHooks({
   ...loadConfig(),
   webBaseUrl: WEB_BASE_URL,
-  pages: { login: LoginPage, dashboard: DashboardPage }, // no registry hook needed
-  wiremockBaseline: ['wiremock/login'], // stubs every scenario needs
+  pages: { login: LoginPage, dashboard: DashboardPage },  // no registry hook needed
+  wiremockBaseline: ['wiremock/login'],                   // stubs every scenario needs
   hooks: {
     afterReset: (world) => world.remember('tenant', world.uniqueId('tenant')),
     onScenarioFailed: async (world, scenario) => {
@@ -614,12 +600,12 @@ registerHooks({
 })
 ```
 
-| Hook               | When                                                                                                                                                                                                                      |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `afterReset`       | After the per-scenario reset (world state, WireMock reset and baseline stubs, Redis flush). It runs before the framework's `@ui` hook, so there's no page yet, and before `Before` hooks registered after `registerHooks` |
-| `onScenarioFailed` | When a scenario has failed, including an undefined, ambiguous or pending step, before anything is torn down; the page is still open. If it throws, cleanup still runs and the error is reported after it                  |
-| `beforePageClose`  | In `@ui` scenarios, just before the framework closes the page. The page is closed even if it throws                                                                                                                       |
-| `cleanup` (option) | After each scenario, after the `cleanupTables` cleanup                                                                                                                                                                    |
+| Hook | When |
+|---|---|
+| `afterReset` | After the per-scenario reset (world state, WireMock reset and baseline stubs, Redis flush). It runs before the framework's `@ui` hook, so there's no page yet, and before `Before` hooks registered after `registerHooks` |
+| `onScenarioFailed` | When a scenario has failed, including an undefined, ambiguous or pending step, before anything is torn down; the page is still open. If it throws, cleanup still runs and the error is reported after it |
+| `beforePageClose` | In `@ui` scenarios, just before the framework closes the page. The page is closed even if it throws |
+| `cleanup` (option) | After each scenario, after the `cleanupTables` cleanup |
 
 After a scenario the order is: `onScenarioFailed` (if it failed), cleanup, `beforePageClose`, then the page closes.
 
@@ -631,18 +617,8 @@ The `/spa` entry point covers what SPA suites need beyond the UI steps: serving 
 
 ```typescript
 import * as path from 'node:path'
-import {
-  registerHooks,
-  loadConfig,
-  registerUiSteps,
-  registerWaitingSteps,
-  type FrameworkOptions,
-} from '@bearingsoftware/component-test-framework/core'
-import {
-  registerSpaServer,
-  registerCoverage,
-  saveFailureArtifacts,
-} from '@bearingsoftware/component-test-framework/spa'
+import { registerHooks, loadConfig, registerUiSteps, registerWaitingSteps, type FrameworkOptions } from '@bearingsoftware/component-test-framework/core'
+import { registerSpaServer, registerCoverage, saveFailureArtifacts } from '@bearingsoftware/component-test-framework/spa'
 
 const SUITE = path.resolve(__dirname, '..')
 
@@ -651,7 +627,7 @@ const SUITE = path.resolve(__dirname, '..')
 const spa = registerSpaServer({
   distDir: path.resolve(SUITE, '../../dist'),
   apiUrl: process.env.WIREMOCK_URL ?? 'http://localhost:8443',
-  runtimeEnv: { VITE_API_BASE_URL: '/api' }, // served as /__env.js: window.__ENV
+  runtimeEnv: { VITE_API_BASE_URL: '/api' },   // served as /__env.js: window.__ENV
   buildHint: '(cd web && npm run build:coverage)',
 })
 
@@ -672,34 +648,31 @@ registerWaitingSteps(options)
 
 **Server** (`registerSpaServer`, or `startSpaServer` to manage it yourself):
 
-| Option                      | Default            |                                                                                                                    |
-| --------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `distDir`                   |                    | The build; must contain `index.html`                                                                               |
-| `apiUrl`                    |                    | Where API paths go, usually WireMock. A path in it goes in front of every forwarded path                           |
-| `proxyPrefixes`             | `['/api']`         | Path prefixes to forward; `/api` matches `/api` and `/api/…`, not `/apiary` (a trailing slash makes no difference) |
-| `stripPrefix`               | `true`             | Remove the prefix before forwarding (`/api/v1/x` → `/v1/x`); `false` keeps the full path                           |
-| `runtimeEnv`                |                    | Served as `/__env.js`, `window.__ENV = {…}`, from memory: the build isn't changed                                  |
-| `mimeTypes`                 |                    | Extra content types, e.g. `.webmanifest`                                                                           |
-| `buildHint`                 |                    | Named in the error when the build is missing                                                                       |
-| `portEnvVar`, `defaultPort` | `WEB_PORT`, `3100` | Where the port comes from (`registerSpaServer` only). Under `--parallel`, worker n adds n                          |
+| Option | Default | |
+|---|---|---|
+| `distDir` | | The build; must contain `index.html` |
+| `apiUrl` | | Where API paths go, usually WireMock. A path in it goes in front of every forwarded path |
+| `proxyPrefixes` | `['/api']` | Path prefixes to forward; `/api` matches `/api` and `/api/…`, not `/apiary` (a trailing slash makes no difference) |
+| `stripPrefix` | `true` | Remove the prefix before forwarding (`/api/v1/x` → `/v1/x`); `false` keeps the full path |
+| `runtimeEnv` | | Served as `/__env.js`, `window.__ENV = {…}`, from memory: the build isn't changed |
+| `mimeTypes` | | Extra content types, e.g. `.webmanifest` |
+| `buildHint` | | Named in the error when the build is missing |
+| `portEnvVar`, `defaultPort` | `WEB_PORT`, `3100` | Where the port comes from (`registerSpaServer` only). Under `--parallel`, worker n adds n |
 
 Before starting it checks the build exists; once listening it fetches `/` to prove the app is served.
-
 - **Paths:** paths outside the build are refused.
 - **Connections:** if the API drops a connection mid-response, the browser's is dropped too, rather than left waiting. When the browser abandons a request (navigating away from a stream, say), the API request ends too. Stopping the server ends any proxied requests still open.
 - **Headers and redirects:** connection-level headers aren't passed on. A redirect from the API to its own address is pointed back through the server.
 - **WebSockets:** upgrades aren't proxied; they get a 501.
 - **Port:** `registerSpaServer` needs a fixed port, since the base URL is worked out before the server starts. Under Cucumber `--parallel`, each worker runs its own server on the port plus its worker number; see [Running in parallel](#running-in-parallel).
 
-**Coverage** (`registerCoverage`, or `createCoverageCollector`) reads `window.__coverage__` from SPAs built with istanbul instrumentation, such as vite-plugin-istanbul. It waits for the document to load, then for the instrumented bundle to run (`loadTimeoutMs`, `evalTimeoutMs`, 6s each), so a page reloaded just before the scenario ended still counts. After the run it writes `coverage/lcov.info`, `coverage-summary.json`, the HTML report and `.nyc_output/out.json`. Under `--parallel`, each worker saves its own coverage in `.nyc_output` and rewrites the reports from every worker's, so the last worker to finish leaves the whole run's.
-
+**Coverage** (`registerCoverage`, or `createCoverageCollector`) reads `window.__coverage__` from SPAs built with istanbul instrumentation, such as vite-plugin-istanbul. It waits for the document to load, then for the instrumented bundle to run (`loadTimeoutMs`, `evalTimeoutMs`, 6s each), so a page reloaded just before the scenario ended still counts. After the run it writes `coverage/lcov.info`, `coverage-summary.json`, the HTML report and `.nyc_output/out.json`. Under `--parallel`, each worker saves its own coverage in `.nyc_output/.workers` and rewrites the reports from every worker's, so the last worker to finish leaves the whole run's.
 - `onMissingSample: 'throw' | 'warn'`: a page with no coverage fails the scenario (default) or is logged and counted.
 - `onNothingCollected: 'skip' | 'throw'`: a run with no coverage at all writes nothing (default) or fails, so a broken build can't report a silent 0%.
 
 It needs `istanbul-lib-coverage`, `istanbul-lib-report` and `istanbul-reports`. `collect` can wait up to `loadTimeoutMs + evalTimeoutMs` (12s by default) inside the framework's `@ui` After hook, so give the suite a step timeout above that, such as `setDefaultTimeout(30_000)`; under Cucumber's 5s default a missing sample shows as a timeout instead of the diagnostic message.
 
 **Browser helpers**
-
 - `saveFailureArtifacts(dir)`: an `onScenarioFailed` hook saving a full-page screenshot and the HTML, named after the scenario.
 - `registerRouteBlocks(tag, routes)`: abort or answer requests to third parties in tagged scenarios (`{ url, fulfill? }`).
 - `registerWebAuthnTag(tag)`: a virtual WebAuthn authenticator for passkey flows (Chromium).
@@ -759,18 +732,21 @@ registerHooks({
 
 Each worker gets:
 
-|                | How                                                                                                                                                                                                                                                                                           | What the service under test needs                                                                                                        |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| WireMock       | One WireMock, shared. The worker's stubs are registered under `/__worker-<n>`, with their ids and scenario names namespaced too, and the per-scenario reset removes only the worker's stubs and requests. Request counts and searches look only under the prefix, and report URLs without it. | Call WireMock at `workerWiremockUrl(url)`. For an SPA, pass it as `registerSpaServer`'s `apiUrl`.                                        |
-| Postgres       | A database per worker, `<name>_w<n>`, copied from the configured one before the first scenario (`CREATE DATABASE … TEMPLATE`). A copy left by an earlier run is dropped first. Cleanup and the database steps use the worker's.                                                               | Use `workerDatabaseUrl(url)`, and await `prepareWorkerDatabase(url)` before starting; it runs once per worker however often it's called. |
-| Redis          | A database index per worker: the URL's index plus n. The per-scenario flush empties only the worker's.                                                                                                                                                                                        | Use `workerRedisUrl(url)`.                                                                                                               |
-| Ports and logs | `workerPort(base)` is `base + n`; `registerSpaServer` adds n itself. Service logs go to `<name>.w<n>.<ext>`.                                                                                                                                                                                  | Listen on the worker's port.                                                                                                             |
+|  | How | What the service under test needs |
+|---|---|---|
+| WireMock | One WireMock, shared. The worker's stubs are registered under `/__worker-<n>`, with their ids and scenario names namespaced too, and the per-scenario reset removes only the worker's stubs and requests. Request counts and searches look only under the prefix, and report URLs without it. | Call WireMock at `workerWiremockUrl(url)`. For an SPA, pass it as `registerSpaServer`'s `apiUrl`. |
+| Postgres | A database per worker, `<name>_w<n>`, copied from the configured one before the first scenario (`CREATE DATABASE … TEMPLATE`). A copy left by an earlier run is dropped first. Cleanup and the database steps use the worker's. | Use `workerDatabaseUrl(url)`, and await `prepareWorkerDatabase(url)` before starting; it runs once per worker however often it's called. |
+| Redis | A database index per worker: the URL's index plus n. The per-scenario flush empties only the worker's. | Use `workerRedisUrl(url)`. |
+| Ports and logs | `workerPort(base)` is `base + n`; `registerSpaServer` adds n itself. Service logs go to `<name>.w<n>.<ext>`. | Listen on the worker's port. |
 
 `currentWorker()` returns `{ id, total, parallel }`, from Cucumber's `CUCUMBER_WORKER_ID` and `CUCUMBER_TOTAL_WORKERS`. Outside a parallel run every helper returns what it was given.
 
 Things to know:
 
-- **Prepare the template first.** Workers copy the configured database, so migrate (and seed) it before the run, and leave nothing connected to it: Postgres won't copy a database another session is using. `prepareWorkerDatabase` retries for 15s, then fails naming the cause. It needs Postgres 13 or later. Pass `workerIsolation.database: { template: 'app_template' }` to copy a different database.
+- **WireMock's own mappings don't apply.** A worker's reset no longer resets the whole of WireMock, and stubs WireMock loads from its own `mappings` folder aren't under any worker's prefix, so the service never reaches them. Load shared stubs with `wiremockBaseline`, which registers them under each worker's prefix after every reset.
+- **`workerWiremockUrl` takes WireMock's root URL**, such as `http://localhost:8443`, as `wiremockUrl` does: the prefix is added at the root.
+- **Prepare the template first.** Workers copy the configured database, so migrate (and seed) it before the run, and leave nothing connected to it: Postgres won't copy a database another session is using. `prepareWorkerDatabase` retries for 15s, then fails naming the cause. It needs Postgres 13 or later. Pass `workerIsolation.database: { template: 'app_template' }` to copy a different database, and the same `template` to `prepareWorkerDatabase`: two calls that disagree fail rather than copying the wrong one. A URL with no database name, or `postgres`, copies `postgres` itself, connecting through `template1` while it does.
+- **One run per Postgres at a time.** Each run drops and recreates `<name>_w<n>`, so two runs sharing a server and a database name would drop each other's databases mid-run. The same goes for two runs sharing a coverage folder.
 - **Space ports apart.** Workers use `base` to `base + N - 1`, so keep services' bases further apart than the worker count.
 - **Redis has 16 databases** unless configured otherwise, so with a base index of 0 that's up to 16 workers.
 - **Pub/sub isn't isolated.** Channels are shared across Redis databases, so parallel scenarios mustn't rely on a channel name being theirs alone.
@@ -798,15 +774,15 @@ Ways consumers have cut their component suites' run time, parallel or not:
 
 The package root works as it always has: it exports everything and registers every built-in step when it's imported. Only the entry points below can be imported: deep paths into `dist/` are no longer reachable. Alongside it are entry points that register nothing on import, so a suite loads and registers only what it uses:
 
-| Entry point                                      | Contents                                                                                                                     |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| `@bearingsoftware/component-test-framework/core` | World, config, `registerHooks`, services, waiting, requests and login, utilities, and `register…Steps()` for each step group |
-| `…/wiremock`                                     | `WireMockClient`, `requestPattern`, `registerWiremockSteps`                                                                  |
-| `…/postgres`                                     | `DbClient`, `countRows`, `queryOnce`, `registerDbSteps`, `registerServiceSteps`                                              |
-| `…/redis`                                        | `RedisClient`, `registerRedisSteps`                                                                                          |
-| `…/playwright`                                   | `BasePage`, `registerUiSteps`                                                                                                |
-| `…/spa`                                          | `registerSpaServer`, `registerCoverage`, `saveFailureArtifacts`, route blocks, WebAuthn, accessibility steps                 |
-| `…/preset`                                       | `cucumberPreset()`, a profile for `cucumber.js`                                                                              |
+| Entry point | Contents |
+|---|---|
+| `@bearingsoftware/component-test-framework/core` | World, config, `registerHooks`, services, waiting, requests and login, the parallel-run helpers (`currentWorker`, `workerPort`, `worker…Url`, `prepareWorkerDatabase`), utilities, and `register…Steps()` for each step group |
+| `…/wiremock` | `WireMockClient`, `requestPattern`, `registerWiremockSteps`, and the namespacing helpers `namespaceStub`, `namespaceUrlMatcher`, `namespaceId` |
+| `…/postgres` | `DbClient`, `countRows`, `queryOnce`, `registerDbSteps`, `registerServiceSteps`, `prepareWorkerDatabase` |
+| `…/redis` | `RedisClient`, `registerRedisSteps` |
+| `…/playwright` | `BasePage`, `registerUiSteps` |
+| `…/spa` | `registerSpaServer`, `registerCoverage`, `saveFailureArtifacts`, route blocks, WebAuthn, accessibility steps |
+| `…/preset` | `cucumberPreset()`, a profile for `cucumber.js` |
 
 The step groups are `registerApiSteps`, `registerRawApiSteps`, `registerSseSteps`, `registerResponseSteps`, `registerWiremockSteps`, `registerDbSteps`, `registerRedisSteps`, `registerServiceSteps` and `registerUiSteps`, plus the opt-in `registerWaitingSteps` and `registerRequestSteps`. Calling one twice, or after importing the root, registers nothing more.
 
@@ -818,31 +794,15 @@ Nothing has to change: the root import keeps working. To move a suite over:
 
 1. **Imports.** Import from `/core` (and an adapter for anything stack-specific) instead of the root.
 2. **Steps.** Replace the `void apiSteps` style imports with the matching calls:
-
    ```typescript
    // before
-   import {
-     registerHooks,
-     apiSteps,
-     responseSteps,
-     uiSteps,
-   } from '@bearingsoftware/component-test-framework'
-   void apiSteps
-   void responseSteps
-   void uiSteps
+   import { registerHooks, apiSteps, responseSteps, uiSteps } from '@bearingsoftware/component-test-framework'
+   void apiSteps; void responseSteps; void uiSteps
 
    // after
-   import {
-     registerHooks,
-     registerApiSteps,
-     registerResponseSteps,
-     registerUiSteps,
-   } from '@bearingsoftware/component-test-framework/core'
-   registerApiSteps()
-   registerResponseSteps()
-   registerUiSteps()
+   import { registerHooks, registerApiSteps, registerResponseSteps, registerUiSteps } from '@bearingsoftware/component-test-framework/core'
+   registerApiSteps(); registerResponseSteps(); registerUiSteps()
    ```
-
 3. **Hooks that depend on order.** Move `Before`/`After` hooks that rely on running before or after the framework's into `hooks`: page registration into `pages`, coverage collection into `beforePageClose`, failure screenshots into `onScenarioFailed`, and stubs every scenario re-adds into `wiremockBaseline`.
 4. **cucumber.js.** Optionally replace it with the preset:
    ```javascript
@@ -866,58 +826,44 @@ Each scenario follows this lifecycle:
 
 ```typescript
 // Types
-;(OperationEntry,
-  OperationMap,
-  CallRecord,
-  UIStateSnapshot,
-  FrameworkConfig,
-  FrameworkOptions,
-  AuthOptions,
-  RequestFilter)
+OperationEntry, OperationMap, CallRecord, UIStateSnapshot, FrameworkConfig, FrameworkOptions, AuthOptions, RequestFilter
 
 // Support
-ComponentTestWorld // Base Cucumber World class
-loadConfig() // Load config from env vars
-requireApiBaseUrl() // Configured API URL, or a clear error if unset
-loadFixture() // Load a JSON fixture file
-listFixtures() // List all fixtures in a directory
-registerHooks() // Wire up Before/After hooks
+ComponentTestWorld    // Base Cucumber World class
+loadConfig()          // Load config from env vars
+requireApiBaseUrl()   // Configured API URL, or a clear error if unset
+loadFixture()         // Load a JSON fixture file
+listFixtures()        // List all fixtures in a directory
+registerHooks()       // Wire up Before/After hooks
 
 // Clients
-WireMockClient // WireMock admin API client
-DbClient // PostgreSQL client (pg)
-RedisClient // Redis client (ioredis)
+WireMockClient        // WireMock admin API client
+DbClient              // PostgreSQL client (pg)
+RedisClient           // Redis client (ioredis)
 
 // Pages
-BasePage // Abstract page object base class
+BasePage              // Abstract page object base class
 
 // Services
-;(registerServiceUnderTest(), startService(), stopServices(), spawnServiceUnderTest())
+registerServiceUnderTest(), startService(), stopServices(), spawnServiceUnderTest()
 
 // Requests, values and login
-;(sendOperation(), fillPath(), EMPTY_REQUEST, valueAt())
-;(login(), requestLogin(), adoptTokens(), jwtClaims(), registerLoginTag(), clearLoginCache())
-;(world.remember(), world.recall(), world.uniqueId())
+sendOperation(), fillPath(), EMPTY_REQUEST, valueAt()
+login(), requestLogin(), adoptTokens(), jwtClaims(), registerLoginTag(), clearLoginCache()
+world.remember(), world.recall(), world.uniqueId()
 
 // Waiting
-;(eventually(), holdsFor(), StopRetrying, isStopRetrying(), waitTimeout(), serviceWaitTimeout())
-;(countRows(), queryOnce(), assertSafeTableName(), requireDb())
-;(assertPartialMatch(), requestPattern(), describeRequests())
+eventually(), holdsFor(), StopRetrying, isStopRetrying(), waitTimeout(), serviceWaitTimeout()
+countRows(), queryOnce(), assertSafeTableName(), requireDb()
+assertPartialMatch(), requestPattern(), describeRequests()
 
 // Steps (import to register with Cucumber)
-;(apiSteps, responseSteps, wiremockSteps, serviceSteps, uiSteps)
+apiSteps, responseSteps, wiremockSteps, serviceSteps, uiSteps
 
 // Opt-in steps (registered only when called)
-;(registerWaitingSteps(), registerRequestSteps())
-;(registerApiSteps(),
-  registerRawApiSteps(),
-  registerSseSteps(),
-  registerResponseSteps(),
-  registerWiremockSteps(),
-  registerDbSteps(),
-  registerRedisSteps(),
-  registerServiceSteps(),
-  registerUiSteps())
+registerWaitingSteps(), registerRequestSteps()
+registerApiSteps(), registerRawApiSteps(), registerSseSteps(), registerResponseSteps(),
+registerWiremockSteps(), registerDbSteps(), registerRedisSteps(), registerServiceSteps(), registerUiSteps()
 
 // cucumber.js (from /preset)
 cucumberPreset()

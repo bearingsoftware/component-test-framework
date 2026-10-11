@@ -118,7 +118,7 @@ describe('coverage under --parallel (COMPONENT-11)', () => {
     JSON.parse(fs.readFileSync(path.join(outDir, 'coverage-summary.json'), 'utf-8')).total
       .statements
   const runFiles = () =>
-    fs.readdirSync(path.join(dir, '.nyc_output')).filter((f) => f.startsWith('worker-'))
+    fs.readdirSync(path.join(dir, '.nyc_output', '.workers')).filter((f) => f.startsWith('worker-'))
 
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctf-coverage-'))
@@ -133,8 +133,8 @@ describe('coverage under --parallel (COMPONENT-11)', () => {
   })
 
   it("merges every worker's coverage into one report, and drops an earlier run's files", async () => {
-    fs.mkdirSync(path.join(dir, '.nyc_output'))
-    fs.writeFileSync(path.join(dir, '.nyc_output', 'worker-1-0.json'), '{}')
+    fs.mkdirSync(path.join(dir, '.nyc_output', '.workers'), { recursive: true })
+    fs.writeFileSync(path.join(dir, '.nyc_output', '.workers', 'worker-1-0.json'), '{}')
 
     // Worker 0 covers the first statement, worker 1 the same file with the
     // second statement too.

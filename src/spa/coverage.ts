@@ -156,34 +156,37 @@ export function createCoverageCollector(options: CoverageCollectorOptions): Cove
     // Under --parallel each worker has only its own scenarios' coverage. It
     // saves that to a file of its own, then, holding a lock, merges every
     // worker's file from this run and rewrites the reports. Whichever
-    // worker finishes last writes the report with everyone's coverage.
-    fs.mkdirSync(nycOutput, { recursive: true })
+    // worker finishes last writes the report with everyone's coverage. The
+    // workers' files go in a folder of their own: nyc reads every .json
+    // directly in .nyc_output as raw coverage, which these aren't.
+    const workers = path.join(nycOutput, '.workers')
+    fs.mkdirSync(workers, { recursive: true })
     const run = runKey()
     const mine: WorkerCoverage = { counts, coverage: map.toJSON() }
-    fs.writeFileSync(path.join(nycOutput, `worker-${run}-${worker.id}.json`), JSON.stringify(mine))
-    withLock(path.join(nycOutput, '.lock'), () => {
+    fs.writeFileSync(path.join(workers, `worker-${run}-${worker.id}.json`), JSON.stringify(mine))
+    withLock(path.join(workers, '.lock'), () => {
       const merged = createCoverageMap({})
       const totals = { collected: 0, missed: 0 }
-      let workers = 0
-      for (const file of fs.readdirSync(nycOutput)) {
+      let reported = 0
+      for (const file of fs.readdirSync(workers)) {
         const match = /^worker-(\d+)-\d+\.json$/.exec(file)
         if (!match) continue
         if (match[1] !== run) {
           // Left by an earlier run.
-          fs.rmSync(path.join(nycOutput, file), { force: true })
+          fs.rmSync(path.join(workers, file), { force: true })
           continue
         }
         const saved = JSON.parse(
-          fs.readFileSync(path.join(nycOutput, file), 'utf-8'),
+          fs.readFileSync(path.join(workers, file), 'utf-8'),
         ) as WorkerCoverage
         merged.merge(saved.coverage)
         totals.collected += saved.counts.collected
         totals.missed += saved.counts.missed
-        workers++
+        reported++
       }
       if (totals.collected > 0) report(merged)
       // Only once every worker has reported can the run have collected nothing.
-      else if (workers >= worker.total) nothingCollected(totals.missed)
+      else if (reported >= worker.total) nothingCollected(totals.missed)
     })
   }
 

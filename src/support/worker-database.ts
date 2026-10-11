@@ -9,7 +9,11 @@ export interface WorkerDatabaseOptions {
    * that) before the run, and have no open connections while workers clone it.
    */
   template?: string
-  /** A database to connect to while creating the copy. Default `postgres`. */
+  /**
+   * A database to connect to while creating the copy. Default `postgres`, or
+   * `template1` when the template is `postgres` itself: nothing may be
+   * connected to the template while it's copied.
+   */
   maintenanceDatabase?: string
   /**
    * How long to keep retrying while the template is in use (another session
@@ -18,7 +22,7 @@ export interface WorkerDatabaseOptions {
   templateBusyTimeoutMs?: number
 }
 
-const prepared = new Map<string, Promise<string>>()
+const prepared = new Map<string, { template: string; pending: Promise<string> }>()
 
 /**
  * Create this worker's database, a fresh copy of the template, and return
@@ -35,13 +39,24 @@ export function prepareWorkerDatabase(
 ): Promise<string> {
   const target = workerDatabaseUrl(url)
   if (target === url) return Promise.resolve(url)
-  let pending = prepared.get(target)
-  if (!pending) {
-    pending = cloneDatabase(url, target, options)
-    prepared.set(target, pending)
-    // A failed attempt isn't remembered, so a later call can try again.
-    pending.catch(() => prepared.delete(target))
+  const template = options.template ?? databaseName(url)
+  const earlier = prepared.get(target)
+  if (earlier) {
+    if (earlier.template !== template) {
+      return Promise.reject(
+        new Error(
+          `prepareWorkerDatabase was asked to copy "${databaseName(target)}" from "${template}", ` +
+            `but an earlier call copies it from "${earlier.template}". Pass the same template ` +
+            `everywhere, including workerIsolation.database.template.`,
+        ),
+      )
+    }
+    return earlier.pending
   }
+  const pending = cloneDatabase(url, target, { ...options, template })
+  prepared.set(target, { template, pending })
+  // A failed attempt isn't remembered, so a later call can try again.
+  pending.catch(() => prepared.delete(target))
   return pending
 }
 
@@ -61,8 +76,23 @@ async function cloneDatabase(
 ): Promise<string> {
   const template = options.template ?? databaseName(url)
   const name = databaseName(target)
+  // Postgres cuts names off at 63 bytes, which could make every worker's
+  // name the same, or the template's own.
+  if (Buffer.byteLength(name) > 63) {
+    throw new Error(
+      `Worker database name "${name}" is longer than Postgres's 63 bytes; use a shorter database name.`,
+    )
+  }
+  const maintenanceDatabase =
+    options.maintenanceDatabase ?? (template === 'postgres' ? 'template1' : 'postgres')
+  if (maintenanceDatabase === template) {
+    throw new Error(
+      `The template "${template}" can't also be the maintenance database: nothing may be connected ` +
+        `to a database while it's copied. Set maintenanceDatabase to another one.`,
+    )
+  }
   const maintenance = new URL(url)
-  maintenance.pathname = `/${encodeURIComponent(options.maintenanceDatabase ?? 'postgres')}`
+  maintenance.pathname = `/${encodeURIComponent(maintenanceDatabase)}`
 
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pg = require('pg') as typeof import('pg')

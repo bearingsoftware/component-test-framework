@@ -79,9 +79,8 @@ function matchPrefix(pathname: string, prefixes: string[]): string | undefined {
  * other path so client-side routes load, and API paths forwarded to
  * WireMock (or any `apiUrl`).
  *
- * Before listening it checks the build exists and writes `__env.js` when
- * `runtimeEnv` is given; once listening it fetches `/` to prove the SPA is
- * served.
+ * Before listening it checks the build exists; once listening it fetches
+ * `/` to prove the SPA is served. `runtimeEnv` is served as `/__env.js`.
  */
 export async function startSpaServer(options: SpaServerOptions): Promise<SpaServer> {
   const root = path.resolve(options.distDir)
