@@ -9,3 +9,8 @@ package.json.orig
 tests/parallel/coverage/
 tests/parallel/.nyc_output/
 tests/parallel/reports/
+
+# The Playwright Test example suite's output
+tests/playwright-test/coverage/
+tests/playwright-test/.nyc_output/
+test-results/

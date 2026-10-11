@@ -1,0 +1,10 @@
+{
+  "request": { "method": "POST", "urlPath": "/auth/login" },
+  "response": {
+    "status": 200,
+    "jsonBody": {
+      "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJvd25lckBleGFtcGxlLmNvbSIsInJvbGUiOiJvd25lciJ9.c2lnbmF0dXJl",
+      "refresh_token": "refresh-1"
+    }
+  }
+}

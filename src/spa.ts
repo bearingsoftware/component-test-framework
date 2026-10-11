@@ -5,7 +5,7 @@
 export { startSpaServer, registerSpaServer } from './spa/server'
 export type { SpaServerOptions, SpaServer, RegisterSpaServerOptions } from './spa/server'
 export { createCoverageCollector, registerCoverage } from './spa/coverage'
-export type { CoverageCollectorOptions, CoverageCollector } from './spa/coverage'
+export type { CoverageCollectorOptions, CoverageCollector, CoverageRun } from './spa/coverage'
 export {
   saveFailureArtifacts,
   addVirtualAuthenticator,
