@@ -142,6 +142,10 @@ All configuration is loaded from environment variables via `loadConfig()`. Overr
 | `defaultStepTimeout` | _(Cucumber's 5s)_ | Timeout in ms for every step and hook. Leave unset to keep a `setDefaultTimeout` call of your own |
 | `waitTimeout` | _(see [Waiting](#waiting))_ | How long UI and assertion waits poll before failing, in ms |
 | `auth` | _(none)_ | How the API issues tokens: `loginPath`, `tokenPath` (default `access_token`), `refreshTokenPath`, `loginMethod`, `loginBody`. See [Requests, values and login](#requests-values-and-login) |
+| `hooks` | _(none)_ | Suite code at fixed points: `afterReset`, `onScenarioFailed`, `beforePageClose`. See [Lifecycle hooks](#lifecycle-hooks) |
+| `pages` | _(none)_ | Page object classes by name, created for every `@ui` scenario. Needs `webBaseUrl` |
+| `wiremockBaseline` | _(none)_ | WireMock stub directories, relative to `fixturesDir`, loaded after every reset |
+| `cleanup` | _(none)_ | Cleanup after each scenario for what `cleanupTables` doesn't cover |
 | `serviceWaitTimeout` | `30000` | How long waits for background work (DB record waits, opt-in WireMock and DB steps) poll, in ms |
 
 ### Suites that don't use WireMock or an API
@@ -574,6 +578,80 @@ For more control, `startService(options)` does the same without registering hook
 - **Point every vendor URL at WireMock** in the service's environment.
 - **Clear state the service reads once at boot** in `beforeStart`. A table the previous run left behind otherwise reconfigures this one.
 
+## Lifecycle hooks
+
+Suites used to add their own `Before`/`After` hooks and rely on the order Cucumber runs them in, for example to collect coverage before the framework closes the page. The `hooks` option runs suite code at fixed points instead:
+
+```typescript
+registerHooks({
+  ...loadConfig(),
+  webBaseUrl: WEB_BASE_URL,
+  pages: { login: LoginPage, dashboard: DashboardPage },  // no registry hook needed
+  wiremockBaseline: ['wiremock/login'],                   // stubs every scenario needs
+  hooks: {
+    afterReset: (world) => world.remember('tenant', world.uniqueId('tenant')),
+    onScenarioFailed: async (world, scenario) => {
+      const name = scenario.pickle.name.replace(/[^\w-]+/g, '_')
+      await world.page?.screenshot({ path: `reports/${name}.png` })
+    },
+    beforePageClose: (world) => collectCoverage(world),
+  },
+  cleanup: (world) => emptyBucket(world),
+})
+```
+
+| Hook | When |
+|---|---|
+| `afterReset` | After the per-scenario reset (world state, WireMock reset and baseline stubs, Redis flush). It runs before the framework's `@ui` hook, so there's no page yet, and before `Before` hooks registered after `registerHooks` |
+| `onScenarioFailed` | When a scenario has failed, including an undefined, ambiguous or pending step, before anything is torn down; the page is still open. If it throws, cleanup still runs and the error is reported after it |
+| `beforePageClose` | In `@ui` scenarios, just before the framework closes the page. The page is closed even if it throws |
+| `cleanup` (option) | After each scenario, after the `cleanupTables` cleanup |
+
+After a scenario the order is: `onScenarioFailed` (if it failed), cleanup, `beforePageClose`, then the page closes.
+
+`wiremockBaseline` directories use WireMock's layout, `<dir>/mappings/*.json`, and need `wiremockUrl`. A missing directory, a baseline without WireMock, and `pages` without `webBaseUrl` are reported when `registerHooks` is called, not in every scenario.
+
+## Entry points
+
+The package root works as it always has: it exports everything and registers every built-in step when it's imported. Only the entry points below can be imported: deep paths into `dist/` are no longer reachable. Alongside it are entry points that register nothing on import, so a suite loads and registers only what it uses:
+
+| Entry point | Contents |
+|---|---|
+| `@bearingsoftware/component-test-framework/core` | World, config, `registerHooks`, services, waiting, requests and login, utilities, and `register…Steps()` for each step group |
+| `…/wiremock` | `WireMockClient`, `requestPattern`, `registerWiremockSteps` |
+| `…/postgres` | `DbClient`, `countRows`, `queryOnce`, `registerDbSteps`, `registerServiceSteps` |
+| `…/redis` | `RedisClient`, `registerRedisSteps` |
+| `…/playwright` | `BasePage`, `registerUiSteps` |
+| `…/preset` | `cucumberPreset()`, a profile for `cucumber.js` |
+
+The step groups are `registerApiSteps`, `registerRawApiSteps`, `registerSseSteps`, `registerResponseSteps`, `registerWiremockSteps`, `registerDbSteps`, `registerRedisSteps`, `registerServiceSteps` and `registerUiSteps`, plus the opt-in `registerWaitingSteps` and `registerRequestSteps`. Calling one twice, or after importing the root, registers nothing more.
+
+The database and Redis drivers (`pg`, `ioredis`) and Playwright load only when they're used, whichever entry point a suite imports. A UI-only suite never loads `pg` or `ioredis`.
+
+### Migrating to the core entry point
+
+Nothing has to change: the root import keeps working. To move a suite over:
+
+1. **Imports.** Import from `/core` (and an adapter for anything stack-specific) instead of the root.
+2. **Steps.** Replace the `void apiSteps` style imports with the matching calls:
+   ```typescript
+   // before
+   import { registerHooks, apiSteps, responseSteps, uiSteps } from '@bearingsoftware/component-test-framework'
+   void apiSteps; void responseSteps; void uiSteps
+
+   // after
+   import { registerHooks, registerApiSteps, registerResponseSteps, registerUiSteps } from '@bearingsoftware/component-test-framework/core'
+   registerApiSteps(); registerResponseSteps(); registerUiSteps()
+   ```
+3. **Hooks that depend on order.** Move `Before`/`After` hooks that rely on running before or after the framework's into `hooks`: page registration into `pages`, coverage collection into `beforePageClose`, failure screenshots into `onScenarioFailed`, and stubs every scenario re-adds into `wiremockBaseline`.
+4. **cucumber.js.** Optionally replace it with the preset:
+   ```javascript
+   const { cucumberPreset } = require('@bearingsoftware/component-test-framework/preset')
+   module.exports = { default: cucumberPreset({ tags: 'not @pending' }) }
+   ```
+
+TypeScript finds the entry points' types with `"moduleResolution": "node"` as well as `node16`/`bundler`.
+
 ## Scenario Lifecycle
 
 Each scenario follows this lifecycle:
@@ -624,6 +702,11 @@ apiSteps, responseSteps, wiremockSteps, serviceSteps, uiSteps
 
 // Opt-in steps (registered only when called)
 registerWaitingSteps(), registerRequestSteps()
+registerApiSteps(), registerRawApiSteps(), registerSseSteps(), registerResponseSteps(),
+registerWiremockSteps(), registerDbSteps(), registerRedisSteps(), registerServiceSteps(), registerUiSteps()
+
+// cucumber.js (from /preset)
+cucumberPreset()
 ```
 
 ## Publishing

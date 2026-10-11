@@ -3,7 +3,7 @@ import { strict as assert } from 'assert'
 import type { ComponentTestWorld } from '../support/world'
 import { sendOperation } from '../support/requests'
 import { adoptTokens, jwtClaims, login, requestLogin } from '../support/auth'
-import { rawRequest } from './api/raw-api.steps'
+import { rawRequest } from '../support/raw-request'
 import { valueAt } from '../utils/json-path'
 
 function lastResponse(world: ComponentTestWorld): NonNullable<ComponentTestWorld['lastResponse']> {

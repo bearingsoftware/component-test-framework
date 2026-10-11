@@ -1,3 +1,8 @@
+import type { Page } from '@playwright/test'
+import type { ITestCaseHookParameter } from '@cucumber/cucumber'
+import type { ComponentTestWorld } from '../support/world'
+import type { BasePage } from '../pages/base.page'
+
 /** Maps an OpenAPI operationId to its HTTP method and URL path. */
 export interface OperationEntry {
   method: string
@@ -20,6 +25,40 @@ export interface UIStateSnapshot {
   step: string
   values: Record<string, string>
 }
+
+/**
+ * Points in the framework's per-scenario lifecycle where suite code runs in
+ * a known order, rather than depending on the order hooks were registered.
+ * Each receives the scenario's world.
+ */
+export interface LifecycleHooks {
+  /**
+   * After the framework's per-scenario reset (world state, WireMock reset and
+   * baseline stubs, Redis flush). It runs before the framework's @ui hook, so
+   * there's no page yet, and before Before hooks registered after
+   * registerHooks.
+   */
+  afterReset?: (world: ComponentTestWorld) => unknown | Promise<unknown>
+  /**
+   * When a scenario has failed (including an undefined, ambiguous or pending
+   * step), before anything is torn down: the page is still open, so this is
+   * the place to save a screenshot or the HTML. If it throws, cleanup still
+   * runs and the error is reported after it.
+   */
+  onScenarioFailed?: (
+    world: ComponentTestWorld,
+    scenario: ITestCaseHookParameter,
+  ) => unknown | Promise<unknown>
+  /**
+   * In @ui scenarios, just before the framework closes the page: for
+   * example to collect browser-side coverage. The page is closed even if this
+   * throws.
+   */
+  beforePageClose?: (world: ComponentTestWorld) => unknown | Promise<unknown>
+}
+
+/** A page object class, as the `pages` option takes it. */
+export type PageClass = new (page: Page, baseUrl: string) => BasePage
 
 /** How the API under test issues tokens, for the login and token steps. */
 export interface AuthOptions {
@@ -64,6 +103,27 @@ export interface FrameworkConfig {
   operationMap?: OperationMap
   /** How the API issues tokens. See {@link AuthOptions}. */
   auth?: AuthOptions
+  /** Suite code to run at fixed points in each scenario. See {@link LifecycleHooks}. */
+  hooks?: LifecycleHooks
+  /**
+   * Page objects by name, created for every @ui scenario with its page and
+   * `webBaseUrl` and put in `world.pageRegistry`, so a suite needn't register
+   * them in a hook of its own.
+   */
+  pages?: Record<string, PageClass>
+  /**
+   * WireMock stub directories, relative to `fixturesDir`, each laid out as
+   * `<dir>/mappings/*.json`, loaded after every reset: stubs most scenarios need, such as a login, so each scenario's
+   * own stubs are only what's particular to it. A scenario's stubs are
+   * added later, so they win where both match at the same priority.
+   */
+  wiremockBaseline?: string[]
+  /**
+   * How to clean up after each scenario, for state `cleanupTables` doesn't
+   * cover (another database, a queue, files). Runs after the `cleanupTables`
+   * cleanup when both are set.
+   */
+  cleanup?: (world: ComponentTestWorld) => unknown | Promise<unknown>
   /** Tables to truncate between scenarios (with CASCADE). */
   cleanupTables?: string[]
   /**

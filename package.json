@@ -4,6 +4,59 @@
   "description": "Reusable Cucumber-based component test framework for APIs, workers, and UIs",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "default": "./dist/core.js"
+    },
+    "./wiremock": {
+      "types": "./dist/wiremock.d.ts",
+      "default": "./dist/wiremock.js"
+    },
+    "./postgres": {
+      "types": "./dist/postgres.d.ts",
+      "default": "./dist/postgres.js"
+    },
+    "./redis": {
+      "types": "./dist/redis.d.ts",
+      "default": "./dist/redis.js"
+    },
+    "./playwright": {
+      "types": "./dist/playwright.d.ts",
+      "default": "./dist/playwright.js"
+    },
+    "./preset": {
+      "types": "./dist/preset.d.ts",
+      "default": "./dist/preset.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "core": [
+        "dist/core.d.ts"
+      ],
+      "wiremock": [
+        "dist/wiremock.d.ts"
+      ],
+      "postgres": [
+        "dist/postgres.d.ts"
+      ],
+      "redis": [
+        "dist/redis.d.ts"
+      ],
+      "playwright": [
+        "dist/playwright.d.ts"
+      ],
+      "preset": [
+        "dist/preset.d.ts"
+      ]
+    }
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bearingsoftware/component-test-framework.git"
@@ -23,7 +76,8 @@
     "test:unit": "vitest run --passWithNoTests",
     "prepublishOnly": "npm run build",
     "pub": "node scripts/publish.mjs",
-    "publish:restore": "node scripts/restore-after-publish.mjs"
+    "publish:restore": "node scripts/restore-after-publish.mjs",
+    "test:smoke": "tsc && cucumber-js --config tests/smoke/cucumber.js"
   },
   "peerDependencies": {
     "@cucumber/cucumber": ">=11.0.0",
