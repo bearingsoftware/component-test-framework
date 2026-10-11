@@ -230,7 +230,7 @@ describe('a namespaced client', () => {
     const scoped = namespaceStub(stub, ns)
     expect(scoped).toEqual({
       id: namespaceId(stub.id, ns),
-      scenarioName: '/__worker-2:checkout',
+      scenarioName: '~2F__worker-2:checkout',
       request: { method: 'GET', urlPath: '/__worker-2/a', headers: { X: { equalTo: '1' } } },
       response: { status: 200 },
       metadata: { owner: 'suite', componentTestNamespace: ns },

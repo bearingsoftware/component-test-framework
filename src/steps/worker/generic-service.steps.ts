@@ -123,6 +123,44 @@ When(
 )
 
 /**
+ * Move a WireMock scenario, then wait for a new row matching the predicate.
+ * The count is taken just before the move, so rows written earlier under the
+ * old state don't satisfy the wait, as they would for a plain "a record
+ * exists" check. It can't tell which state a later row came from: a poll
+ * already in flight when the step runs can still land after the count, so
+ * make the predicate specific to the new state's behaviour where you can.
+ * Needs both WireMock and the database configured (COMPONENT-14).
+ */
+When(
+  'the WireMock scenario {string} is moved to state {string} and a new row appears in {word} matching {string}',
+  async function (
+    this: ComponentTestWorld,
+    name: string,
+    state: string,
+    table: string,
+    whereClause: string,
+  ) {
+    assert.ok(this.db, 'Database client not configured')
+    assertSafeTableName(table)
+    const before = await countRows(this, table, whereClause)
+    await this.wiremock.setScenarioState(name, state)
+    await eventually(
+      async () => {
+        const actual = await countRows(this, table, whereClause)
+        assert.ok(actual > before, `have ${actual}, as before the move`)
+      },
+      {
+        timeout: serviceWaitTimeout(this.config),
+        interval: RECORD_POLL_INTERVAL,
+        description:
+          `waiting for a new record in ${table} WHERE ${whereClause} after moving ` +
+          `WireMock scenario "${name}" to "${state}" (${before} before)`,
+      },
+    )
+  },
+)
+
+/**
  * Poll until `count` rows matching the predicate exist. The predicate is
  * interpolated verbatim, so callers must not pass untrusted input — this is
  * meant for feature-file authored assertions only.

@@ -67,8 +67,17 @@ export type {
 // Clients
 export { WireMockClient } from './clients/wiremock-client'
 export { requestPattern, describeRequests } from './clients/wiremock-client'
-export type { RequestFilter, WireMockClientOptions } from './clients/wiremock-client'
-export { namespaceStub, namespaceUrlMatcher, namespaceId } from './clients/wiremock-client'
+export type {
+  RequestFilter,
+  WireMockClientOptions,
+  WireMockScenario,
+} from './clients/wiremock-client'
+export {
+  namespaceStub,
+  namespaceUrlMatcher,
+  namespaceId,
+  namespaceScenarioName,
+} from './clients/wiremock-client'
 export { DbClient } from './clients/db-client'
 export { RedisClient } from './clients/redis-client'
 export type { PubSubSubscription } from './clients/redis-client'

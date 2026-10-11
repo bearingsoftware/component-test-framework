@@ -246,6 +246,8 @@ Manage external API stubs during scenarios.
 | `Given the {word} API at {string} returns the response {word}` | Override a path with a fixture body |
 | `Then the {word} API at {string} was called {int} time(s)` | Wait until a specific path has been called exactly N times |
 | `Then the {word} API was called {int} time(s)` | Wait until a provider has been called exactly N times in total |
+| `When the WireMock scenario {string} is moved to state {string}` | Move a stateful scenario, so the stubs requiring that state answer |
+| `Then the WireMock scenario {string} is in state {string}` | Wait until a scenario is in a state |
 
 `the {word} API is stubbed from {word}` sends every mapping in the directory to WireMock in a single `/__admin/mappings/import` call. Mapping files can hold one mapping or WireMock's multi-mapping form, `{ "mappings": [...] }`. Stub precedence is the same as registering each mapping in turn: for equal priorities, the last file wins. Tested against WireMock 3.9.
 
@@ -271,6 +273,24 @@ Scenario: Handle vendor API failure
   And the sunsynk API at "/api/v1/inverter/readings" was called 1 time
 ```
 
+#### Scenarios
+
+A WireMock [scenario](https://wiremock.org/docs/stateful-behaviour/) is a set of stubs sharing a `scenarioName`, each answering only in its `requiredScenarioState`. Stubs move it on by themselves with `newScenarioState`. A test can also move it, to make a vendor recover mid-scenario without loading other stubs:
+
+```gherkin
+Scenario: The worker recovers when the vendor does
+  Given the sunsynk API is stubbed from sunsynk-recover
+  Then the worker_errors table contains 1 row matching "provider = 'sunsynk'"
+  When the WireMock scenario "sunsynk-outage" is moved to state "recovered"
+  And I wait for a new record in readings matching "provider = 'sunsynk'"
+```
+
+A background poll that started before the move can still write a row afterwards, under the old state. To be sure the row came after the move, use `the WireMock scenario {string} is moved to state {string} and a new row appears in {word} matching {string}`, one of the service steps. It counts the matching rows before moving the scenario, then waits for one more.
+
+From code, `this.wiremock` has `getScenarios()`, `getScenarioState(name)`, `setScenarioState(name, state)` and `resetScenarios()`. Moving a scenario to a state none of its stubs mention fails, and the error lists the states it has. Every scenario is back in `Started` after the per-scenario reset, because the reset removes the stubs.
+
+WireMock 3 reads the name in `/__admin/scenarios/{name}/state` without decoding it, so it can only move a scenario whose name needs no encoding in a URL: letters, digits and `-._~!$&'()*+,;=:@`, with no spaces. Under worker isolation the framework stores each worker's scenario under an encoded name, such as `~2F__worker-2:sunsynk-outage`. That keeps the workers' scenarios apart, and any name works there. Steps and client calls take the name the stubs give.
+
 ### Service Call Tracking Steps
 
 Generic steps for calling services and counting invocations. Call counts are tracked in the Cucumber world and persist across steps within a scenario.
@@ -282,10 +302,11 @@ Generic steps for calling services and counting invocations. Call counts are tra
 | `Then the total calls to the service {word} should be {int}` | Assert total calls to a service |
 | `When I wait for a new record in {word} matching {string}` | Poll DB until a matching row appears |
 | `When I wait for {int} record(s) in {word} matching {string}` | Poll DB until at least N matching rows exist |
+| `When the WireMock scenario {string} is moved to state {string} and a new row appears in {word} matching {string}` | Count matching rows, move the scenario, then poll until there's one more. Needs WireMock and the database |
 | `Then the {word} table contains {int} row(s) matching {string}` | Wait until exactly N rows match |
 | `Then the {word} table is empty` | Wait until the table is empty |
 
-The two `I wait for` steps poll for `serviceWaitTimeout` (30s by default, as they always have). Table names must be plain SQL identifiers, such as `jobs`, not `schema.jobs`. Predicates are inserted into the SQL as written, so they must come from your own feature files. A query error fails the step at once rather than being retried.
+The two `I wait for` steps and the scenario-move step poll for `serviceWaitTimeout` (30s by default, as they always have). Table names must be plain SQL identifiers, such as `jobs`, not `schema.jobs`. Predicates are inserted into the SQL as written, so they must come from your own feature files. A query error fails the step at once rather than being retried.
 
 ### UI Steps (Playwright)
 
@@ -847,7 +868,7 @@ The package root works as it always has: it exports everything and registers eve
 | Entry point | Contents |
 |---|---|
 | `@bearingsoftware/component-test-framework/core` | World, config, `registerHooks`, services, waiting, requests and login, the parallel-run helpers (`currentWorker`, `workerPort`, `worker…Url`, `prepareWorkerDatabase`), utilities, and `register…Steps()` for each step group |
-| `…/wiremock` | `WireMockClient`, `requestPattern`, `registerWiremockSteps`, and the namespacing helpers `namespaceStub`, `namespaceUrlMatcher`, `namespaceId` |
+| `…/wiremock` | `WireMockClient`, `requestPattern`, `registerWiremockSteps`, and the namespacing helpers `namespaceStub`, `namespaceUrlMatcher`, `namespaceId`, `namespaceScenarioName` |
 | `…/postgres` | `DbClient`, `countRows`, `queryOnce`, `registerDbSteps`, `registerServiceSteps`, `prepareWorkerDatabase` |
 | `…/redis` | `RedisClient`, `registerRedisSteps` |
 | `…/playwright` | `BasePage`, `registerUiSteps` |
