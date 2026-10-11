@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.9](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.8...v0.3.9) (2026-10-11)
+
+
+### Bug Fixes
+
+* **COMPONENT-10:** address second review of the SPA server ([da0503d](https://github.com/bearingsoftware/component-test-framework/commit/da0503d42efebed6893a1ff9161c768648155a84))
+* **COMPONENT-10:** address second review of the SPA server ([173d03f](https://github.com/bearingsoftware/component-test-framework/commit/173d03f24fddbc977081ca405c1e70dc702f5ef0))
+
 ## [0.3.8](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.7...v0.3.8) (2026-10-11)
 
 
