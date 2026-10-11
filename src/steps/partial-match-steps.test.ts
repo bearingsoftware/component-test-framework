@@ -17,8 +17,10 @@ vi.mock('@cucumber/cucumber', async (importOriginal) => {
 })
 
 import './common/response-assertion.steps'
-import './common/redis.steps'
+import { defineRedisSteps } from './common/redis.steps'
 import './worker/generic-service.steps'
+
+defineRedisSteps()
 
 const run = (world: unknown, expression: string, ...args: unknown[]) => {
   const step = steps.get(expression)

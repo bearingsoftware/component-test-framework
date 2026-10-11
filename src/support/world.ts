@@ -39,7 +39,10 @@ export class ComponentTestWorld extends World {
   // --- Valkey / Redis assertion state ---
   lastRedisValue?: string
   lastRedisMessage?: string
+  /** The subscription the last "I subscribe to Valkey …" step opened. */
   activeSubscription?: PubSubSubscription
+  /** Every subscription steps opened this scenario, closed after it. */
+  subscriptions: PubSubSubscription[] = []
 
   // --- Call tracking ---
   callCounts: Map<string, number> = new Map()
@@ -146,6 +149,7 @@ export class ComponentTestWorld extends World {
     this.lastRedisValue = undefined
     this.lastRedisMessage = undefined
     this.activeSubscription = undefined
+    this.subscriptions = []
     this.callCounts.clear()
     this.callHistory = []
     this.uiStateSnapshots = []

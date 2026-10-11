@@ -305,6 +305,21 @@ describe('registerHooks lifecycle options (COMPONENT-9)', () => {
     })
     expect(cleanup).toHaveBeenCalledWith(w)
   })
+
+  it("closes every subscription the scenario's steps opened, even when one fails (COMPONENT-15)", async () => {
+    registerHooks(baseOptions)
+    const first = { close: vi.fn().mockRejectedValue(new Error('gone')) }
+    const second = { close: vi.fn() }
+    const own = { close: vi.fn() }
+    const w = Object.assign(world(), { subscriptions: [first, second], activeSubscription: own })
+    await everyAfter().fn.call(w, {
+      pickle: { name: 'ok', uri: 'x' },
+      result: { status: 'PASSED' },
+    })
+    for (const sub of [first, second, own]) expect(sub.close).toHaveBeenCalledOnce()
+    expect(w.subscriptions).toEqual([])
+    expect(w.activeSubscription).toBeUndefined()
+  })
 })
 
 describe('registerHooks workerIsolation (COMPONENT-11)', () => {

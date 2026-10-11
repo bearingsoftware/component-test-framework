@@ -80,7 +80,12 @@ export {
 } from './clients/wiremock-client'
 export { DbClient } from './clients/db-client'
 export { RedisClient } from './clients/redis-client'
-export type { PubSubSubscription } from './clients/redis-client'
+export type {
+  PubSubSubscription,
+  PubSubMessage,
+  MessagePredicate,
+  ValueMatcher,
+} from './clients/redis-client'
 
 // Pages
 export { BasePage } from './pages/base.page'
@@ -100,6 +105,7 @@ export * as responseSteps from './steps/common/response-assertion.steps'
 export * as dbAssertionSteps from './steps/common/db-assertion.steps'
 export * as wiremockSteps from './steps/common/wiremock.steps'
 export * as redisSteps from './steps/common/redis.steps'
+import { registerRedisSteps as registerRedisStepsOnImport } from './steps/register'
 export * as serviceSteps from './steps/worker/generic-service.steps'
 export * as uiSteps from './steps/ui/generic-ui.steps'
 
@@ -119,6 +125,11 @@ export {
   registerServiceSteps,
   registerUiSteps,
 } from './steps/register'
+export type { RedisStepOptions } from './steps/common/redis.steps'
+
+// The Redis steps are defined by a function, so they can take options; the
+// root registers them on import, as it does the other groups.
+registerRedisStepsOnImport()
 
 // Helpers exposed so consumers can compose their own raw-request step defs.
 export { rawRequest } from './support/raw-request'
