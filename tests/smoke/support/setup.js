@@ -22,6 +22,12 @@ core.registerHooks({
 core.registerResponseSteps()
 core.registerResponseSteps()
 
+// An adapter entry point with opt-in steps, likewise.
+const mailpit = require('../../../dist/mailpit')
+mailpit.registerMailpitSteps()
+mailpit.registerMailpitSteps()
+assert.equal(typeof mailpit.MailpitClient, 'function')
+
 Given('a response with status {int}', function (status) {
   this.lastResponse = { status, body: null, headers: {} }
 })

@@ -44,6 +44,10 @@
       "types": "./dist/openapi.d.ts",
       "default": "./dist/openapi.js"
     },
+    "./mailpit": {
+      "types": "./dist/mailpit.d.ts",
+      "default": "./dist/mailpit.js"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -71,6 +75,9 @@
       ],
       "openapi": [
         "dist/openapi.d.ts"
+      ],
+      "mailpit": [
+        "dist/mailpit.d.ts"
       ]
     }
   },
