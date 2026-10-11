@@ -965,7 +965,7 @@ export { expect } from '@playwright/test'
 
 export const test = defineFixtures({
   spa: { distDir: path.join(__dirname, '../dist'), proxyPrefixes: ['/api'] },
-  wiremock: { url: process.env.WIREMOCK_URL ?? 'http://localhost:8443', resetEachTest: true },
+  wiremock: { url: process.env.WIREMOCK_URL ?? 'http://localhost:8443' },
   stubsDir: path.join(__dirname, 'stubs'),
   auth: { loginPath: '/api/auth/login' },
   coverage: { outDir: path.join(__dirname, 'coverage') },
@@ -988,7 +988,7 @@ test('the dashboard shows the latest order', async ({ page, stubs, auth }) => {
 | Fixture | Scope | What it is |
 |---|---|---|
 | `spaServer` | worker | The built SPA, served with API paths forwarded to WireMock. One per Playwright worker, on a free port, or on `basePort` plus the worker's `parallelIndex`. `baseURL` is its URL, so `page.goto('/')` opens the app. `spa` can be a function of the worker, to give each worker its own `runtimeEnv`. |
-| `wiremock` | worker | A `WireMockClient`. Each worker has its own path prefix, `/__worker-<parallelIndex>`, on the shared WireMock, as with Cucumber's `workerIsolation.wiremock`. It's reset when the worker starts, and before every test with `resetEachTest`, after which `baseline` stub directories are loaded again. `isolate: false` turns the prefix off. |
+| `wiremock` | worker | A `WireMockClient`. Each worker has its own path prefix, `/__worker-<parallelIndex>`, on the shared WireMock, as with Cucumber's `workerIsolation.wiremock`. It's reset before every test (and when the worker starts), after which `baseline` stub directories are loaded again; `resetEachTest: false` resets only when the worker starts. `isolate: false` turns the prefix off. |
 | `wiremockUrl` | worker | The URL a service under test should call WireMock at: the root URL plus the worker's prefix. |
 | `stubs` | test | `load(...names)` loads stub files (`login.json`) or directories laid out as `<name>/mappings/*.json` from `stubsDir`; `add(mapping)` registers one. |
 | `auth` | test | `login(username, password)` sends the login request that `auth` describes (`loginPath`, `loginBody`, `tokenPath` and so on, as for Cucumber) and keeps the tokens. It goes to `auth.apiBaseUrl`, or else through the SPA server, as the SPA's own login would. Also `headers()`, `claims()`, `sign()` for forged tokens, and `storeInLocalStorage(page, key)`. |

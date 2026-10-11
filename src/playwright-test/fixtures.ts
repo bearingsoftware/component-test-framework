@@ -39,7 +39,9 @@ export interface FixtureOptions {
     isolate?: boolean
     /**
      * Reset this worker's stubs and requests before every test, then load
-     * `baseline` again. Default false: they're reset once, when the worker starts.
+     * `baseline` again, as Cucumber resets before every scenario. Default
+     * true; false resets only when the worker starts, so a test sees the
+     * stubs and requests of the tests before it.
      */
     resetEachTest?: boolean
     /** Stub directories, each laid out as `<dir>/mappings/*.json`, loaded after every reset. */
@@ -203,7 +205,7 @@ export function defineFixtures(options: FixtureOptions) {
         await resetWiremock(wiremock)
         await use()
       },
-      { auto: Boolean(wm?.resetEachTest) } as { auto: boolean },
+      { auto: Boolean(wm && (wm.resetEachTest ?? true)) } as { auto: boolean },
     ],
 
     spaServer: [

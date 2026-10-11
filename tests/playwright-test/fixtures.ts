@@ -12,7 +12,7 @@ export const test = defineFixtures({
   }),
   // CTF_NO_ISOLATION=1 shares one WireMock namespace between workers, to see
   // the price tests trample each other.
-  wiremock: { url: WIREMOCK_URL, resetEachTest: true, isolate: !process.env.CTF_NO_ISOLATION },
+  wiremock: { url: WIREMOCK_URL, isolate: !process.env.CTF_NO_ISOLATION },
   stubsDir: path.join(__dirname, 'stubs'),
   // Logins go the way the SPA's would: through the SPA server to WireMock.
   auth: { loginPath: '/api/auth/login' },
