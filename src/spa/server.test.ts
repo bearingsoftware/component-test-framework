@@ -112,16 +112,23 @@ describe('SPA server (COMPONENT-10)', () => {
     })
   })
 
-  it('answers client-side routes and missing files with index.html', async () => {
+  it('answers client-side routes with index.html, and a missing asset with a 404', async () => {
     const { baseUrl } = await start()
     expect(await get(baseUrl, '/projects/42/settings')).toMatchObject({
       status: 200,
       body: '<html>app</html>',
     })
-    expect(await get(baseUrl, '/assets/missing.js')).toMatchObject({
-      status: 200,
-      body: '<html>app</html>',
-    })
+    // As deployed: a missing asset is a 404, so a test can see the build never emitted it.
+    expect(await get(baseUrl, '/assets/missing.js')).toMatchObject({ status: 404 })
+    expect(await get(baseUrl, '/assets/maplibre-gl-worker.mjs')).toMatchObject({ status: 404 })
+  })
+
+  it('answers a browser navigation with index.html even when the path looks like a file', async () => {
+    const { baseUrl } = await start()
+    const res = await fetch(`${baseUrl}/releases/v1.2`, { headers: { Accept: 'text/html' } })
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('<html>app</html>')
+    expect((await fetch(`${baseUrl}/releases/v1.2`)).status).toBe(404)
   })
 
   it('refuses paths outside the build, including a sibling folder with the same prefix', async () => {

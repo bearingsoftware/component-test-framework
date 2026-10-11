@@ -76,8 +76,8 @@ function matchPrefix(pathname: string, prefixes: string[]): string | undefined {
 
 /**
  * Serve a built SPA the way it's deployed: its files, `index.html` for any
- * other path so client-side routes load, and API paths forwarded to
- * WireMock (or any `apiUrl`).
+ * other page so client-side routes load, a 404 for a missing asset, and API
+ * paths forwarded to WireMock (or any `apiUrl`).
  *
  * Before listening it checks the build exists; once listening it fetches
  * `/` to prove the SPA is served. `runtimeEnv` is served as `/__env.js`.
@@ -132,7 +132,11 @@ export async function startSpaServer(options: SpaServerOptions): Promise<SpaServ
       res.end('bad request')
       return
     }
-    serveFile(res, root, decoded === '/' ? '/index.html' : decoded, indexHtml, mimeTypes)
+    serveFile(res, root, decoded === '/' ? '/index.html' : decoded, {
+      indexHtml,
+      mimeTypes,
+      isPage: isPageRequest(req, decoded),
+    })
   })
 
   // WebSocket upgrades aren't proxied; say so rather than leave the client waiting.
@@ -271,13 +275,29 @@ function forward(req: http.IncomingMessage, res: http.ServerResponse, f: Forward
   req.pipe(upstream)
 }
 
-/** Serve a file from the build, or index.html for anything that isn't one. */
+/**
+ * Whether a request for a path that isn't in the build is for a page, which
+ * gets `index.html`, rather than an asset, which gets a 404: a browser
+ * navigation (it accepts HTML) or a path without a file extension. A missing
+ * `/assets/worker.mjs` must 404 as it does when deployed, or a test can't
+ * see that the build never emitted it.
+ */
+function isPageRequest(req: http.IncomingMessage, requestPath: string): boolean {
+  if ((req.headers.accept ?? '').includes('text/html')) return true
+  const ext = path.extname(requestPath)
+  return ext === '' || ext === '.html'
+}
+
+/** Serve a file from the build; otherwise index.html for a page, or a 404. */
 function serveFile(
   res: http.ServerResponse,
   root: string,
   requestPath: string,
-  indexHtml: string,
-  mimeTypes: Record<string, string>,
+  {
+    indexHtml,
+    mimeTypes,
+    isPage,
+  }: { indexHtml: string; mimeTypes: Record<string, string>; isPage: boolean },
 ): void {
   const resolved = path.normalize(path.join(root, requestPath))
   // With the separator, so a sibling such as dist-old isn't inside dist.
@@ -286,7 +306,13 @@ function serveFile(
     res.end('forbidden')
     return
   }
-  const file = fs.existsSync(resolved) && fs.statSync(resolved).isFile() ? resolved : indexHtml
+  const exists = fs.existsSync(resolved) && fs.statSync(resolved).isFile()
+  if (!exists && !isPage) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+    res.end(`not in the build: ${requestPath}`)
+    return
+  }
+  const file = exists ? resolved : indexHtml
   const type = mimeTypes[path.extname(file)] ?? 'application/octet-stream'
   res.writeHead(200, { 'Content-Type': type })
   fs.createReadStream(file)
