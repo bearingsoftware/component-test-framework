@@ -1,0 +1,9 @@
+{
+  "swagger": "2.0",
+  "basePath": "/v2",
+  "paths": {
+    "/projects/{id}/remediable": { "get": {}, "post": {} },
+    "/projects": { "get": { "summary": "All projects" } },
+    "/2fa/codes": { "post": {} }
+  }
+}
