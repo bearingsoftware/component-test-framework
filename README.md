@@ -708,7 +708,8 @@ import { registerSpaServer, registerCoverage, saveFailureArtifacts } from '@bear
 const SUITE = path.resolve(__dirname, '..')
 
 // Serves web/dist on WEB_PORT (default 3100): its files, index.html for
-// client-side routes, and /api/* forwarded to WireMock with /api removed.
+// client-side routes, a 404 for a missing asset, and /api/* forwarded to
+// WireMock with /api removed.
 const spa = registerSpaServer({
   distDir: path.resolve(SUITE, '../../dist'),
   apiUrl: process.env.WIREMOCK_URL ?? 'http://localhost:8443',
