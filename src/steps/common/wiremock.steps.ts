@@ -1,4 +1,4 @@
-import { Given, Then } from '@cucumber/cucumber'
+import { Given, Then, When } from '@cucumber/cucumber'
 import { strict as assert } from 'assert'
 import * as path from 'path'
 import type { ComponentTestWorld } from '../../support/world'
@@ -110,5 +110,29 @@ Then(
   'the {word} API was called {int} time(s)',
   async function (this: ComponentTestWorld, provider: string, count: number) {
     await waitForExactRequestCount(this, `/${provider}/.*`, count)
+  },
+)
+
+// COMPONENT-14: stateful stubs. A scenario's stubs answer by its state, so a
+// test can move it on mid-scenario, say from failing to recovered, without
+// loading other stubs. Under worker isolation each worker has its own.
+When(
+  'the WireMock scenario {string} is moved to state {string}',
+  async function (this: ComponentTestWorld, name: string, state: string) {
+    await this.wiremock.setScenarioState(name, state)
+  },
+)
+
+Then(
+  'the WireMock scenario {string} is in state {string}',
+  async function (this: ComponentTestWorld, name: string, state: string) {
+    await eventually(
+      async () => {
+        const actual = await this.wiremock.getScenarioState(name)
+        if (actual === undefined) throw new StopRetrying(`WireMock has no scenario "${name}"`)
+        assert.equal(actual, state, `WireMock scenario "${name}" is in state "${actual}"`)
+      },
+      { timeout: waitTimeout(this.config) },
+    )
   },
 )

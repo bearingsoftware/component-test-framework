@@ -26,6 +26,24 @@ Feature: Ordering, run by four workers at once
       | 111   | 222   |
       | 112   | 224   |
 
+  Scenario Outline: A promotion the test starts changes the quote (<first> then <second>)
+    Given the pricing service quotes <first> for SPROCKET until the "promotion" scenario is "discounted", then <second>
+    When I order 1 of SPROCKET
+    Then the order total is <first>
+    When the WireMock scenario "promotion" is moved to state "discounted"
+    Then the WireMock scenario "promotion" is in state "discounted"
+    When I order 1 of SPROCKET
+    Then the order total is <second>
+
+    Examples:
+      | first | second |
+      | 40    | 30     |
+      | 41    | 31     |
+      | 42    | 32     |
+      | 43    | 33     |
+      | 44    | 34     |
+      | 45    | 35     |
+
   Scenario Outline: A repriced order uses the second quote (<first> then <second>)
     Given the pricing service quotes <first> and then <second> for GADGET
     When I order 1 of GADGET

@@ -32,6 +32,16 @@ export interface WireMockClientOptions {
   namespace?: string
 }
 
+/** A WireMock scenario, as {@link WireMockClient.getScenarios} reports it. */
+export interface WireMockScenario {
+  /** The name stubs give in `scenarioName`, without any namespace. */
+  name: string
+  /** The state it is in now. */
+  state: string
+  /** Every state its stubs mention, `Started` among them. */
+  possibleStates: string[]
+}
+
 /** The metadata key that marks which namespace registered a stub. */
 const NAMESPACE_KEY = 'componentTestNamespace'
 
@@ -243,6 +253,102 @@ export class WireMockClient {
     await this.expectOk(res, 'removeStub')
   }
 
+  /**
+   * Every scenario WireMock knows, with its state. With a namespace, only
+   * this client's scenarios, under the names its stubs gave them.
+   */
+  async getScenarios(): Promise<WireMockScenario[]> {
+    const res = await this.fetch(this.url('/__admin/scenarios'))
+    await this.expectOk(res, 'getScenarios')
+    const data = (await res.json()) as {
+      scenarios?: { id?: string; name?: string; state: string; possibleStates?: string[] }[]
+    }
+    const ns = this.options.namespace
+    const prefix = ns ? `${pathSafe(ns)}:` : ''
+    return (data.scenarios ?? []).flatMap((scenario) => {
+      const stored = scenario.name ?? scenario.id ?? ''
+      if (!stored.startsWith(prefix)) return []
+      return [
+        {
+          name: ns ? fromPathSafe(stored.slice(prefix.length)) : stored,
+          state: scenario.state,
+          possibleStates: scenario.possibleStates ?? [],
+        },
+      ]
+    })
+  }
+
+  /** The state a scenario is in, or undefined when no stub of this client's names it. */
+  async getScenarioState(name: string): Promise<string | undefined> {
+    return (await this.getScenarios()).find((s) => s.name === name)?.state
+  }
+
+  /**
+   * Move a scenario to `state`, as a stub's `newScenarioState` would, so the
+   * stubs requiring that state answer from now on. The state must be one
+   * the scenario's stubs mention. With a namespace, only this client's
+   * scenario of that name moves.
+   */
+  async setScenarioState(name: string, state: string): Promise<void> {
+    const res = await this.fetch(this.scenarioStateUrl(name), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ state }),
+    })
+    if (res.status === 404 || res.status === 422) {
+      const scenarios = await this.getScenarios().catch(() => [])
+      const scenario = scenarios.find((s) => s.name === name)
+      if (!scenario) {
+        const known = scenarios.map((s) => `"${s.name}"`).join(', ') || 'none'
+        throw new Error(
+          `WireMock has no scenario "${name}" (scenarios: ${known}). ` +
+            `A scenario exists once a stub naming it in scenarioName is registered.`,
+        )
+      }
+      throw new Error(
+        `WireMock scenario "${name}" has no state "${state}" ` +
+          `(states: ${scenario.possibleStates.map((s) => `"${s}"`).join(', ')})`,
+      )
+    }
+    await this.expectOk(res, `setScenarioState("${name}", "${state}")`)
+  }
+
+  /**
+   * Put scenarios back in their `Started` state. With a namespace, only this
+   * client's; without, every scenario.
+   */
+  async resetScenarios(): Promise<void> {
+    if (!this.options.namespace) {
+      const res = await this.fetch(this.url('/__admin/scenarios/reset'), { method: 'POST' })
+      return this.expectOk(res, 'resetScenarios')
+    }
+    for (const scenario of await this.getScenarios()) {
+      // A PUT with no body puts the scenario back in Started.
+      const res = await this.fetch(this.scenarioStateUrl(scenario.name), { method: 'PUT' })
+      // One whose stubs another step just removed is already gone.
+      if (res.status !== 404) await this.expectOk(res, `resetScenarios ("${scenario.name}")`)
+    }
+  }
+
+  /**
+   * The admin URL of a scenario's state. WireMock 3 matches the name in this
+   * URL without decoding it, so a name that needs encoding can't be
+   * addressed. Under a namespace the stored name is always safe (see
+   * {@link namespaceScenarioName}); without one, a name must be.
+   */
+  private scenarioStateUrl(name: string): string {
+    const ns = this.options.namespace
+    const stored = ns ? namespaceScenarioName(name, ns) : name
+    if (!URL_SAFE_NAME.test(stored)) {
+      throw new Error(
+        `WireMock can't address scenario "${name}": its admin API reads the name from the URL ` +
+          `without decoding it, so a scenario moved by name may only use letters, digits and ` +
+          `-._~!$&'()*+,;=:@. Rename it in the stubs' scenarioName.`,
+      )
+    }
+    return this.url(`/__admin/scenarios/${stored}/state`)
+  }
+
   /** Get the count of requests matching a URL path pattern, optionally filtered by method. */
   async getRequestCount(urlPathPattern: string, filter: RequestFilter = {}): Promise<number> {
     const res = await this.fetch(this.url('/__admin/requests/count'), {
@@ -377,8 +483,45 @@ export function namespaceStub(
     if (typeof mapping[key] === 'string') scoped[key] = namespaceId(mapping[key] as string, ns)
   }
   if (typeof mapping.scenarioName === 'string')
-    scoped.scenarioName = `${ns}:${mapping.scenarioName}`
+    scoped.scenarioName = namespaceScenarioName(mapping.scenarioName, ns)
   return scoped
+}
+
+/** Characters a scenario name can have and still be addressed in WireMock's admin URLs. */
+const URL_SAFE_NAME = /^[A-Za-z0-9\-._~!$&'()*+,;=:@]+$/
+
+/**
+ * Text with every character but letters, digits, `-`, `_` and `.` written as
+ * `~` and a UTF-8 byte in hex, so it needs no encoding in a URL path and
+ * reads back unchanged with {@link fromPathSafe}.
+ */
+function pathSafe(text: string): string {
+  return Array.from(text)
+    .map((char) =>
+      /[A-Za-z0-9_.-]/.test(char)
+        ? char
+        : Array.from(
+            Buffer.from(char, 'utf-8'),
+            (byte) => `~${byte.toString(16).toUpperCase().padStart(2, '0')}`,
+          ).join(''),
+    )
+    .join('')
+}
+
+function fromPathSafe(text: string): string {
+  return text.replace(/(?:~[0-9A-F]{2})+/g, (run) =>
+    Buffer.from(run.replace(/~/g, ''), 'hex').toString('utf-8'),
+  )
+}
+
+/**
+ * A scenario name as a namespaced client registers it, e.g. `checkout` under
+ * `/__worker-2` is `~2F__worker-2:checkout`. Two namespaces never share a
+ * scenario, and the name needs no encoding in WireMock's admin URLs, which
+ * WireMock 3 doesn't decode, whatever characters the stubs' name has.
+ */
+export function namespaceScenarioName(name: string, ns: string): string {
+  return `${pathSafe(ns)}:${pathSafe(name)}`
 }
 
 /** A logged request with the namespace taken off its URL. */

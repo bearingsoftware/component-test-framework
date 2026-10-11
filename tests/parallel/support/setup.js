@@ -106,6 +106,30 @@ Given(
   },
 )
 
+// A scenario the test moves itself (COMPONENT-14): one quote while it is
+// Started, another once a step moves it on. Moving it by name must move
+// only this worker's.
+Given(
+  'the pricing service quotes {int} for {word} until the {string} scenario is {string}, then {int}',
+  async function (first, sku, scenarioName, state, second) {
+    const request = { method: 'GET', urlPath: `/pricing/prices/${sku}` }
+    await this.wiremock.importStubs([
+      {
+        scenarioName,
+        requiredScenarioState: 'Started',
+        request,
+        response: { status: 200, jsonBody: { price: first } },
+      },
+      {
+        scenarioName,
+        requiredScenarioState: state,
+        request,
+        response: { status: 200, jsonBody: { price: second } },
+      },
+    ])
+  },
+)
+
 When('I order {int} of {word}', async function (qty, sku) {
   const res = await fetch(`${this.config.apiBaseUrl}/orders`, {
     method: 'POST',

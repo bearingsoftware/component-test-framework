@@ -42,7 +42,7 @@ export function registerRedisSteps(): void {
   require('./common/redis.steps')
 }
 
-/** Service calls, call counts and the database record waits. */
+/** Service calls, call counts, the database record waits and the WireMock scenario move that waits for a row. */
 export function registerServiceSteps(): void {
   require('./worker/generic-service.steps')
 }
