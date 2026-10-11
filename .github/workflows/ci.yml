@@ -24,13 +24,17 @@ jobs:
     if: "!startsWith(github.head_ref, 'release-please--')"
     runs-on: ubuntu-latest
     # COMPONENT-15: the RedisClient tests run against a real Redis; without
-    # REDIS_URL they skip.
+    # REDIS_URL they skip. COMPONENT-16: the Mailpit client's integration
+    # test sends real mail.
     services:
       redis:
         image: redis:7-alpine
         ports: ["56391:6379"]
         options: >-
           --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30
+      mailpit:
+        image: axllent/mailpit:v1.27
+        ports: ["58025:8025", "51025:1025"]
     env:
       REDIS_URL: redis://localhost:56391
     steps:
@@ -44,7 +48,12 @@ jobs:
       # The UI step tests drive a real browser; they skip themselves without one.
       - name: Install Chromium for the UI step tests
         run: npx playwright install --with-deps chromium
+      - name: Wait for Mailpit
+        run: timeout 60 sh -c 'until curl -sf http://localhost:58025/api/v1/info; do sleep 1; done'
       - name: Run unit tests
+        env:
+          MAILPIT_URL: http://localhost:58025
+          MAILPIT_SMTP: localhost:51025
         run: npm run test:unit
       # The built package under a real Cucumber run: entry points, step
       # registration and lifecycle hooks.
