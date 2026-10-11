@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.11](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.10...v0.3.11) (2026-10-11)
+
+
+### Features
+
+* **COMPONENT-12:** ctf command to generate, check and audit operation maps ([a1aeb13](https://github.com/bearingsoftware/component-test-framework/commit/a1aeb13d5a4b90fb00207c8b2825884abc057eb6))
+* **COMPONENT-12:** ctf command to generate, check and audit operation maps ([4c14757](https://github.com/bearingsoftware/component-test-framework/commit/4c14757cf48681980b65b084b3111d18bc9763e3))
+
+
+### Bug Fixes
+
+* **COMPONENT-12:** address review of the ctf OpenAPI tooling ([7fa3fd4](https://github.com/bearingsoftware/component-test-framework/commit/7fa3fd41a1114347b3b6190a737dce9bb8152c57))
+
 ## [0.3.10](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.9...v0.3.10) (2026-10-11)
 
 
