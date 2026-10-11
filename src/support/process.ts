@@ -2,6 +2,7 @@ import { spawn, ChildProcess } from 'node:child_process'
 import { createWriteStream, WriteStream, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { Before, After, BeforeAll, AfterAll } from '@cucumber/cucumber'
+import { workerFile } from './worker'
 
 /**
  * Options for {@link spawnServiceUnderTest}.
@@ -19,7 +20,8 @@ export interface SpawnServiceOptions {
   env?: NodeJS.ProcessEnv
   /**
    * Path to write stdout+stderr. Parent directories are created as needed.
-   * Omit to discard output.
+   * Omit to discard output. Under Cucumber `--parallel`, each worker's
+   * service logs to its own file, with `.w<n>` before the extension.
    */
   logFile?: string
   /** Append to `logFile` rather than starting it afresh. Default false. */
@@ -110,10 +112,14 @@ class ManagedService {
   private stopping = false
   private finalStop: Promise<void> | null = null
 
-  constructor(private readonly opts: SpawnServiceOptions) {
-    if (opts.logFile) {
-      mkdirSync(dirname(opts.logFile), { recursive: true })
-      this.log = createWriteStream(opts.logFile, { flags: opts.appendLog ? 'a' : 'w' })
+  private readonly opts: SpawnServiceOptions
+
+  constructor(opts: SpawnServiceOptions) {
+    const logFile = opts.logFile ? workerFile(opts.logFile) : undefined
+    this.opts = { ...opts, logFile }
+    if (logFile) {
+      mkdirSync(dirname(logFile), { recursive: true })
+      this.log = createWriteStream(logFile, { flags: opts.appendLog ? 'a' : 'w' })
     }
   }
 

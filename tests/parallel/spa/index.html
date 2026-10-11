@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Shop</title>
+    <script src="/__env.js"></script>
+  </head>
+  <body>
+    <p>Served for worker <span id="worker">?</span></p>
+    <p>Widget price: <span id="price">loading</span></p>
+    <script>
+      // Stands in for an instrumented bundle: istanbul coverage for one file,
+      // with a statement per worker, so the merged report shows every
+      // worker's coverage arrived.
+      const worker = window.__ENV.WORKER
+      const statements = {}
+      const counts = {}
+      for (let i = 0; i < 16; i++) {
+        statements[i] = { start: { line: i + 1, column: 0 }, end: { line: i + 1, column: 10 } }
+        counts[i] = String(i) === worker ? 1 : 0
+      }
+      window.__coverage__ = {
+        '/shop/app.js': {
+          path: '/shop/app.js',
+          statementMap: statements,
+          fnMap: {},
+          branchMap: {},
+          s: counts,
+          f: {},
+          b: {},
+        },
+      }
+      document.getElementById('worker').textContent = worker
+      fetch('/api/pricing/prices/WIDGET')
+        .then((res) => res.json())
+        .then((quote) => (document.getElementById('price').textContent = String(quote.price)))
+    </script>
+  </body>
+</html>

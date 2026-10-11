@@ -16,6 +16,7 @@ export type {
   AuthOptions,
   LifecycleHooks,
   PageClass,
+  WorkerIsolationOptions,
 } from './types'
 
 // Setup
@@ -38,6 +39,20 @@ export type {
   ServiceHandle,
   RegisteredService,
 } from './support/process'
+
+// Parallel runs
+export {
+  currentWorker,
+  workerPort,
+  workerFile,
+  wiremockNamespace,
+  workerWiremockUrl,
+  workerDatabaseUrl,
+  workerRedisUrl,
+} from './support/worker'
+export type { WorkerInfo } from './support/worker'
+export { prepareWorkerDatabase } from './support/worker-database'
+export type { WorkerDatabaseOptions } from './support/worker-database'
 
 // Waiting
 export {

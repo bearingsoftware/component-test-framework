@@ -41,6 +41,57 @@ jobs:
       - name: Run smoke tests
         run: npm run test:smoke
 
+  # COMPONENT-11: the reference suite, four Cucumber workers sharing one
+  # WireMock, Postgres and Redis, kept apart by workerIsolation.
+  parallel-reference:
+    if: "!startsWith(github.head_ref, 'release-please--')"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["55440:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports: ["56390:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30
+      wiremock:
+        image: wiremock/wiremock:3.9.2
+        ports: ["58443:8080"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Install Chromium for the SPA scenarios
+        run: npx playwright install --with-deps chromium
+      # The throwaway database needn't survive a crash. A services: container
+      # can't take -c flags, but these three settings reload without a restart.
+      - name: Take durability off the test database
+        run: |
+          node -e "
+            const { Client } = require('pg')
+            const c = new Client('postgres://postgres:postgres@localhost:55440/postgres')
+            c.connect()
+              .then(() => c.query(\"ALTER SYSTEM SET fsync = off\"))
+              .then(() => c.query(\"ALTER SYSTEM SET synchronous_commit = off\"))
+              .then(() => c.query(\"ALTER SYSTEM SET full_page_writes = off\"))
+              .then(() => c.query('SELECT pg_reload_conf()'))
+              .then(() => c.end())
+              .catch((e) => { console.error(e); process.exit(1) })
+          "
+      - name: Wait for WireMock
+        run: timeout 60 sh -c 'until curl -sf http://localhost:58443/__admin/health; do sleep 1; done'
+      - name: Run the parallel reference suite
+        run: npm run test:parallel
+
   build:
     if: "!startsWith(github.head_ref, 'release-please--')"
     runs-on: ubuntu-latest

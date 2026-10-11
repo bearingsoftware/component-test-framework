@@ -16,6 +16,8 @@ import { WireMockClient } from '../clients/wiremock-client'
 import { DbClient } from '../clients/db-client'
 import { RedisClient } from '../clients/redis-client'
 import type { FrameworkConfig, FrameworkOptions } from '../types'
+import { currentWorker, wiremockNamespace, workerDatabaseUrl, workerRedisUrl } from './worker'
+import { prepareWorkerDatabase } from './worker-database'
 
 /**
  * Register framework hooks with Cucumber. Call this once in the consumer's
@@ -81,11 +83,21 @@ async function browserForWorker(): Promise<Browser> {
  * error if something tries to use it.
  */
 function resolveConfig(options: FrameworkOptions): FrameworkConfig {
-  return {
+  const config: FrameworkConfig = {
     ...options,
     apiBaseUrl: options.apiBaseUrl ?? '',
     wiremockUrl: options.wiremockUrl ?? '',
   }
+  // This worker's own database and Redis index, so steps, cleanup and the
+  // suite's own code (through world.config) all use the worker's.
+  const isolation = options.workerIsolation
+  if (currentWorker().parallel && isolation) {
+    if (isolation.database && config.databaseUrl) {
+      config.databaseUrl = workerDatabaseUrl(config.databaseUrl)
+    }
+    if (isolation.redis && config.redisUrl) config.redisUrl = workerRedisUrl(config.redisUrl)
+  }
+  return config
 }
 
 export function registerHooks(options: FrameworkOptions): void {
@@ -122,7 +134,11 @@ export function registerHooks(options: FrameworkOptions): void {
     )
   }
 
-  const wiremock = new WireMockClient(config.wiremockUrl)
+  const worker = currentWorker()
+  const isolation = worker.parallel ? options.workerIsolation : undefined
+  const wiremock = new WireMockClient(config.wiremockUrl, undefined, {
+    namespace: isolation?.wiremock ? wiremockNamespace(worker.id) : undefined,
+  })
   let db: DbClient | undefined
   let redis: RedisClient | undefined
 
@@ -131,6 +147,16 @@ export function registerHooks(options: FrameworkOptions): void {
   }
   if (config.redisUrl) {
     redis = new RedisClient(config.redisUrl)
+  }
+
+  // --- Before the suite: this worker's database, copied from the template ---
+  if (isolation?.database && options.databaseUrl) {
+    const sourceUrl = options.databaseUrl
+    const template =
+      typeof isolation.database === 'object' ? isolation.database.template : undefined
+    BeforeAll({ timeout: 60_000 }, async function () {
+      await prepareWorkerDatabase(sourceUrl, { template })
+    })
   }
 
   // --- Before the suite: wait for WireMock to accept admin requests ---

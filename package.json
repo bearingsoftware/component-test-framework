@@ -84,7 +84,8 @@
     "prepublishOnly": "npm run build",
     "pub": "node scripts/publish.mjs",
     "publish:restore": "node scripts/restore-after-publish.mjs",
-    "test:smoke": "tsc && cucumber-js --config tests/smoke/cucumber.js"
+    "test:smoke": "tsc && cucumber-js --config tests/smoke/cucumber.js",
+    "test:parallel": "tsc && node -e \"for (const d of ['coverage', '.nyc_output', 'reports']) require('fs').rmSync('tests/parallel/' + d, { recursive: true, force: true })\" && node tests/parallel/prepare.js && cucumber-js --config tests/parallel/cucumber.js && node tests/parallel/check-coverage.js"
   },
   "peerDependencies": {
     "@cucumber/cucumber": ">=11.0.0",

@@ -306,3 +306,61 @@ describe('registerHooks lifecycle options (COMPONENT-9)', () => {
     expect(cleanup).toHaveBeenCalledWith(w)
   })
 })
+
+describe('registerHooks workerIsolation (COMPONENT-11)', () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>
+  const isolated = {
+    ...baseOptions,
+    wiremockUrl: 'http://wm:8443',
+    databaseUrl: 'postgres://u:p@db:5432/app',
+    workerIsolation: { wiremock: true, database: true },
+  }
+  const adminCalls = () =>
+    fetchSpy.mock.calls.map((c: unknown[]) => String(c[0]).replace('http://wm:8443', ''))
+
+  beforeEach(() => {
+    cucumber.before.length = 0
+    cucumber.beforeAll.length = 0
+    cucumber.after.length = 0
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}'))
+  })
+
+  afterEach(() => {
+    delete process.env.CUCUMBER_PARALLEL
+    delete process.env.CUCUMBER_WORKER_ID
+    delete process.env.CUCUMBER_TOTAL_WORKERS
+    fetchSpy.mockRestore()
+    vi.restoreAllMocks()
+  })
+
+  it('changes nothing in a serial run', async () => {
+    registerHooks(isolated)
+    const world = fakeWorld()
+    await scenarioHook().fn.call(world)
+    expect((world.config as { databaseUrl: string }).databaseUrl).toBe('postgres://u:p@db:5432/app')
+    expect(adminCalls()).toEqual(['/__admin/reset'])
+    // Only WireMock's readiness wait: no database to copy.
+    expect(cucumber.beforeAll.map((h) => h.options.timeout)).toEqual([30_000])
+  })
+
+  it('gives a parallel worker its own database and resets only its own WireMock stubs', async () => {
+    Object.assign(process.env, {
+      CUCUMBER_PARALLEL: 'true',
+      CUCUMBER_WORKER_ID: '1',
+      CUCUMBER_TOTAL_WORKERS: '4',
+    })
+    registerHooks(isolated)
+    const world = fakeWorld()
+    await scenarioHook().fn.call(world)
+    expect((world.config as { databaseUrl: string }).databaseUrl).toBe(
+      'postgres://u:p@db:5432/app_w1',
+    )
+    expect((world.wiremock as { namespace?: string }).namespace).toBe('/__worker-1')
+    expect(adminCalls()).toEqual([
+      '/__admin/mappings/remove-by-metadata',
+      '/__admin/requests/remove',
+    ])
+    // The database copy, then WireMock's readiness wait.
+    expect(cucumber.beforeAll.map((h) => h.options.timeout)).toEqual([60_000, 30_000])
+  })
+})

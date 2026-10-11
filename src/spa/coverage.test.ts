@@ -103,3 +103,80 @@ describe('coverage collector (COMPONENT-10)', () => {
     )
   })
 })
+
+describe('coverage under --parallel (COMPONENT-11)', () => {
+  let dir: string
+  let outDir: string
+  const reporters = ['json-summary']
+  const asWorker = (id: number) =>
+    Object.assign(process.env, {
+      CUCUMBER_PARALLEL: 'true',
+      CUCUMBER_WORKER_ID: String(id),
+      CUCUMBER_TOTAL_WORKERS: '2',
+    })
+  const summary = () =>
+    JSON.parse(fs.readFileSync(path.join(outDir, 'coverage-summary.json'), 'utf-8')).total
+      .statements
+  const runFiles = () =>
+    fs.readdirSync(path.join(dir, '.nyc_output')).filter((f) => f.startsWith('worker-'))
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctf-coverage-'))
+    outDir = path.join(dir, 'coverage')
+  })
+
+  afterEach(() => {
+    delete process.env.CUCUMBER_PARALLEL
+    delete process.env.CUCUMBER_WORKER_ID
+    delete process.env.CUCUMBER_TOTAL_WORKERS
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it("merges every worker's coverage into one report, and drops an earlier run's files", async () => {
+    fs.mkdirSync(path.join(dir, '.nyc_output'))
+    fs.writeFileSync(path.join(dir, '.nyc_output', 'worker-1-0.json'), '{}')
+
+    // Worker 0 covers the first statement, worker 1 the same file with the
+    // second statement too.
+    const second = fileCoverage(0)
+    second['/src/app.ts'].s = { '0': 0, '1': 4 }
+
+    asWorker(0)
+    const first = createCoverageCollector({ outDir, reporters })
+    await first.collect(fakePage({ coverage: fileCoverage(2) }))
+    first.write()
+    expect(summary()).toMatchObject({ covered: 1, total: 2 })
+
+    asWorker(1)
+    const other = createCoverageCollector({ outDir, reporters })
+    await other.collect(fakePage({ coverage: second }))
+    other.write()
+    expect(summary()).toMatchObject({ covered: 2, total: 2 })
+
+    const merged = JSON.parse(fs.readFileSync(path.join(dir, '.nyc_output', 'out.json'), 'utf-8'))
+    expect(merged['/src/app.ts'].s).toEqual({ '0': 2, '1': 4 })
+    expect(runFiles().sort()).toEqual([
+      `worker-${process.ppid}-0.json`,
+      `worker-${process.ppid}-1.json`,
+    ])
+  })
+
+  it('refuses a silent 0% only once every worker has reported nothing', () => {
+    asWorker(0)
+    createCoverageCollector({ outDir, reporters, onNothingCollected: 'throw' }).write()
+    asWorker(1)
+    expect(() =>
+      createCoverageCollector({ outDir, reporters, onNothingCollected: 'throw' }).write(),
+    ).toThrow(/No coverage was collected from any page/)
+  })
+
+  it("doesn't fail a run where only some workers had @ui scenarios", async () => {
+    asWorker(0)
+    createCoverageCollector({ outDir, reporters, onNothingCollected: 'throw' }).write()
+    asWorker(1)
+    const withUi = createCoverageCollector({ outDir, reporters, onNothingCollected: 'throw' })
+    await withUi.collect(fakePage({ coverage: fileCoverage(1) }))
+    expect(() => withUi.write()).not.toThrow()
+    expect(summary()).toMatchObject({ covered: 1 })
+  })
+})
