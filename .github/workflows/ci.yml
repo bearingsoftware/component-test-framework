@@ -79,7 +79,7 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30
       wiremock:
-        image: wiremock/wiremock:3.9.2
+        image: wiremock/wiremock:3.13.2
         ports: ["58443:8080"]
     steps:
       - uses: actions/checkout@v5
@@ -116,7 +116,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       wiremock:
-        image: wiremock/wiremock:3.9.2
+        image: wiremock/wiremock:3.13.2
         ports: ["58443:8080"]
     steps:
       - uses: actions/checkout@v5
