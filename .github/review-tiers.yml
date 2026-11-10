@@ -1,0 +1,29 @@
+version: 1
+owner: "@chattersley"
+default_tier: 1
+tiers:
+  2:
+    description: Sensitive. Recorded as needing two approvals including a code owner.
+    paths:
+      - ".github/workflows/**"
+      - ".github/review-tiers.yml"
+      - ".github/CODEOWNERS"
+      - "release-please-config.json"
+      - ".release-please-manifest.json"
+      - "src/support/**"
+      - "scripts/restore-after-publish.mjs"
+      - "scripts/prepare-snapshot-publish.mjs"
+      - "scripts/publish.mjs"
+  0:
+    description: Docs and generated code. Merges on green checks.
+    paths:
+      - "**/*.md"
+    bot_authors: ["renovate[bot]"]
+    bot_conditions:
+      update_type: patch
+      require_provenance: false
+release:
+  heads: ["release-please--*"]
+attestation:
+  label: tier2-self-reviewed
+  permitted: ["chattersley"]

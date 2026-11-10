@@ -1,0 +1,10 @@
+# Tier 2 globs mirror .github/review-tiers.yml; risk-gate lint-tiers compares them.
+.github/workflows/** @chattersley
+.github/review-tiers.yml @chattersley
+.github/CODEOWNERS @chattersley
+release-please-config.json @chattersley
+.release-please-manifest.json @chattersley
+src/support/** @chattersley
+scripts/publish.mjs @chattersley
+scripts/prepare-snapshot-publish.mjs @chattersley
+scripts/restore-after-publish.mjs @chattersley
