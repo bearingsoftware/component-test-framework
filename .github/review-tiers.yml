@@ -11,6 +11,9 @@ tiers:
       - "release-please-config.json"
       - ".release-please-manifest.json"
       - "src/support/**"
+      - "scripts/restore-after-publish.mjs"
+      - "scripts/prepare-snapshot-publish.mjs"
+      - "scripts/publish.mjs"
   0:
     description: Docs and generated code. Merges on green checks.
     paths:

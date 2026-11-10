@@ -5,3 +5,6 @@
 release-please-config.json @chattersley
 .release-please-manifest.json @chattersley
 src/support/** @chattersley
+scripts/publish.mjs @chattersley
+scripts/prepare-snapshot-publish.mjs @chattersley
+scripts/restore-after-publish.mjs @chattersley
