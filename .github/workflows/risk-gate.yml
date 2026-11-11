@@ -13,7 +13,7 @@ jobs:
       contents: read
       pull-requests: write
       checks: write
-    uses: bearingsoftware/risk-gate/.github/workflows/risk-gate.yml@RISK_GATE_SHA # main
+    uses: bearingsoftware/risk-gate/.github/workflows/risk-gate.yml@850449263941298997c3202e6ff44b5b0ac176a4 # main
     with:
-      risk-gate-ref: RISK_GATE_SHA
+      risk-gate-ref: 850449263941298997c3202e6ff44b5b0ac176a4
       runs-on: '["ubuntu-latest"]'
