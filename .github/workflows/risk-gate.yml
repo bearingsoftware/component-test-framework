@@ -1,0 +1,19 @@
+name: risk-gate
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+    branches: [main]
+  pull_request_review:
+    types: [submitted, dismissed]
+permissions: {}
+jobs:
+  risk-gate:
+    if: contains(fromJSON('["main"]'), github.event.pull_request.base.ref)
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    uses: bearingsoftware/risk-gate/.github/workflows/risk-gate.yml@850449263941298997c3202e6ff44b5b0ac176a4 # main
+    with:
+      risk-gate-ref: 850449263941298997c3202e6ff44b5b0ac176a4
+      runs-on: '["ubuntu-latest"]'
