@@ -1,0 +1,19 @@
+name: risk-gate
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+    branches: [main]
+  pull_request_review:
+    types: [submitted, dismissed]
+    branches: [main]
+permissions: {}
+jobs:
+  risk-gate:
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    uses: bearingsoftware/risk-gate/.github/workflows/risk-gate.yml@RISK_GATE_SHA # main
+    with:
+      risk-gate-ref: RISK_GATE_SHA
+      runs-on: '["ubuntu-latest"]'
