@@ -13,9 +13,9 @@ jobs:
       contents: read
       pull-requests: write
       checks: write
-    uses: bearingsoftware/risk-gate/.github/workflows/risk-gate.yml@67973455d5d2778da186afa48fe7b2a3c6c7cd14 # main
+    uses: bearingsoftware/risk-gate/.github/workflows/risk-gate.yml@1f754a4bec9bc33596fab7a859745698a0df361a # main
     with:
-      risk-gate-ref: 67973455d5d2778da186afa48fe7b2a3c6c7cd14
+      risk-gate-ref: 1f754a4bec9bc33596fab7a859745698a0df361a
       runs-on: '["ubuntu-latest"]'
     secrets:
       anthropic-api-key: ${{ secrets.RISK_GATE_ANTHROPIC_API_KEY }}
