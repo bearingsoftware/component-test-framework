@@ -17,5 +17,6 @@ jobs:
     with:
       risk-gate-ref: 1f754a4bec9bc33596fab7a859745698a0df361a
       runs-on: '["ubuntu-latest"]'
+      mode: enforce
     secrets:
       anthropic-api-key: ${{ secrets.RISK_GATE_ANTHROPIC_API_KEY }}
