@@ -6,6 +6,8 @@ export interface TestStrength {
   noticed: number
   survived: { stub: string; fault: Fault; scenarios: string[] }[]
   tolerated: { stub: string; fault: Fault }[]
+  /** Pairs whose runs said nothing: no report, no scenarios, or a failure that didn't repeat. */
+  inconclusive: { stub: string; fault: Fault; reason: string }[]
   baselineFailing: string[]
   /** Suite executions, the baseline included. */
   runs: number
@@ -31,6 +33,11 @@ export function renderMarkdown(r: TestStrength): string {
     }
     lines.push('')
   }
+  if (r.inconclusive.length > 0) {
+    lines.push('## Inconclusive (neither noticed nor survived)', '')
+    for (const i of r.inconclusive) lines.push(`- \`${i.stub}\` with \`${i.fault}\`: ${i.reason}`)
+    lines.push('')
+  }
   if (r.tolerated.length > 0) {
     lines.push('## Tolerated (allowlist, not run)', '')
     for (const t of r.tolerated) lines.push(`- \`${t.stub}\` with \`${t.fault}\``)
@@ -49,21 +56,30 @@ export function renderMarkdown(r: TestStrength): string {
 export const LIST_CAP = 200
 export const SCENARIO_CAP = 50
 
-/** A test-strength file bounded for embedding in evidence.json. */
+export const STRING_CAP = 200
+
+/** A test-strength file bounded for embedding in evidence.json: list lengths and string lengths. */
 export function boundForEvidence(r: TestStrength): TestStrength & { truncated: boolean } {
-  const truncated =
+  let truncated =
     r.survived.length > LIST_CAP ||
     r.tolerated.length > LIST_CAP ||
+    r.inconclusive.length > LIST_CAP ||
     r.baselineFailing.length > LIST_CAP ||
     r.survived.some((s) => s.scenarios.length > SCENARIO_CAP)
-  const survived = r.survived
-    .slice(0, LIST_CAP)
-    .map((s) => ({ ...s, scenarios: s.scenarios.slice(0, SCENARIO_CAP) }))
-  return {
-    ...r,
-    survived,
-    tolerated: r.tolerated.slice(0, LIST_CAP),
-    baselineFailing: r.baselineFailing.slice(0, LIST_CAP),
-    truncated,
+  const str = (text: string) => {
+    if (text.length <= STRING_CAP) return text
+    truncated = true
+    return `${text.slice(0, STRING_CAP - 1)}…`
   }
+  const survived = r.survived.slice(0, LIST_CAP).map((s) => ({
+    ...s,
+    stub: str(s.stub),
+    scenarios: s.scenarios.slice(0, SCENARIO_CAP).map(str),
+  }))
+  const tolerated = r.tolerated.slice(0, LIST_CAP).map((t) => ({ ...t, stub: str(t.stub) }))
+  const inconclusive = r.inconclusive
+    .slice(0, LIST_CAP)
+    .map((i) => ({ ...i, stub: str(i.stub), reason: str(i.reason) }))
+  const baselineFailing = r.baselineFailing.slice(0, LIST_CAP).map(str)
+  return { ...r, survived, tolerated, inconclusive, baselineFailing, truncated }
 }

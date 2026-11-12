@@ -33,7 +33,7 @@ function defaultExec(command: string, env: NodeJS.ProcessEnv): number | null {
 
 export function withArgs(command: string, args: string[]): string {
   const text = args.map(shellQuote).join(' ')
-  return command.includes('{args}') ? command.replace('{args}', text) : `${command} ${text}`
+  return command.includes('{args}') ? command.replace('{args}', () => text) : `${command} ${text}`
 }
 
 interface Evidence {
@@ -90,6 +90,22 @@ export function runFaults(options: FaultsOptions): TestStrength {
       )
     }
     const baseline = readCucumberJson(baselineJson)
+    if (baseline.length === 0) {
+      throw new FaultsError(
+        `the baseline run ran 0 scenarios: check that "${options.run}" runs the suite (a port clash or a failed BeforeAll hook gives this).`,
+      )
+    }
+    if (!fs.existsSync(hitsFile)) {
+      throw new FaultsError(
+        'the baseline run recorded no stub hits: CTF_FAULT_HITS was not honoured. The suite needs ' +
+          "wiremockUrl set and the framework's WireMock adapter (registerHooks) in use.",
+      )
+    }
+    if (baseline.every((s) => !s.passed)) {
+      throw new FaultsError(
+        `every one of the ${baseline.length} baseline scenarios failed, so no fault could be noticed: fix the suite first.`,
+      )
+    }
     const hits = readHits(hitsFile)
     const baselineFailing = baseline.filter((s) => !s.passed)
     const passing = baseline.filter((s) => s.passed)
@@ -117,15 +133,29 @@ export function runFaults(options: FaultsOptions): TestStrength {
       if (isTolerated(allowlist, stub, fault)) tolerated.push({ stub, fault })
       else todo.push({ stub, fault, targets })
     }
+    // Truncation by --max-runs keeps stubs changed scenarios hit first, then the most-hit ones.
+    const changed = new Set(selected.map(scenarioKey))
+    const changedHits = (t: (typeof todo)[number]) =>
+      t.targets.filter((s) => changed.has(scenarioKey(s))).length
+    todo.sort(
+      (a, b) =>
+        Number(changedHits(b) > 0) - Number(changedHits(a) > 0) ||
+        b.targets.length - a.targets.length ||
+        a.stub.localeCompare(b.stub) ||
+        a.fault.localeCompare(b.fault),
+    )
     const max = options.maxRuns ?? Infinity
     const toRun = todo.slice(0, max)
 
     let noticed = 0
     const survived: TestStrength['survived'] = []
-    toRun.forEach(({ stub, fault, targets }, i) => {
-      const json = path.join(work, `fault-${i}.json`)
+    const inconclusive: TestStrength['inconclusive'] = []
+    let n = 0
+    // 'failed', 'passed', or the reason a run says nothing.
+    const attempt = (stub: string, fault: Fault, targets: ScenarioResult[]) => {
+      const json = path.join(work, `fault-${n++}.json`)
       runs++
-      const status = exec(
+      exec(
         withArgs(options.run, [
           '--format',
           `json:${json}`,
@@ -133,17 +163,40 @@ export function runFaults(options: FaultsOptions): TestStrength {
         ]),
         { CTF_FAULT: `${stub}=${fault}`, CTF_FAULT_HITS: '' },
       )
-      const ran = fs.existsSync(json) ? readCucumberJson(json) : undefined
-      const failed = ran ? ran.some((s) => !s.passed) : status !== 0
-      if (failed) noticed++
-      else survived.push({ stub, fault, scenarios: [...new Set(targets.map((t) => t.name))] })
-    })
+      if (!fs.existsSync(json)) return 'wrote no Cucumber JSON report'
+      let ran: ScenarioResult[]
+      try {
+        ran = readCucumberJson(json)
+      } catch {
+        return 'wrote an unreadable Cucumber JSON report'
+      }
+      if (ran.length === 0) return 'ran no scenarios'
+      return ran.some((s) => !s.passed) ? 'failed' : 'passed'
+    }
+    for (const { stub, fault, targets } of toRun) {
+      let outcome = attempt(stub, fault, targets)
+      if (outcome === 'failed') {
+        // A failure counts only if it repeats.
+        const again = attempt(stub, fault, targets)
+        outcome =
+          again === 'failed'
+            ? 'failed'
+            : again === 'passed'
+              ? 'flaky: failed once, then passed'
+              : again
+      }
+      if (outcome === 'failed') noticed++
+      else if (outcome === 'passed') {
+        survived.push({ stub, fault, scenarios: [...new Set(targets.map((t) => t.name))] })
+      } else inconclusive.push({ stub, fault, reason: outcome })
+    }
 
     const result: TestStrength = {
       version: 1,
       faultsInjected: toRun.length,
       noticed,
       survived,
+      inconclusive,
       tolerated,
       baselineFailing: baselineFailing.map((s) => s.name),
       runs,

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterAll } from 'vitest'
+import { describe, it, expect, afterAll, vi } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -59,7 +59,14 @@ function fakeSuite(scenarios: FakeScenario[], log: string[] = []) {
       fs.writeFileSync(
         env.CTF_FAULT_HITS,
         ran
-          .map((s) => JSON.stringify({ uri: 'features/a.feature', name: s.name, stubs: s.hits }))
+          .map((s) =>
+            JSON.stringify({
+              uri: 'features/a.feature',
+              name: s.name,
+              line: s.line,
+              stubs: s.hits,
+            }),
+          )
           .join('\n') + '\n',
       )
     }
@@ -91,6 +98,7 @@ describe('runFaults', () => {
     expect(log).toEqual([
       '|',
       'GET /p/x=status500|features/a.feature:3,features/a.feature:6',
+      'GET /p/x=status500|features/a.feature:3,features/a.feature:6',
       'GET /q=status500|features/a.feature:6',
     ])
     expect(r).toMatchObject({
@@ -99,7 +107,7 @@ describe('runFaults', () => {
       noticed: 1,
       survived: [{ stub: 'GET /q', fault: 'status500', scenarios: ['lax'] }],
       baselineFailing: ['broken'],
-      runs: 3,
+      runs: 4,
       tolerated: [],
     })
   })
@@ -107,9 +115,10 @@ describe('runFaults', () => {
   it('does not count a scenario failing at baseline as noticing a fault', () => {
     const only: FakeScenario[] = [
       { name: 'broken', line: 9, hits: ['GET /p/x'], fails: ['baseline', 'GET /p/x=status500'] },
+      { name: 'ok', line: 3, hits: ['GET /q'], fails: [] },
     ]
     const r = runFaults({ run: 'c', faults: ['status500'], out: mkdtemp(), exec: fakeSuite(only) })
-    expect(r.faultsInjected).toBe(0)
+    expect(r.faultsInjected).toBe(1)
     expect(r.noticed).toBe(0)
     expect(r.baselineFailing).toEqual(['broken'])
   })
@@ -140,7 +149,7 @@ describe('runFaults', () => {
     })
     expect(r.tolerated).toEqual([{ stub: 'GET /q', fault: 'status500' }])
     expect(r.faultsInjected).toBe(1)
-    expect(log).toHaveLength(2)
+    expect(log).toHaveLength(3)
   })
 
   it('stops at --max-runs and says how many pairs it left', () => {
@@ -172,6 +181,7 @@ describe('runFaults', () => {
     })
     expect(log.slice(1)).toEqual([
       'GET /p/x=status500|features/a.feature:3,features/a.feature:6',
+      'GET /p/x=status500|features/a.feature:3,features/a.feature:6',
       'GET /q=status500|features/a.feature:6',
     ])
     expect(r.faultsInjected).toBe(2)
@@ -196,6 +206,7 @@ describe('runFaults', () => {
         'baselineFailing',
         'durationMs',
         'faultsInjected',
+        'inconclusive',
         'noticed',
         'notRun',
         'runs',
@@ -217,12 +228,129 @@ describe('runFaults', () => {
   })
 })
 
+describe('runFaults: bad runs and a bad baseline', () => {
+  const one: FakeScenario[] = [
+    { name: 'a', line: 3, hits: ['GET /p'], fails: ['GET /p=status500'] },
+  ]
+  /** A suite whose faulted runs go through `faulted`; the baseline is the fake suite's. */
+  const withFaulted =
+    (faulted: (n: number, command: string) => string | number, scenarios = one) =>
+    (command: string, env: NodeJS.ProcessEnv) => {
+      if (!env.CTF_FAULT) return fakeSuite(scenarios)(command, env)
+      faultedRuns++
+      const json = /'json:([^']+)'/.exec(command)?.[1] as string
+      const out = faulted(faultedRuns, command)
+      if (typeof out === 'string') fs.writeFileSync(json, out)
+      return 1
+    }
+  let faultedRuns = 0
+  const report = (status: string) =>
+    JSON.stringify([
+      {
+        uri: 'features/a.feature',
+        elements: [{ type: 'scenario', name: 'a', line: 3, steps: [{ result: { status } }] }],
+      },
+    ])
+  const go = (exec: ReturnType<typeof withFaulted>) => {
+    faultedRuns = 0
+    return runFaults({ run: 'c', faults: ['status500'], out: mkdtemp(), exec })
+  }
+
+  it('calls a faulted run with no JSON inconclusive, not noticed', () => {
+    const r = go(withFaulted(() => 1))
+    expect(r).toMatchObject({ faultsInjected: 1, noticed: 0, survived: [] })
+    expect(r.inconclusive).toEqual([
+      { stub: 'GET /p', fault: 'status500', reason: 'wrote no Cucumber JSON report' },
+    ])
+  })
+
+  it('calls a faulted run of zero scenarios inconclusive, not a survivor', () => {
+    const r = go(withFaulted(() => '[]'))
+    expect(r.survived).toEqual([])
+    expect(r.inconclusive[0].reason).toBe('ran no scenarios')
+  })
+
+  it('re-runs a failure once, and counts it only if it repeats', () => {
+    const r = go(withFaulted(() => report('failed')))
+    expect(r).toMatchObject({ noticed: 1, inconclusive: [], runs: 3 })
+  })
+
+  it('marks a failure that does not repeat as flaky and inconclusive', () => {
+    const r = go(withFaulted((n) => report(n === 1 ? 'failed' : 'passed')))
+    expect(r).toMatchObject({ noticed: 0, survived: [] })
+    expect(r.inconclusive[0].reason).toMatch(/^flaky/)
+  })
+
+  it('does not re-run a pass', () => {
+    const r = go(withFaulted(() => report('passed')))
+    expect(r).toMatchObject({ survived: [{ stub: 'GET /p' }], runs: 2 })
+  })
+
+  it('fails when the baseline ran 0 scenarios', () => {
+    expect(() => runFaults({ run: 'c', out: mkdtemp(), exec: fakeSuite([]) })).toThrow(
+      /ran 0 scenarios/,
+    )
+  })
+
+  it('fails when the baseline recorded no hits file', () => {
+    const exec = (command: string) => {
+      const json = /'json:([^']+)'/.exec(command)?.[1] as string
+      fs.writeFileSync(json, report('passed'))
+      return 0
+    }
+    expect(() => runFaults({ run: 'c', out: mkdtemp(), exec })).toThrow(/no stub hits/)
+  })
+
+  it('fails when every baseline scenario failed', () => {
+    const bad: FakeScenario[] = [{ name: 'a', line: 3, hits: ['GET /p'], fails: ['baseline'] }]
+    expect(() => runFaults({ run: 'c', out: mkdtemp(), exec: fakeSuite(bad) })).toThrow(
+      /every one of the 1 baseline scenarios failed/,
+    )
+  })
+
+  it('exits 2 from the command for each', () => {
+    expect(main(['faults', '--run', 'exit 0', '--out', mkdtemp()])).toBe(2)
+  })
+
+  it('keeps Outline rows that share a name apart, by line', () => {
+    const rows: FakeScenario[] = [
+      { name: 'row', line: 3, hits: ['GET /a'], fails: ['GET /a=status500'] },
+      { name: 'row', line: 4, hits: ['GET /b'], fails: [] },
+    ]
+    const r = runFaults({ run: 'c', faults: ['status500'], out: mkdtemp(), exec: fakeSuite(rows) })
+    expect(r.noticed).toBe(1)
+    expect(r.survived).toEqual([{ stub: 'GET /b', fault: 'status500', scenarios: ['row'] }])
+  })
+
+  it('under --max-runs, runs stubs changed scenarios hit first, then the most-hit', () => {
+    const many: FakeScenario[] = [
+      { name: 'z1', line: 3, hits: ['GET /z'], fails: [] },
+      { name: 'z2', line: 4, hits: ['GET /z'], fails: [] },
+      { name: 'a1', line: 5, hits: ['GET /a'], fails: [] },
+      { name: 'm1', line: 6, hits: ['GET /m'], fails: [] },
+    ]
+    const log: string[] = []
+    runFaults({
+      run: 'c',
+      faults: ['status500'],
+      maxRuns: 2,
+      out: mkdtemp(),
+      exec: fakeSuite(many, log),
+    })
+    expect(log.slice(1).map((l) => l.split('|')[0])).toEqual([
+      'GET /z=status500',
+      'GET /a=status500',
+    ])
+  })
+})
+
 describe('withArgs and selectChanged', () => {
   it('appends, or fills {args}', () => {
     expect(withArgs('npx cucumber-js', ['--format', 'json:/t/a b'])).toBe(
       "npx cucumber-js '--format' 'json:/t/a b'",
     )
     expect(withArgs('run {args} --x', ['a'])).toBe("run 'a' --x")
+    expect(withArgs('run {args}', ["$&$'"])).toBe("run '$&$'\\'''")
   })
 
   it('selects added, changed, and operation-naming scenarios', () => {
@@ -296,6 +424,7 @@ describe('boundForEvidence', () => {
     noticed: 0,
     survived: [],
     tolerated: [],
+    inconclusive: [],
     baselineFailing: [],
     runs: 1,
     notRun: 0,
@@ -303,6 +432,16 @@ describe('boundForEvidence', () => {
   }
   it('leaves a small report whole and untruncated', () => {
     expect(boundForEvidence(base)).toEqual({ ...base, truncated: false })
+  })
+  it('caps string lengths too', () => {
+    const long = 'x'.repeat(5000)
+    const b = boundForEvidence({
+      ...base,
+      survived: [{ stub: long, fault: 'status500', scenarios: [long] }],
+      baselineFailing: [long],
+    })
+    expect(JSON.stringify(b).length).toBeLessThan(1000)
+    expect(b.truncated).toBe(true)
   })
   it('caps the survivors, their scenarios and the other lists, and says so', () => {
     const survived = Array.from({ length: LIST_CAP + 5 }, (_, i) => ({
@@ -359,6 +498,7 @@ describe('ctf evidence --test-strength', () => {
       noticed: 1,
       survived: [{ stub: 'GET /a', fault: 'status500', scenarios: ['a'] }],
       tolerated: [],
+      inconclusive: [],
       baselineFailing: [],
       runs: 3,
       notRun: 0,
@@ -396,5 +536,16 @@ describe('ctf faults command', () => {
     expect(quiet(['faults', '--run', 'x'])).toBe(2)
     expect(quiet(['faults', '--run', 'x', '--out', mkdtemp(), '--faults', 'slow'])).toBe(2)
     expect(quiet(['faults', '--run', 'exit 1', '--out', mkdtemp()])).toBe(2)
+  })
+})
+
+describe('allowlist absent at the base ref', () => {
+  it('warns once, naming the file', () => {
+    const dir = gitRepo()
+    const warn = vi.spyOn(console, 'error').mockImplementation(() => {})
+    readAllowlistAtBase('HEAD:nowhere.txt', dir)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0][0]).toContain('nowhere.txt')
+    warn.mockRestore()
   })
 })

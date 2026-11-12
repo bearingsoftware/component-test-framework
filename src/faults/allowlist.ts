@@ -49,6 +49,7 @@ export function readAllowlistAtBase(spec: string, cwd = process.cwd()): Tolerate
   try {
     text = git(['show', `${ref}:./${rel}`])
   } catch {
+    console.error(`ctf faults: allowlist ${rel} does not exist at ${ref}; no faults are tolerated`)
     return []
   }
   return parseAllowlist(text, `${ref}:${rel}`)

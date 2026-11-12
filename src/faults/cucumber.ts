@@ -46,6 +46,7 @@ export function readCucumberJson(file: string): ScenarioResult[] {
 export interface HitLine {
   uri: string
   name: string
+  line?: number
   stubs: string[]
 }
 
@@ -64,4 +65,4 @@ export function readHits(file: string): Map<string, Set<string>> {
   return hits
 }
 
-export const scenarioKey = (s: { uri: string; name: string }) => `${s.uri}\u0000${s.name}`
+export const scenarioKey = (s: { uri: string; line?: number }) => `${s.uri}:${s.line}`
