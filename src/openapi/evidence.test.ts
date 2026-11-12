@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, afterAll } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -37,12 +37,18 @@ const call = (op: string, status?: string) => [
   ...(status ? [`Then the response status should be ${status}`] : []),
 ]
 
+const made: string[] = []
+afterAll(() => {
+  for (const d of made) fs.rmSync(d, { recursive: true, force: true })
+})
+
 function repo(before: Files, after: Files): { dir: string; out: string } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctf-evidence-test-'))
   const run = (...args: string[]) =>
     execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], {
       stdio: 'pipe',
     })
+  made.push(dir)
   run('init', '-q', '-b', 'main')
   const write = (files: Files) => {
     for (const [name, content] of Object.entries(files)) {
@@ -98,9 +104,10 @@ describe('collectEvidence', () => {
         'features/a.feature': feature([['a', call('getA', '200')]]),
       },
     )
-    expect(files).toEqual({ base: '100.00', head: '50.00', apiBreak: 'false' })
-    expect(result.coverage.noDocumentedStatuses).toBe(true)
-    expect(result.coverage.delta).toBe(-50)
+    expect(files).toEqual({ base: '50.00', head: '50.00', apiBreak: 'false' })
+    expect(result.coverage.noDocumentedStatuses).toBe(false)
+    expect(result.coverage.delta).toBe(0)
+    expect(result.specs).toMatchObject([{ presentAtBase: false }])
     expect(result.scenarios.added).toEqual([{ file: 'features/a.feature', name: 'a' }])
     expect(result.statusGaps.new).toEqual([
       { operation: 'getA', method: 'GET', path: '/a', status: '404' },
@@ -151,10 +158,10 @@ describe('collectEvidence', () => {
         'features/a.feature': feature([['ok', call('getA', '404')]]),
       },
     )
-    expect(result.scenarios).toEqual({
+    expect(result.scenarios).toMatchObject({
       added: [],
       removed: [],
-      changed: [{ file: 'features/a.feature', name: 'ok' }],
+      changed: [{ file: 'features/a.feature', name: 'ok', tagsChanged: false }],
     })
   })
 
@@ -273,5 +280,136 @@ describe('collectEvidence', () => {
     expect(files.apiBreak).toBe('false')
     expect(result.apiDiff.suppressed).toBe(1)
     expect(result.apiDiff.breaking).toEqual([])
+  })
+
+  it('ignores an allowlist entry the change adds for its own break', () => {
+    const { files, result } = evidence(
+      { 'api.yaml': spec({ ...ONE, '/b': { id: 'getB', statuses: ['200'] } }) },
+      { 'api.yaml': spec(ONE), 'allow.txt': 'GET /b\n' },
+      { allowlist: 'allow.txt' },
+    )
+    expect(files.apiBreak).toBe('true')
+    expect(result.apiDiff.suppressed).toBe(0)
+    expect(result.apiDiff.allowlist).toMatchObject({
+      source: 'base',
+      entries: [],
+      headDiffers: true,
+    })
+  })
+
+  it('reads the base spec despite export-ignore, and a file over 1 MB', () => {
+    const padding = `${'# padding\n'.repeat(150_000)}`
+    const feats = { 'features/a.feature': padding + feature([['a', call('getA', '200')]]) }
+    expect(padding.length).toBeGreaterThan(1 << 20)
+    const { files, result } = evidence(
+      { 'api.yaml': spec(ONE), '.gitattributes': 'api.yaml export-ignore\n', ...feats },
+      { 'api.yaml': spec(ONE), '.gitattributes': 'api.yaml export-ignore\n', ...feats },
+    )
+    expect(files.base).toBe('50.00')
+    expect(result.specs).toMatchObject([{ presentAtBase: true }])
+    expect(result.scenarios.changed).toEqual([])
+  })
+
+  it('removes earlier output, so a run that cannot run leaves none', () => {
+    const { dir, out } = repo({}, { 'api.yaml': spec(ONE) })
+    fs.mkdirSync(out)
+    for (const f of ['coverage-base.txt', 'coverage-head.txt', 'api-break.txt', 'evidence.json']) {
+      fs.writeFileSync(path.join(out, f), 'stale')
+    }
+    expect(() =>
+      collectEvidence({ base: 'nope', specs: ['api.yaml'], features: ['features'], out, cwd: dir }),
+    ).toThrow(/nope/)
+    expect(fs.readdirSync(out)).toEqual([])
+  })
+
+  it('leaves no temporary directory behind, on success or failure', () => {
+    const { dir, out } = repo({}, { 'api.yaml': spec(ONE) })
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ctf-evidence-scratch-'))
+    made.push(scratch)
+    const before = process.env.TMPDIR
+    process.env.TMPDIR = scratch
+    try {
+      const options = { base: 'HEAD~1', head: 'HEAD', features: ['features'], out, cwd: dir }
+      collectEvidence({ ...options, specs: ['api.yaml'] })
+      expect(fs.readdirSync(scratch)).toEqual([])
+      expect(() => collectEvidence({ ...options, specs: ['missing.yaml'] })).toThrow(/missing.yaml/)
+      expect(fs.readdirSync(scratch)).toEqual([])
+    } finally {
+      if (before === undefined) delete process.env.TMPDIR
+      else process.env.TMPDIR = before
+    }
+  })
+
+  it('does not count scenarios tagged @skip, and records them', () => {
+    const feats = (tag: string) =>
+      `Feature: F\n\n  ${tag}\n  Scenario: s\n    ${call('getA', '404').join('\n    ')}\n\n  Scenario: ok\n    ${call('getA', '200').join('\n    ')}\n`
+    const { files, result } = evidence(
+      { 'api.yaml': spec(ONE), 'features/a.feature': feats('@smoke') },
+      { 'api.yaml': spec(ONE), 'features/a.feature': feats('@skip') },
+    )
+    expect(files).toEqual({ base: '100.00', head: '50.00', apiBreak: 'false' })
+    expect(result.scenarios.excluded).toEqual({
+      tags: ['@skip', '@pending', '@wip'],
+      head: [{ file: 'features/a.feature', name: 's' }],
+    })
+    expect(result.scenarios.changed).toEqual([
+      { file: 'features/a.feature', name: 's', tagsChanged: true },
+    ])
+    const custom = evidence(
+      { 'api.yaml': spec(ONE), 'features/a.feature': feats('@smoke') },
+      { 'api.yaml': spec(ONE), 'features/a.feature': feats('@smoke') },
+      { excludeTags: ['@smoke'] },
+    )
+    expect(custom.files.head).toBe('50.00')
+    expect(custom.result.scenarios.excluded.tags).toEqual(['@smoke'])
+  })
+
+  it('lists documented statuses the head no longer documents', () => {
+    const { result } = evidence(
+      { 'api.yaml': spec({ '/a': { id: 'getA', statuses: ['200', '404', 'default'] } }) },
+      { 'api.yaml': spec({ '/a': { id: 'getA', statuses: ['200'] } }) },
+    )
+    expect(result.statusesRemoved).toEqual([{ method: 'GET', path: '/a', status: '404' }])
+  })
+
+  it('finds scenarios that use a map alias', () => {
+    const noId = (statuses: string[]) =>
+      `openapi: 3.0.3\ninfo: { title: T, version: '1' }\npaths:\n  /a:\n    get:\n      responses:\n${statuses.map((s) => `        '${s}': { description: d }\n`).join('')}`
+    const map = JSON.stringify({ fetchA: { method: 'GET', path: '/a' } })
+    const feat = (extra: string[][]) =>
+      feature([
+        ['a', call('fetchA', '200')],
+        ...extra.map((s, i): [string, string[]] => [`x${i}`, s]),
+      ])
+    const base = { 'api.yaml': noId(['200']), 'map.json': map, 'features/a.feature': feat([]) }
+    const without = evidence(
+      base,
+      { ...base, 'api.yaml': noId(['200', '500']) },
+      { map: 'map.json' },
+    )
+    expect(without.result.operations.changedWithoutScenario).toEqual(['GET /a'])
+    const withScenario = evidence(
+      base,
+      {
+        ...base,
+        'api.yaml': noId(['200', '500']),
+        'features/a.feature': feat([call('fetchA', '500')]),
+      },
+      { map: 'map.json' },
+    )
+    expect(withScenario.result.operations.changedInSpec).toEqual(['GET /a'])
+    expect(withScenario.result.operations.changedWithoutScenario).toEqual([])
+  })
+
+  it('marks an Outline changed when only an Examples row changes', () => {
+    const outline = (rows: string) =>
+      `Feature: F\n  Scenario Outline: status\n    When I send the request r to the getA operation\n    Then the response status should be <s>\n    Examples:\n      | s |\n${rows}`
+    const { result } = evidence(
+      { 'api.yaml': spec(ONE), 'features/a.feature': outline('      | 200 |\n') },
+      { 'api.yaml': spec(ONE), 'features/a.feature': outline('      | 200 |\n      | 404 |\n') },
+    )
+    expect(result.scenarios.changed).toEqual([
+      { file: 'features/a.feature', name: 'status', tagsChanged: false },
+    ])
   })
 })
