@@ -27,7 +27,7 @@ const SUITE = path.resolve(__dirname, '..')
 
 // The service and the SPA server, one of each per worker, on the worker's
 // own port and pointed at the worker's own database, Redis and WireMock prefix.
-const servicePort = core.workerPort(18100)
+const servicePort = core.workerPort(Number(process.env.SERVICE_PORT ?? 18100))
 core.registerServiceUnderTest({
   name: 'orders',
   cwd: SUITE,

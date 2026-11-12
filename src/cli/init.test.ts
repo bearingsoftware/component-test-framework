@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
+import { execFileSync } from 'child_process'
 import ts from 'typescript'
 import { main } from '../cli'
 import { PIECES, type Piece } from './init'
@@ -256,5 +257,61 @@ describe('ctf init output details', () => {
     expect(main(['init', dir, '--force'])).toBe(0)
     expect(read('tsconfig.json')).toBe('{ "mine": true }\n')
     expect(read('cucumber.js')).toContain('cucumberPreset()')
+  })
+})
+
+describe('ctf init --containers', () => {
+  const NO_COMPOSE = BASE.filter((f) => f !== 'cucumber.js' && f !== 'docker-compose.yml')
+
+  it.each([
+    ['wiremock'],
+    ['postgres'],
+    ['redis'],
+    ['wiremock', 'postgres', 'redis'],
+    ['spa', 'postgres'],
+  ] as Piece[][])('writes cucumber.mjs and no compose file for --with %s', (...pieces) => {
+    expect(main(['init', dir, '--with', pieces.join(','), '--containers'])).toBe(0)
+    const withSpa = pieces.includes('spa')
+    expect(written()).toEqual(
+      [
+        ...NO_COMPOSE,
+        'cucumber.mjs',
+        ...(withSpa ? ['pages/home.page.ts', 'web/index.html'] : []),
+      ].sort(),
+    )
+    const chosen = new Set<Piece>(pieces)
+    if (withSpa) chosen.add('wiremock')
+    const mjs = read('cucumber.mjs')
+    expect(mjs).toContain(`from '@bearingsoftware/component-test-framework/testcontainers'`)
+    expect(mjs).toContain('await startContainers({')
+    expect(mjs).toContain('export default cucumberPreset()')
+    for (const piece of ['wiremock', 'postgres', 'redis'] as const) {
+      expect(mjs.includes(IMAGES[piece])).toBe(chosen.has(piece))
+    }
+    expect(read('features/example.feature')).not.toContain('docker-compose')
+    expect(() =>
+      execFileSync(process.execPath, ['--check', path.join(dir, 'cucumber.mjs')]),
+    ).not.toThrow()
+  })
+
+  it('prints install and run steps with the testcontainers packages and no docker compose', () => {
+    main(['init', dir, '--with', 'wiremock,postgres', '--containers'])
+    const out = vi.mocked(console.log).mock.calls.flat().join('\n')
+    expect(out).toContain('testcontainers @testcontainers/postgresql\n')
+    expect(out).not.toContain('@testcontainers/redis')
+    expect(out).not.toContain('docker compose')
+    expect(out).toContain('npx cucumber-js')
+  })
+
+  it('rejects mailpit, which has no container, and writes nothing', () => {
+    expect(main(['init', dir, '--with', 'mailpit', '--containers'])).toBe(2)
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain('Mailpit')
+    expect(written()).toEqual([])
+  })
+
+  it('leaves the output without --containers unchanged', () => {
+    main(['init', dir])
+    expect(written()).toEqual(BASE)
+    expect(read('cucumber.js')).not.toContain('startContainers')
   })
 })

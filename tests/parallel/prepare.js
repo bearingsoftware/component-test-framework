@@ -2,12 +2,11 @@
 // worker copies. Run before the suite (npm run test:parallel does).
 const { Client } = require('pg')
 
-const url = new URL(
-  process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:55440/ctf_reference',
-)
-const name = url.pathname.slice(1)
+const DEFAULT_URL = 'postgres://postgres:postgres@localhost:55440/ctf_reference'
 
-async function main() {
+async function prepare(databaseUrl = process.env.DATABASE_URL ?? DEFAULT_URL) {
+  const url = new URL(databaseUrl)
+  const name = url.pathname.slice(1)
   const maintenance = new URL(url)
   maintenance.pathname = '/postgres'
   const admin = new Client({ connectionString: maintenance.toString() })
@@ -29,7 +28,11 @@ async function main() {
   console.log(`template database ${name} ready`)
 }
 
-main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+module.exports = { prepare }
+
+if (require.main === module) {
+  prepare().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+}

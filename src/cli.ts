@@ -18,6 +18,9 @@ Commands:
                                   docker-compose.yml and .env.example (dir defaults to .)
       --with <names>                Comma-separated: wiremock, postgres, redis, mailpit, spa
                                     (default wiremock; spa also brings wiremock)
+      --containers                  Write cucumber.mjs, which starts the services in Docker
+                                    with Testcontainers, instead of cucumber.js and
+                                    docker-compose.yml (not for mailpit)
       --force                       Overwrite files that already exist
 
   generate-operation-map <spec>   Write a typed operation map for an OpenAPI spec
@@ -92,7 +95,11 @@ function init(args: string[]): number {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
-    options: { with: { type: 'string' }, force: { type: 'boolean' } },
+    options: {
+      with: { type: 'string' },
+      force: { type: 'boolean' },
+      containers: { type: 'boolean' },
+    },
   })
   if (positionals.length > 1) throw new UsageError('init takes one directory')
   const names = (values.with ?? 'wiremock').split(',').filter(Boolean)
@@ -102,9 +109,13 @@ function init(args: string[]): number {
       `unknown --with name${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ') || '(none given)'}; valid names are ${PIECES.join(', ')}`,
     )
   }
+  const containers = values.containers ?? false
+  if (containers && names.includes('mailpit')) {
+    throw new UsageError('--containers has no Mailpit container; drop mailpit from --with')
+  }
   const dir = positionals[0] ?? '.'
   const keptTsconfig = fs.existsSync(path.join(dir, 'tsconfig.json'))
-  for (const file of initProject(dir, names as Piece[], values.force ?? false)) {
+  for (const file of initProject(dir, names as Piece[], values.force ?? false, containers)) {
     console.log(`wrote ${path.join(dir, file)}`)
   }
   if (keptTsconfig) {
@@ -112,7 +123,7 @@ function init(args: string[]): number {
       `\nKept your tsconfig.json. ts-node needs "module": "commonjs", "moduleResolution": "node" and "esModuleInterop": true in it.`,
     )
   }
-  console.log(nextSteps(dir, names as Piece[]))
+  console.log(nextSteps(dir, names as Piece[], containers))
   return 0
 }
 
