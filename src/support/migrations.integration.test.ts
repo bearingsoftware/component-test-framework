@@ -6,6 +6,7 @@ import * as path from 'path'
 import { Client } from 'pg'
 import { runMigrations } from './migrations'
 import { postgresAdapter } from '../adapters/postgres'
+import { prepareWorkerDatabase } from './worker-database'
 
 // Against a real Postgres: DATABASE_URL, which CI's reference job sets.
 // Without it these tests are skipped. They create their own databases.
@@ -149,6 +150,50 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
       runMigrations(urlFor(sourceDb), { command: 'sleep 5', timeoutMs: 200 }),
     ).rejects.toThrow(/timed out after 200ms/)
   })
+
+  it('gives up waiting for the lock with a message that names it', async () => {
+    const url = urlFor(sourceDb)
+    const holder = runMigrations(url, options(1500))
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    await expect(runMigrations(url, options(), { lockTimeoutMs: 400 })).rejects.toThrow(
+      /waiting for the migrations lock "ctf-migrations:/,
+    )
+    await holder
+  })
+
+  it('keeps the lock through the copy: two workers, each migrating while connected to the template', async () => {
+    const tpl = `${run}_two`
+    databases.push(tpl, `${tpl}_w1`, `${tpl}_w2`)
+    await admin((c) => c.query(`CREATE DATABASE "${tpl}"`))
+    const source = urlFor(tpl)
+    const worker = (id: string) => {
+      const mine = { ...options(3000) }
+      return runMigrations(source, mine, {
+        whileLocked: () => {
+          // prepareWorkerDatabase reads the worker id when called, so set it just before.
+          Object.assign(process.env, {
+            CUCUMBER_PARALLEL: 'true',
+            CUCUMBER_WORKER_ID: id,
+            CUCUMBER_TOTAL_WORKERS: '2',
+          })
+          return prepareWorkerDatabase(source, { templateBusyTimeoutMs: 1000 })
+        },
+      })
+    }
+    try {
+      // Each command holds a connection to the template for 3s. If the lock
+      // were released before the copy, the other worker's command would hold
+      // the template during this copy, which gives up after 1s.
+      await Promise.all([worker('1'), worker('2')])
+    } finally {
+      delete process.env.CUCUMBER_PARALLEL
+      delete process.env.CUCUMBER_WORKER_ID
+      delete process.env.CUCUMBER_TOTAL_WORKERS
+    }
+    const tables = `SELECT count(*) AS n FROM information_schema.tables WHERE table_name = 'widgets'`
+    expect(await count(`${tpl}_w1`, tables)).toBe(1)
+    expect(await count(`${tpl}_w2`, tables)).toBe(1)
+  }, 30_000)
 
   it('migrates the template before the adapter copies it for the worker', async () => {
     Object.assign(process.env, {

@@ -131,6 +131,12 @@ describe.skipIf(!url)('seeding against Postgres (COMPONENT-24)', () => {
     expect(await rows(second)).toBe(2)
   })
 
+  it('inserts an empty row with DEFAULT VALUES', async () => {
+    await db.insertRow(second, {})
+    expect(await rows(second)).toBe(3)
+    await db.query(`DELETE FROM ${second}`)
+  })
+
   it('cleans what it seeded through cleanTables', async () => {
     await db.cleanTables([table, second])
     expect(await rows(table)).toBe(0)

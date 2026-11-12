@@ -41,7 +41,13 @@ export function redactPassword(text: string, url: string): string {
   }
   if (!password) return text
   let result = text
-  for (const form of new Set([password, decodeURIComponent(password)])) {
+  let decoded = password
+  try {
+    decoded = decodeURIComponent(password)
+  } catch {
+    // A bare % isn't valid encoding: the raw form is all there is to hide.
+  }
+  for (const form of new Set([password, decoded])) {
     if (form) result = result.split(form).join('***')
   }
   return result
@@ -52,16 +58,29 @@ function lockDatabase(name: string): string {
   return name === 'postgres' ? 'template1' : 'postgres'
 }
 
+/** Extra options of {@link runMigrations}. */
+export interface RunMigrationsExtras {
+  /**
+   * Runs after the command succeeds, while the lock is still held: for the
+   * worker's database copy, so another worker's migration command can't be
+   * connected to the template while it's copied.
+   */
+  whileLocked?: () => unknown | Promise<unknown>
+  /** How long to wait for the lock, in ms. Default twice `timeoutMs` plus 30s. */
+  lockTimeoutMs?: number
+}
+
 /**
  * Run the migrations command against `databaseUrl`, one process at a time
  * across the server: it holds a Postgres advisory lock, keyed on the database
- * name, while the command runs. The lock is taken on a maintenance database,
- * not on `databaseUrl`'s own, and released before this returns, so nothing is
- * left connected to a database that is about to be copied as a template.
+ * name, from before the command until it returns and `whileLocked` has
+ * finished. The lock is taken on a maintenance database, not on
+ * `databaseUrl`'s own, so it never keeps the template from being copied.
  */
 export async function runMigrations(
   databaseUrl: string,
   options: MigrationsOptions,
+  extras: RunMigrationsExtras = {},
 ): Promise<void> {
   const parsed = new URL(databaseUrl)
   const name = decodeURIComponent(parsed.pathname.replace(/^\//, '')) || 'postgres'
@@ -72,9 +91,27 @@ export async function runMigrations(
   const pg = require('pg') as typeof import('pg')
   const lock: Client = new pg.Client({ connectionString: maintenance.toString() })
   await lock.connect()
+  const key = `ctf-migrations:${name}`
+  const lockTimeoutMs =
+    extras.lockTimeoutMs ?? 2 * (options.timeoutMs ?? DEFAULT_TIMEOUT_MS) + 30_000
   try {
-    await lock.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [`ctf-migrations:${name}`])
+    const deadline = Date.now() + lockTimeoutMs
+    for (;;) {
+      const { rows } = await lock.query(
+        'SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS got',
+        [key],
+      )
+      if (rows[0].got) break
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `Timed out after ${lockTimeoutMs}ms waiting for the migrations lock "${key}": ` +
+            `another worker is still migrating or copying "${name}".`,
+        )
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
     await runMigrationCommand(databaseUrl, options)
+    await extras.whileLocked?.()
   } finally {
     // Closing the connection releases the lock.
     await lock.end()
@@ -101,8 +138,12 @@ export function runMigrationCommand(
     let timedOut = false
     const timer = setTimeout(() => {
       timedOut = true
-      if (child.pid && process.platform !== 'win32') process.kill(-child.pid, 'SIGKILL')
-      else child.kill('SIGKILL')
+      try {
+        if (child.pid && process.platform !== 'win32') process.kill(-child.pid, 'SIGKILL')
+        else child.kill('SIGKILL')
+      } catch {
+        // Already exited.
+      }
     }, timeoutMs)
 
     const fail = (what: string) => {

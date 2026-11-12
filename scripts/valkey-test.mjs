@@ -8,6 +8,8 @@ if (!url) {
   console.log('VALKEY_URL is not set; skipping the Valkey tests.')
   process.exit(0)
 }
+// Only redis-client.test.ts talks to the server; the redis-steps tests use
+// mocks, so they are not Valkey coverage.
 const vitest = fileURLToPath(new URL('../node_modules/vitest/vitest.mjs', import.meta.url))
 const { status } = spawnSync(
   process.execPath,

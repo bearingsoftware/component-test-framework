@@ -13,6 +13,7 @@ describe('redaction (COMPONENT-24)', () => {
   it('hides the password wherever it appears, encoded or not', () => {
     const encoded = 'postgres://app:p%40ss@db/shop'
     expect(redactPassword('failed with p@ss and p%40ss', encoded)).toBe('failed with *** and ***')
+    expect(redactPassword('pw is 100%', 'postgres://app:100%@db/shop')).toBe('pw is ***')
     expect(redactPassword('nothing to hide', 'postgres://app@db/shop')).toBe('nothing to hide')
   })
 })

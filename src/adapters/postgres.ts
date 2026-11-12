@@ -26,18 +26,22 @@ export function postgresAdapter(options: PostgresAdapterOptions): Adapter<DbClie
     name: 'postgres',
     setup: () => new DbClient(options.url),
     ...((workerDatabase || migrations) && {
-      beforeAllTimeout: 60_000 + 2 * (migrations ? (migrations.timeoutMs ?? 120_000) : 0),
+      // The lock wait (up to twice the command's timeout plus 30s), the command, then the copy.
+      beforeAllTimeout: migrations ? 90_000 + 3 * (migrations.timeoutMs ?? 120_000) : 60_000,
       async beforeAll() {
+        const copy = () =>
+          workerDatabase
+            ? prepareWorkerDatabase(workerDatabase.sourceUrl, { template: workerDatabase.template })
+            : undefined
         if (migrations) {
+          // The copy runs under the lock, so no other worker's migration command is connected to the template meanwhile.
           await runMigrations(
             workerDatabase ? templateUrl(workerDatabase) : options.url,
             migrations,
+            { whileLocked: copy },
           )
-        }
-        if (workerDatabase) {
-          await prepareWorkerDatabase(workerDatabase.sourceUrl, {
-            template: workerDatabase.template,
-          })
+        } else {
+          await copy()
         }
       },
     }),
