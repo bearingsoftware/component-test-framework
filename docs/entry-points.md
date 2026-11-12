@@ -12,6 +12,7 @@ The package root works as it always has: it exports everything and registers eve
 | `…/spa` | `registerSpaServer`, `registerCoverage`, `saveFailureArtifacts`, route blocks, WebAuthn, accessibility steps |
 | `…/preset` | `cucumberPreset()`, a profile for `cucumber.js` |
 | `…/openapi` | `loadSpec`, `readOperationMap`, `generateOperationMap`, `checkOperationMaps`, `auditCoverage`: the code behind the `ctf` command |
+| `…/testcontainers` | `startContainers`, `stopContainers` |
 | `…/mailpit` | `MailpitClient`, `registerMailpitSteps`, `emailContains`, `emailLinks` |
 | `…/playwright-test` | `defineFixtures`: the SPA server, WireMock, stubs, logins and coverage as Playwright Test fixtures. Loads no Cucumber |
 

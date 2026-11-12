@@ -10,6 +10,7 @@
 - [Testing a single-page app](spa.md): the SPA server, coverage and browser helpers
 - [Playwright Test fixtures](playwright-test.md): the same pieces as Playwright Test fixtures
 - [Email: Mailpit](mailpit.md): email steps
+- [Testcontainers](testcontainers.md): start Postgres, Valkey / Redis and WireMock in Docker from `cucumber.mjs`
 - [Running in parallel](parallel.md): worker isolation, and making suites fast in CI
 - [OpenAPI tooling and `ctf init`](openapi-cli.md): the `ctf` command
 - [Lifecycle](lifecycle.md): starting the service under test, lifecycle hooks and the scenario lifecycle

@@ -26,6 +26,39 @@ if (fs.existsSync(envFile) && typeof process.loadEnvFile === 'function') process
 module.exports = { default: cucumberPreset() }
 `
 
+const CONTAINER_IMAGES: Record<'wiremock' | 'postgres' | 'redis', string> = {
+  wiremock: 'wiremock/wiremock:3.13.2',
+  postgres: 'postgres:17-alpine',
+  redis: 'redis:7-alpine',
+}
+
+const CONTAINER_PACKAGES: Record<'postgres' | 'redis', string> = {
+  postgres: '@testcontainers/postgresql',
+  redis: '@testcontainers/redis',
+}
+
+function cucumberMjs(pieces: Piece[]): string {
+  const services = (['wiremock', 'postgres', 'redis'] as const)
+    .filter((p) => pieces.includes(p))
+    .map((p) => `  ${p}: { image: '${CONTAINER_IMAGES[p]}' },`)
+  return `import * as fs from 'node:fs'
+import * as path from 'node:path'
+import { cucumberPreset } from '${PKG}/preset'
+import { startContainers } from '${PKG}/testcontainers'
+
+// Variables already in the environment win over .env (Node 20.12 and later).
+const envFile = path.join(import.meta.dirname, '.env')
+if (fs.existsSync(envFile) && typeof process.loadEnvFile === 'function') process.loadEnvFile(envFile)
+
+// Starts a container for each service whose URL variable is unset, and sets it.
+await startContainers({
+${services.join('\n')}
+})
+
+export default cucumberPreset()
+`
+}
+
 // ts-node's defaults on a current Node leave import statements in the output,
 // which Node then loads as ES modules and can't resolve extensionless paths.
 const TSCONFIG = `{
@@ -210,6 +243,18 @@ function dockerCompose(pieces: Piece[]): string {
   return `services:\n${services.join('')}`
 }
 
+function envExampleContainers(pieces: Piece[]): string {
+  const lines: string[] = [
+    '# cucumber.mjs starts a container for each service whose variable is unset.',
+    '# Set one to use your own instead.',
+  ]
+  if (pieces.includes('wiremock')) lines.push('# WIREMOCK_URL=http://localhost:8443')
+  if (pieces.includes('postgres')) lines.push('# DATABASE_URL=postgres://localhost:5432/postgres')
+  if (pieces.includes('redis')) lines.push('# REDIS_URL=redis://localhost:6379')
+  if (pieces.includes('spa')) lines.push('WEB_PORT=3100')
+  return `${lines.join('\n')}\n`
+}
+
 function envExample(pieces: Piece[]): string {
   const lines: string[] = [
     '# docker compose reads the *_PORT values; cucumber.js loads the rest.',
@@ -255,16 +300,28 @@ const WEB_INDEX = `<!doctype html>
 `
 
 /** Every file `ctf init` writes for these pieces, by path relative to the target directory. */
-export function templates(pieces: Piece[]): Record<string, string> {
-  const files: Record<string, string> = {
-    'cucumber.js': CUCUMBER_JS,
-    'tsconfig.json': TSCONFIG,
-    'support/setup.ts': setupTs(pieces),
-    'support/operation-map.ts': OPERATION_MAP,
-    'features/example.feature': exampleFeature(pieces),
-    'docker-compose.yml': dockerCompose(pieces),
-    '.env.example': envExample(pieces),
-  }
+export function templates(pieces: Piece[], containers = false): Record<string, string> {
+  const files: Record<string, string> = containers
+    ? {
+        'cucumber.mjs': cucumberMjs(pieces),
+        'tsconfig.json': TSCONFIG,
+        'support/setup.ts': setupTs(pieces),
+        'support/operation-map.ts': OPERATION_MAP,
+        'features/example.feature': exampleFeature(pieces).replaceAll(
+          'in docker-compose.yml',
+          'that cucumber.mjs starts',
+        ),
+        '.env.example': envExampleContainers(pieces),
+      }
+    : {
+        'cucumber.js': CUCUMBER_JS,
+        'tsconfig.json': TSCONFIG,
+        'support/setup.ts': setupTs(pieces),
+        'support/operation-map.ts': OPERATION_MAP,
+        'features/example.feature': exampleFeature(pieces),
+        'docker-compose.yml': dockerCompose(pieces),
+        '.env.example': envExample(pieces),
+      }
   if (pieces.includes('spa')) {
     files['pages/home.page.ts'] = HOME_PAGE
     files['web/index.html'] = WEB_INDEX
@@ -273,8 +330,13 @@ export function templates(pieces: Piece[]): Record<string, string> {
 }
 
 /** Write the scaffold into `dir`. Throws, naming the files, when any exist and `force` isn't set. */
-export function initProject(dir: string, pieces: Piece[], force: boolean): string[] {
-  const files = templates(normalisePieces(pieces))
+export function initProject(
+  dir: string,
+  pieces: Piece[],
+  force: boolean,
+  containers = false,
+): string[] {
+  const files = templates(normalisePieces(pieces), containers)
   // A project's own tsconfig is never replaced, even with --force.
   if (fs.existsSync(path.join(dir, 'tsconfig.json'))) delete files['tsconfig.json']
   const names = Object.keys(files)
@@ -295,16 +357,22 @@ export function initProject(dir: string, pieces: Piece[], force: boolean): strin
 }
 
 /** What to run after `ctf init`, for what these pieces need. */
-export function nextSteps(dir: string, pieces: Piece[]): string {
+export function nextSteps(dir: string, pieces: Piece[], containers = false): string {
   const chosen = normalisePieces(pieces)
   const spa = chosen.includes('spa')
   const packages = ['@cucumber/cucumber', 'ts-node', 'typescript@5', '@types/node']
   if (spa) packages.push('@playwright/test')
+  if (containers) {
+    packages.push('testcontainers')
+    for (const p of ['postgres', 'redis'] as const) {
+      if (chosen.includes(p)) packages.push(CONTAINER_PACKAGES[p])
+    }
+  }
   const steps = [
     ...(dir === '.' ? [] : [`cd ${dir}`]),
     `npm install --save-dev ${packages.join(' ')}`,
     ...(spa ? ['npx playwright install chromium'] : []),
-    'docker compose up -d --wait',
+    ...(containers ? [] : ['docker compose up -d --wait']),
     'npx cucumber-js',
   ]
   return `\nNext:\n${steps.map((l) => `  ${l}`).join('\n')}`

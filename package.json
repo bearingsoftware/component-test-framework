@@ -52,6 +52,10 @@
       "types": "./dist/playwright-test.d.ts",
       "default": "./dist/playwright-test.js"
     },
+    "./testcontainers": {
+      "types": "./dist/testcontainers.d.ts",
+      "default": "./dist/testcontainers.js"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -85,6 +89,9 @@
       ],
       "playwright-test": [
         "dist/playwright-test.d.ts"
+      ],
+      "testcontainers": [
+        "dist/testcontainers.d.ts"
       ]
     }
   },
@@ -113,15 +120,19 @@
     "test:docs": "node scripts/check-doc-links.mjs",
     "test:valkey": "node scripts/valkey-test.mjs",
     "examples:test": "tsc && node examples/run.js",
-    "test:playwright-test": "tsc && node -e \"for (const d of ['coverage', '.nyc_output']) require('fs').rmSync('tests/playwright-test/' + d, { recursive: true, force: true })\" && playwright test -c tests/playwright-test && node tests/playwright-test/check-coverage.js"
+    "test:playwright-test": "tsc && node -e \"for (const d of ['coverage', '.nyc_output']) require('fs').rmSync('tests/playwright-test/' + d, { recursive: true, force: true })\" && playwright test -c tests/playwright-test && node tests/playwright-test/check-coverage.js",
+    "containers:test": "tsc && node -e \"for (const d of ['coverage', '.nyc_output', 'reports']) require('fs').rmSync('tests/parallel/' + d, { recursive: true, force: true })\" && cucumber-js --config tests/parallel/cucumber.containers.mjs && node tests/parallel/check-coverage.js"
   },
   "peerDependencies": {
     "@axe-core/playwright": ">=4.0.0",
     "@cucumber/cucumber": ">=11.0.0",
     "@playwright/test": ">=1.0.0",
+    "@testcontainers/postgresql": ">=12.0.0",
+    "@testcontainers/redis": ">=12.0.0",
     "istanbul-lib-coverage": ">=3.0.0",
     "istanbul-lib-report": ">=3.0.0",
     "istanbul-reports": ">=3.0.0",
+    "testcontainers": ">=12.0.0",
     "typescript": ">=4.9.0"
   },
   "peerDependenciesMeta": {
@@ -142,6 +153,15 @@
     },
     "typescript": {
       "optional": true
+    },
+    "testcontainers": {
+      "optional": true
+    },
+    "@testcontainers/postgresql": {
+      "optional": true
+    },
+    "@testcontainers/redis": {
+      "optional": true
     }
   },
   "dependencies": {
@@ -154,6 +174,8 @@
     "@cucumber/cucumber": "^13.3.0",
     "@eslint/js": "^9.39.4",
     "@playwright/test": "^1.63.0",
+    "@testcontainers/postgresql": "~12.2.1",
+    "@testcontainers/redis": "~12.2.1",
     "@types/istanbul-lib-coverage": "^2.0.6",
     "@types/istanbul-lib-report": "^3.0.3",
     "@types/istanbul-reports": "^3.0.4",
@@ -168,6 +190,7 @@
     "istanbul-reports": "^3.2.0",
     "npm-run-all2": "^5.0.0",
     "prettier": "^3.8.2",
+    "testcontainers": "~12.2.1",
     "typescript": "~5.9.0",
     "typescript-eslint": "^8.58.0",
     "vitest": "^4.1.11"
