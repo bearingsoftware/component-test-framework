@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.17](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.16...v0.3.17) (2026-11-12)
+
+
+### Features
+
+* **cli:** ctf evidence, static test evidence for risk-gate (COMPONENT-27 part C) ([1932477](https://github.com/bearingsoftware/component-test-framework/commit/193247700b1d7bbc05aaa2cd21737e3c4a28c37a))
+
+
+### Bug Fixes
+
+* **cli:** honour Examples tags, make exclusions additive, report missing objects ([b89479c](https://github.com/bearingsoftware/component-test-framework/commit/b89479ce71926ff381a170c89eb47b1798691b34))
+* **process:** count only ESRCH as gone, treat zombie-only groups as gone, bound the waits ([1b3c52c](https://github.com/bearingsoftware/component-test-framework/commit/1b3c52c0c2b2f7c64fd535c61f8b38ab35c994fd))
+* **process:** stop() waits for the whole process group (COMPONENT-29) ([464eddb](https://github.com/bearingsoftware/component-test-framework/commit/464eddb8e63ddd2d970c791a737a8ab1e34d34a6))
+
 ## [0.3.16](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.15...v0.3.16) (2026-11-12)
 
 
