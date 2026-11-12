@@ -1,0 +1,40 @@
+openapi: 3.0.3
+info:
+  title: Widgets
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '200': { description: ok }
+  /widgets:
+    get:
+      operationId: listWidgets
+      responses:
+        2XX: { description: ok }
+        default: { description: error }
+    post:
+      operationId: createWidget
+      responses:
+        '201': { description: created }
+        '400': { description: bad }
+        default: { description: error }
+  /widgets/{id}:
+    get:
+      operationId: getWidget
+      responses:
+        '200': { description: ok }
+        '404': { description: missing }
+        4XX: { description: client error }
+        '500': { description: broken }
+    put:
+      operationId: updateWidget
+      responses:
+        '200': { description: ok }
+        4XX: { description: client error }
+    delete:
+      operationId: deleteWidget
+      responses:
+        '204': { description: gone }
+        '404': { description: missing }

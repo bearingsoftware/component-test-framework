@@ -1,6 +1,6 @@
 # Steps
 
-API, response and service call tracking steps, then the request, value, login and waiting helpers. Steps for [WireMock](wiremock.md), [Valkey / Redis](redis.md) and the [UI](ui-playwright.md) have their own pages.
+API, response and service call tracking steps, then the request, value, login and waiting helpers. Steps for [WireMock](wiremock.md), [Valkey / Redis](redis.md) and the [UI](ui-playwright.md) have their own pages. `npx ctf steps` lists every step the framework can register, as a table or JSON (see [the CLI](openapi-cli.md#listing-the-frameworks-steps-ctf-steps)).
 
 ## API Steps
 
