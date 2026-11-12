@@ -17,6 +17,9 @@ import { checkStubs, existingFiles, generateStubs } from './openapi/stubs'
 import { applyAllowlist, diffSpecs } from './openapi/diff'
 import { collectEvidence } from './openapi/evidence'
 import { stepCatalogue } from './steps/catalogue'
+import { runFaults } from './faults/run'
+import { readAllowlistAtBase } from './faults/allowlist'
+import { FAULTS, isFault, type Fault } from './faults/inject'
 import { initProject, nextSteps, PIECES, type Piece } from './cli/init'
 
 const HELP = `Usage: ctf <command> [options]
@@ -99,9 +102,26 @@ Commands:
       --base-path <path>            As for audit-coverage and api-diff
       --pattern <regex>             How features name an operation (as audit-coverage)
       --status-pattern <regex>      How features assert a status (as audit-coverage)
+      --test-strength <file>        Embed a ctf faults test-strength.json as testStrength
       --out <dir>                   Write coverage-base.txt, coverage-head.txt, api-break.txt
                                     and evidence.json here (required)
                                     Exits 0 once written, never 1.
+
+  faults --run "<command>"        Advisory test strength: inject a fault into each WireMock stub
+                                  the suite hit and see whether a scenario fails. Runs the suite.
+      --run <command>               Runs Cucumber, taking --format json:<file> and scenario
+                                    paths at its end, or where {args} is (required)
+      --scenarios <evidence.json>   Only stubs hit by scenarios it lists as added or changed,
+                                    or that name its changed operations
+      --stubs <list>                Comma-separated selectors, "METHOD /path" or
+                                    "GRAPHQL <endpoint> <operation>", a trailing * for a
+                                    prefix (default: every stub the baseline run hit)
+      --faults <list>               Comma-separated: status500, emptyBody, connectionReset (all)
+      --allowlist <ref>:<path>      Tolerated "METHOD path fault" lines, read from <ref>, never
+                                    the working tree; those pairs are not run
+      --max-runs <n>                At most n faulted suite runs (default 100)
+      --out <dir>                   Write test-strength.json and test-strength.md (required)
+                                    Exits 0 once written, even with survivors; 2 if it can't run.
 
 Exit status: 0 when all is well, 1 when a check finds problems (or the audit
 finds gaps with --fail-on-gaps), 2 when the command can't run.
@@ -343,6 +363,7 @@ function evidence(args: string[]): number {
       'no-default-exclusions': { type: 'boolean' },
       pattern: { type: 'string', multiple: true },
       'status-pattern': { type: 'string', multiple: true },
+      'test-strength': { type: 'string' },
       out: { type: 'string' },
       'base-path': { type: 'string' },
     },
@@ -368,11 +389,61 @@ function evidence(args: string[]): number {
     noDefaultExclusions: values['no-default-exclusions'],
     patterns: values.pattern?.map((p) => regex(p) as RegExp),
     statusPatterns: values['status-pattern']?.map((p) => regex(p) as RegExp),
+    testStrength: values['test-strength'],
     out: values.out,
   })
   console.log(
     `wrote ${values.out}: coverage ${result.coverage.base.toFixed(2)} -> ${result.coverage.head.toFixed(2)}, ` +
       `api break ${result.apiDiff.breaking.length > 0}`,
+  )
+  return 0
+}
+
+function faults(args: string[]): number {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      run: { type: 'string' },
+      scenarios: { type: 'string' },
+      stubs: { type: 'string' },
+      faults: { type: 'string' },
+      allowlist: { type: 'string' },
+      'max-runs': { type: 'string' },
+      out: { type: 'string' },
+    },
+  })
+  if (positionals.length > 0) throw new UsageError('faults takes options only')
+  if (!values.run) throw new UsageError('faults needs --run')
+  if (!values.out) throw new UsageError('faults needs --out')
+  const list = (v: string | undefined) =>
+    v
+      ?.split(',')
+      .map((x) => x.trim())
+      .filter(Boolean)
+  const names = list(values.faults)
+  const unknown = names?.filter((n) => !isFault(n))
+  if (unknown?.length) {
+    throw new UsageError(
+      `unknown fault ${unknown.join(', ')}; valid faults are ${FAULTS.join(', ')}`,
+    )
+  }
+  const maxRuns = values['max-runs'] === undefined ? 100 : Number(values['max-runs'])
+  if (!Number.isInteger(maxRuns) || maxRuns < 0)
+    throw new UsageError('--max-runs takes a whole number')
+
+  const result = runFaults({
+    run: values.run,
+    scenarios: values.scenarios,
+    stubs: list(values.stubs),
+    faults: names as Fault[] | undefined,
+    allowlist: values.allowlist ? readAllowlistAtBase(values.allowlist) : undefined,
+    maxRuns,
+    out: values.out,
+  })
+  console.log(
+    `wrote ${values.out}: ${result.noticed} of ${result.faultsInjected} faults noticed, ` +
+      `${result.survived.length} survived, ${result.runs} runs`,
   )
   return 0
 }
@@ -538,6 +609,7 @@ export function main(argv: string[]): number {
     if (command === 'api-diff') return apiDiff(rest)
     if (command === 'steps') return steps(rest)
     if (command === 'evidence') return evidence(rest)
+    if (command === 'faults') return faults(rest)
     throw new UsageError(`unknown command: ${command}`)
   } catch (err) {
     const usage =
