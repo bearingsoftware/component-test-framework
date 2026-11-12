@@ -1,0 +1,7 @@
+openapi: 3.0.3
+info: { title: Pets, version: '1' }
+paths:
+  /pets/{id}:
+    get:
+      responses:
+        '200': { description: ok }

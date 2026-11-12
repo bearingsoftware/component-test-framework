@@ -1,0 +1,14 @@
+openapi: 3.0.3
+info: { title: Pets, version: '1' }
+paths:
+  /pets:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind: { type: string, enum: [a, b, c] }
+      responses:
+        '201': { description: created }

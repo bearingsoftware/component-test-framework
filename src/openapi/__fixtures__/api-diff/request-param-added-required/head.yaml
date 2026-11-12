@@ -1,0 +1,9 @@
+openapi: 3.0.3
+info: { title: Pets, version: '1' }
+paths:
+  /pets:
+    get:
+      parameters:
+        - { name: limit, in: query, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: ok }
