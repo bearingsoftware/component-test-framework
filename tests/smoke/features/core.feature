@@ -7,3 +7,6 @@ Feature: The core entry point
 
   Scenario: Lifecycle hooks run in order
     Then the afterReset hook has run for this scenario
+
+  Scenario: A consumer adapter's state reaches a step through world.adapter()
+    Then the consumer adapter state has reached the step
