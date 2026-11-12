@@ -18,7 +18,7 @@ export interface StepEntry {
   optIn: boolean
 }
 
-interface Group {
+export interface Group {
   registeredBy: string
   entryPoint: StepEntry['entryPoint']
   optIn: boolean
@@ -148,6 +148,11 @@ const HOOKS_AND_SETUP = [
  * Needs `@cucumber/cucumber`, a peer dependency; throws a clear error without it.
  */
 export function stepCatalogue(): StepEntry[] {
+  return captureSteps(GROUPS)
+}
+
+/** {@link stepCatalogue} for the given groups; the tests pass ones that throw. */
+export function captureSteps(groups: Group[]): StepEntry[] {
   const root = path.resolve(__dirname, '..')
   const inPackage = (file: string) => file === root || file.startsWith(root + path.sep)
 
@@ -155,7 +160,10 @@ export function stepCatalogue(): StepEntry[] {
   try {
     actual = require('@cucumber/cucumber')
   } catch (err) {
-    if ((err as { code?: string }).code === 'MODULE_NOT_FOUND') {
+    if (
+      (err as { code?: string }).code === 'MODULE_NOT_FOUND' &&
+      /Cannot find module '@cucumber\/cucumber'/.test((err as Error).message)
+    ) {
       throw new Error(
         '@cucumber/cucumber is not installed. It is a peer dependency of the framework; install it to list steps.',
       )
@@ -164,7 +172,7 @@ export function stepCatalogue(): StepEntry[] {
   }
 
   const entries: StepEntry[] = []
-  let group: Group = GROUPS[0]
+  let group: Group = groups[0]
   const record = (keyword: StepEntry['keyword']) => (expression: string | RegExp) => {
     entries.push({
       keyword,
@@ -203,7 +211,7 @@ export function stepCatalogue(): StepEntry[] {
   net.Socket.prototype.connect = refuse('a socket was opened') as typeof connect
   childProcess.spawn = refuse('a process was started')
   try {
-    for (const g of GROUPS) {
+    for (const g of groups) {
       group = g
       g.run()
     }

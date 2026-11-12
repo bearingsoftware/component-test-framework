@@ -195,6 +195,26 @@ describe('auditCoverage statuses (COMPONENT-27)', () => {
     ).toEqual(['418', '200'])
   })
 
+  it('warns about a # language: other than en, and counts its references as unasserted', () => {
+    const file = tmpFeature(
+      '# language: fr\nFonctionnalité: f\n  Scénario: s\n    Quand I send the request a to the ping operation\n    Alors the response status should be 200\n',
+    )
+    const warnings: string[] = []
+    const warn = console.warn
+    console.warn = (m: string) => void warnings.push(m)
+    let r: ReturnType<typeof audit>
+    try {
+      r = audit([file])
+    } finally {
+      console.warn = warn
+    }
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain(file)
+    expect(named(r, 'ping').statuses).toEqual([])
+    expect(named(r, 'ping').unassertedReferences).toEqual([`${file}:4`])
+    expect(named(r, 'ping').references).toEqual([`${file}:4`])
+  })
+
   it('has no gaps for operations without documented responses', () => {
     const bare = auditCoverage({
       operations: [{ method: 'GET', path: '/x', route: '/x' }],

@@ -116,7 +116,25 @@ export function auditCoverage(options: AuditOptions): AuditResult {
 
   const statusPatterns = options.statusPatterns ?? DEFAULT_STATUS_PATTERNS
   for (const file of options.featureFiles) {
-    for (const scenario of parseFeature(fs.readFileSync(file, 'utf-8'))) {
+    const text = fs.readFileSync(file, 'utf-8')
+    if (hasOtherLanguage(text)) {
+      // Keywords in another language aren't parsed; its references count as unasserted.
+      console.warn(
+        `${file}: a # language: other than en isn't supported; its statuses are not read`,
+      )
+      text.split('\n').forEach((line, i) => {
+        if (/^\s*#/.test(line)) return
+        for (const pattern of patterns) {
+          for (const match of line.matchAll(globally(pattern))) {
+            const op = match[1] ? byName.get(match[1]) : undefined
+            const where = `${file}:${i + 1}`
+            if (op && !op.unassertedReferences.includes(where)) op.unassertedReferences.push(where)
+          }
+        }
+      })
+      continue
+    }
+    for (const scenario of parseFeature(text)) {
       let open: { op: AuditedOperation; where: string } | undefined
       const closeUnasserted = () => {
         if (open && !open.op.unassertedReferences.includes(open.where)) {
@@ -164,6 +182,17 @@ export function auditCoverage(options: AuditOptions): AuditResult {
     unknown,
     statusGaps,
   }
+}
+
+function hasOtherLanguage(text: string): boolean {
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed === '' || trimmed.startsWith('@')) continue
+    const header = /^#\s*language:\s*(\S+)/.exec(trimmed)
+    if (header) return header[1] !== 'en'
+    if (!trimmed.startsWith('#')) return false
+  }
+  return false
 }
 
 function globally(pattern: RegExp): RegExp {

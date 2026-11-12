@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { execFileSync } from 'child_process'
+import * as childProcess from 'child_process'
 import * as fs from 'fs'
+import Module from 'module'
+import * as net from 'net'
 import * as path from 'path'
 import type { StepEntry } from './catalogue'
 
@@ -106,9 +109,56 @@ describe('step catalogue (COMPONENT-27)', () => {
     expect(new Set(listed).size).toBe(listed.length)
   })
 
-  it('registers nothing in the process that asks, so asking twice gives the same answer', () => {
+  it('restores every patched global, and the module cache, when a register function throws', () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const again = require(path.join(out, 'steps', 'catalogue.js')).stepCatalogue()
-    expect(again).toEqual(catalogue)
+    const mod = require(path.join(out, 'steps', 'catalogue.js'))
+    const before = {
+      load: (Module as unknown as { _load: unknown })._load,
+      connect: net.Socket.prototype.connect,
+      spawn: childProcess.spawn,
+      cache: { ...require.cache },
+    }
+    const groups = [
+      { registeredBy: 'a', entryPoint: 'core', optIn: false, run: () => mod.stepCatalogue() },
+      {
+        registeredBy: 'b',
+        entryPoint: 'core',
+        optIn: false,
+        run: () => {
+          throw new Error('boom')
+        },
+      },
+    ]
+    expect(() => mod.captureSteps(groups)).toThrow('boom')
+    expect((Module as unknown as { _load: unknown })._load).toBe(before.load)
+    expect(net.Socket.prototype.connect).toBe(before.connect)
+    expect(childProcess.spawn).toBe(before.spawn)
+    expect({ ...require.cache }).toEqual(before.cache)
+    expect(mod.stepCatalogue()).toEqual(catalogue)
+  })
+
+  it('only says cucumber is missing when cucumber itself is', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require(path.join(out, 'steps', 'catalogue.js'))
+    const internals = Module as unknown as { _load: (...a: unknown[]) => unknown }
+    const original = internals._load
+    const missing = (name: string) => {
+      internals._load = function (this: unknown, request: unknown, ...rest: unknown[]) {
+        if (request === '@cucumber/cucumber') {
+          throw Object.assign(new Error(`Cannot find module '${name}'`), {
+            code: 'MODULE_NOT_FOUND',
+          })
+        }
+        return original.call(this, request, ...rest)
+      }
+    }
+    try {
+      missing('@cucumber/cucumber')
+      expect(() => mod.stepCatalogue()).toThrow('@cucumber/cucumber is not installed')
+      missing('some-transitive-dependency')
+      expect(() => mod.stepCatalogue()).toThrow("Cannot find module 'some-transitive-dependency'")
+    } finally {
+      internals._load = original
+    }
   })
 })
