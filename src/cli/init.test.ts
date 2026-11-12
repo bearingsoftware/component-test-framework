@@ -1,0 +1,170 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import * as fs from 'fs'
+import * as os from 'os'
+import * as path from 'path'
+import ts from 'typescript'
+import { main } from '../cli'
+import { PIECES, type Piece } from './init'
+
+const REPO = path.resolve(__dirname, '..', '..')
+
+let dir: string
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctf-init-'))
+  vi.spyOn(console, 'log').mockImplementation(() => undefined)
+  vi.spyOn(console, 'error').mockImplementation(() => undefined)
+})
+afterEach(() => {
+  vi.restoreAllMocks()
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+
+const read = (file: string) => fs.readFileSync(path.join(dir, file), 'utf-8')
+const written = () =>
+  fs
+    .readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((e) => e.isFile())
+    .map((e) => path.relative(dir, path.join(e.parentPath, e.name)).split(path.sep).join('/'))
+    .sort()
+
+const BASE = [
+  '.env.example',
+  'cucumber.js',
+  'docker-compose.yml',
+  'features/example.feature',
+  'support/operation-map.ts',
+  'support/setup.ts',
+]
+
+const IMAGES: Record<Exclude<Piece, 'spa'>, string> = {
+  wiremock: 'wiremock/wiremock:3.13.2',
+  postgres: 'postgres:17-alpine',
+  redis: 'redis:7-alpine',
+  mailpit: 'axllent/mailpit:v1.33',
+}
+
+const ENV: Record<Piece, string> = {
+  wiremock: 'WIREMOCK_URL=',
+  postgres: 'DATABASE_URL=',
+  redis: 'REDIS_URL=',
+  mailpit: 'MAILPIT_URL=',
+  spa: 'WEB_PORT=',
+}
+
+const COMBINATIONS: Piece[][] = [
+  ['wiremock'],
+  ['postgres'],
+  ['redis'],
+  ['mailpit'],
+  ['spa'],
+  ['wiremock', 'postgres'],
+  ['postgres', 'redis', 'mailpit'],
+  [...PIECES],
+]
+
+describe('ctf init', () => {
+  it('defaults to WireMock in the current directory', () => {
+    const cwd = process.cwd()
+    process.chdir(dir)
+    try {
+      expect(main(['init'])).toBe(0)
+    } finally {
+      process.chdir(cwd)
+    }
+    expect(written()).toEqual(BASE)
+    expect(read('docker-compose.yml')).toContain(IMAGES.wiremock)
+    expect(read('docker-compose.yml')).not.toContain('postgres')
+    expect(read('features/example.feature')).toContain('hello operation')
+  })
+
+  it.each(COMBINATIONS)('writes the files for --with %s', (...pieces) => {
+    expect(main(['init', dir, '--with', pieces.join(',')])).toBe(0)
+    const withSpa = pieces.includes('spa')
+    expect(written()).toEqual(
+      withSpa ? [...BASE, 'pages/home.page.ts', 'web/index.html'].sort() : BASE,
+    )
+
+    const chosen = new Set<Piece>(pieces)
+    if (withSpa) chosen.add('wiremock')
+    const compose = read('docker-compose.yml')
+    const env = read('.env.example')
+    const setup = read('support/setup.ts')
+    for (const piece of PIECES) {
+      const image = piece === 'spa' ? undefined : IMAGES[piece]
+      if (image) expect(compose.includes(image)).toBe(chosen.has(piece))
+      expect(env.includes(ENV[piece])).toBe(chosen.has(piece))
+    }
+    expect(setup.includes('registerRedisSteps()')).toBe(chosen.has('redis'))
+    expect(setup.includes('registerDbSteps()')).toBe(chosen.has('postgres'))
+    expect(setup.includes('registerMailpitSteps()')).toBe(chosen.has('mailpit'))
+    expect(setup.includes('registerWiremockSteps()')).toBe(chosen.has('wiremock'))
+    expect(setup.includes('registerSpaServer')).toBe(withSpa)
+    expect(setup).not.toContain('void ')
+    expect(read('cucumber.js')).toContain('cucumberPreset()')
+  })
+
+  it('prints the next steps', () => {
+    main(['init', dir])
+    const out = vi.mocked(console.log).mock.calls.flat().join('\n')
+    expect(out).toContain('docker compose up -d')
+    expect(out).toContain('npx cucumber-js')
+  })
+
+  it('refuses to overwrite, naming the file, and --force replaces it', () => {
+    fs.writeFileSync(path.join(dir, 'cucumber.js'), '// mine\n')
+    expect(main(['init', dir])).toBe(2)
+    expect(vi.mocked(console.error).mock.calls.flat().join('\n')).toContain(
+      path.join(dir, 'cucumber.js'),
+    )
+    expect(read('cucumber.js')).toBe('// mine\n')
+    expect(fs.existsSync(path.join(dir, 'support'))).toBe(false)
+
+    expect(main(['init', dir, '--force'])).toBe(0)
+    expect(read('cucumber.js')).toContain('cucumberPreset()')
+  })
+
+  it('rejects an unknown name, listing the valid ones', () => {
+    expect(main(['init', dir, '--with', 'wiremock,mysql'])).toBe(2)
+    const err = vi.mocked(console.error).mock.calls.flat().join('\n')
+    expect(err).toContain('mysql')
+    for (const piece of PIECES) expect(err).toContain(piece)
+    expect(written()).toEqual([])
+  })
+
+  // The generated code compiled against the package's own sources, with the
+  // package name mapped to src, so it needs no build and no install.
+  it.each(COMBINATIONS)(
+    'generates setup.ts and cucumber.js that typecheck for --with %s',
+    (...pieces) => {
+      main(['init', dir, '--with', pieces.join(',')])
+      const entries = Object.entries({
+        '@bearingsoftware/component-test-framework': ['src/index.ts'],
+        '@bearingsoftware/component-test-framework/*': ['src/*'],
+      })
+      const options: ts.CompilerOptions = {
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.CommonJS,
+        moduleResolution: ts.ModuleResolutionKind.Node10,
+        strict: true,
+        esModuleInterop: true,
+        skipLibCheck: true,
+        allowJs: true,
+        checkJs: true,
+        noEmit: true,
+        baseUrl: REPO,
+        paths: Object.fromEntries(entries),
+        typeRoots: [path.join(REPO, 'node_modules', '@types')],
+        types: ['node'],
+      }
+      const roots = written()
+        .filter((f) => f === 'cucumber.js' || f.endsWith('.ts'))
+        .map((f) => path.join(dir, f))
+      const program = ts.createProgram(roots, options)
+      const diagnostics = ts
+        .getPreEmitDiagnostics(program)
+        .filter((d) => d.file && path.resolve(d.file.fileName).startsWith(dir))
+        .map((d) => `${d.file?.fileName}: ${ts.flattenDiagnosticMessageText(d.messageText, '\n')}`)
+      expect(diagnostics).toEqual([])
+    },
+  )
+})

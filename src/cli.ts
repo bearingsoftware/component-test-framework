@@ -8,10 +8,17 @@ import { generateOperationMap } from './openapi/generate'
 import { checkOperationMaps, readAllowlist, type CheckPair } from './openapi/check'
 import { auditCoverage, findFeatureFiles, DEFAULT_REFERENCE_PATTERNS } from './openapi/audit'
 import { readOperationMap } from './openapi/map-file'
+import { initProject, PIECES, type Piece } from './cli/init'
 
 const HELP = `Usage: ctf <command> [options]
 
 Commands:
+  init [dir]                      Write a starter suite: cucumber.js, support/, a feature,
+                                  docker-compose.yml and .env.example (dir defaults to .)
+      --with <names>                Comma-separated: wiremock, postgres, redis, mailpit, spa
+                                    (default wiremock; spa also brings wiremock)
+      --force                       Overwrite files that already exist
+
   generate-operation-map <spec>   Write a typed operation map for an OpenAPI spec
       --out <file>                  Write it here (default: print it)
       --check                       Fail if --out differs from what would be generated
@@ -63,6 +70,30 @@ function regex(value: string | undefined): RegExp | undefined {
   } catch (err) {
     throw new UsageError(`not a valid regular expression: ${value} (${(err as Error).message})`)
   }
+}
+
+function init(args: string[]): number {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: { with: { type: 'string' }, force: { type: 'boolean' } },
+  })
+  if (positionals.length > 1) throw new UsageError('init takes one directory')
+  const names = (values.with ?? 'wiremock').split(',').filter(Boolean)
+  const unknown = names.filter((n) => !(PIECES as readonly string[]).includes(n))
+  if (unknown.length > 0 || names.length === 0) {
+    throw new UsageError(
+      `unknown --with name${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ') || '(none given)'}; valid names are ${PIECES.join(', ')}`,
+    )
+  }
+  const dir = positionals[0] ?? '.'
+  for (const file of initProject(dir, names as Piece[], values.force ?? false)) {
+    console.log(`wrote ${path.join(dir, file)}`)
+  }
+  console.log(
+    `\nNext:${dir === '.' ? '' : `\n  cd ${dir}`}\n  docker compose up -d\n  npx cucumber-js`,
+  )
+  return 0
 }
 
 function generate(args: string[]): number {
@@ -215,6 +246,7 @@ export function main(argv: string[]): number {
       process.stdout.write(HELP)
       return 0
     }
+    if (command === 'init') return init(rest)
     if (command === 'generate-operation-map') return generate(rest)
     if (command === 'check-operation-map') return check(rest)
     if (command === 'audit-coverage') return audit(rest)
