@@ -35,6 +35,22 @@ jobs:
       mailpit:
         image: axllent/mailpit:v1.33
         ports: ["58025:8025", "51025:1025"]
+      # COMPONENT-24: the migrations, seed and adapter tests need a real
+      # Postgres, with a database of their own so cloning it as a template
+      # isn't blocked by other connections; the Valkey run needs Valkey.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ctf_unit
+        ports: ["55442:5432"]
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
+      valkey:
+        image: valkey/valkey:8-alpine
+        ports: ["56393:6379"]
+        options: >-
+          --health-cmd "valkey-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30
     env:
       REDIS_URL: redis://localhost:56391
     steps:
@@ -54,7 +70,12 @@ jobs:
         env:
           MAILPIT_URL: http://localhost:58025
           MAILPIT_SMTP: localhost:51025
+          DATABASE_URL: postgres://postgres:postgres@localhost:55442/ctf_unit
         run: npm run test:unit
+      - name: Run the Redis client tests against Valkey
+        env:
+          VALKEY_URL: redis://localhost:56393
+        run: npm run test:valkey
       # The built package under a real Cucumber run: entry points, step
       # registration and lifecycle hooks.
       - name: Run smoke tests
