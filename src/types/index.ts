@@ -188,6 +188,11 @@ export interface FrameworkConfig {
    * Postgres and Redis ones, in this order. See {@link Adapter}.
    */
   adapters?: AnyAdapter[]
+  /** GraphQL mocking for the GraphQL steps. */
+  graphql?: {
+    /** Each service's GraphQL endpoint path. A service with no entry uses `/graphql`. */
+    endpoints?: Record<string, string>
+  }
 }
 
 /**
