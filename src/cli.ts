@@ -14,6 +14,7 @@ import {
 } from './openapi/audit'
 import { readOperationMap } from './openapi/map-file'
 import { checkStubs, existingFiles, generateStubs } from './openapi/stubs'
+import { applyAllowlist, diffSpecs } from './openapi/diff'
 import { stepCatalogue } from './steps/catalogue'
 import { initProject, nextSteps, PIECES, type Piece } from './cli/init'
 
@@ -75,6 +76,12 @@ Commands:
       --allowlist <file>            Known gaps, one mapping file name per line;
                                     an entry that matches nothing fails as stale
       --templated                   WireMock templates every response: skip bodies with {{
+      --json                        Print the result as JSON
+
+  api-diff <base> <head>          List what changed between two OpenAPI specs, and which are breaking
+      --allowlist <file>            Accepted breaks, "METHOD /path" or "METHOD /path <rule>" per line;
+                                    an entry that matches no breaking change fails as stale
+      --out-flag <file>             Write true or false: whether a breaking change was found
       --json                        Print the result as JSON
 
 Exit status: 0 when all is well, 1 when a check finds problems (or the audit
@@ -403,6 +410,47 @@ function stubs(args: string[]): number {
   return 0
 }
 
+function apiDiff(args: string[]): number {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      'base-path': { type: 'string' },
+      json: { type: 'boolean' },
+      allowlist: { type: 'string' },
+      'out-flag': { type: 'string' },
+    },
+  })
+  // A flag left by an earlier run must not be read as this run's answer.
+  if (values['out-flag']) fs.rmSync(values['out-flag'], { force: true })
+  if (positionals.length !== 2) throw new UsageError('api-diff takes a base spec and a head spec')
+  const [base, head] = positionals
+
+  const diff = diffSpecs(base, head, { basePath: values['base-path'] })
+  const allowed = applyAllowlist(
+    diff.breaking,
+    values.allowlist ? readAllowlist(values.allowlist) : [],
+  )
+  const breaking = allowed.breaking
+  const shown = diff.nonBreaking.filter((f) => f.rule !== 'description-changed')
+
+  if (values.json) {
+    console.log(JSON.stringify({ version: 1, breaking, nonBreaking: diff.nonBreaking }, null, 2))
+  } else {
+    for (const f of breaking)
+      console.log(`breaking  ${f.rule}  ${f.operation}  ${f.location}  ${f.detail}`)
+    for (const f of shown)
+      console.log(`non-breaking  ${f.rule}  ${f.operation}  ${f.location}  ${f.detail}`)
+    const allowedNote = allowed.allowlisted ? `, ${allowed.allowlisted} allowlisted` : ''
+    console.log(`${breaking.length} breaking, ${shown.length} non-breaking${allowedNote}`)
+  }
+  for (const line of allowed.stale) {
+    console.error(`${values.allowlist}: '${line}' no longer matches any breaking change; remove it`)
+  }
+  if (values['out-flag']) fs.writeFileSync(values['out-flag'], String(breaking.length > 0))
+  return breaking.length > 0 || allowed.stale.length > 0 ? 1 : 0
+}
+
 export function main(argv: string[]): number {
   const [command, ...rest] = argv
   try {
@@ -419,6 +467,7 @@ export function main(argv: string[]): number {
     if (command === 'check-operation-map') return check(rest)
     if (command === 'audit-coverage') return audit(rest)
     if (command === 'stubs') return stubs(rest)
+    if (command === 'api-diff') return apiDiff(rest)
     if (command === 'steps') return steps(rest)
     throw new UsageError(`unknown command: ${command}`)
   } catch (err) {

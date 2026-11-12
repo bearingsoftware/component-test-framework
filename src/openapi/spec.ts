@@ -119,6 +119,10 @@ export interface SpecResponse {
 /** A {@link SpecOperation} with what the spec says about its responses. */
 export interface DetailedOperation extends SpecOperation {
   responses: SpecResponse[]
+  /** The operation object, for the parts {@link responses} doesn't cover (parameters, request bodies). */
+  source: Located
+  /** The path item it is in, with its shared parameters. */
+  pathItem: Located
 }
 
 function derefLocated(loc: Located, cache: Map<string, Json>): Located {
@@ -206,6 +210,8 @@ function walk(
           detailed && isObject(op.responses)
             ? Object.entries(op.responses).map(([status, r]) => responseOf(status, r, ctx, cache))
             : [],
+        source: { value: op, file: ctx.file, root: ctx.root },
+        pathItem: ctx,
       })
     }
   }
@@ -219,7 +225,9 @@ export function loadSpecDetail(file: string, options: LoadSpecOptions = {}) {
 
 /** A spec's operations, in the order the spec lists them. */
 export function loadSpec(file: string, options: LoadSpecOptions = {}): SpecOperation[] {
-  return walk(file, options, false).operations.map(({ responses: _responses, ...op }) => op)
+  return walk(file, options, false).operations.map(
+    ({ responses: _responses, source: _source, pathItem: _pathItem, ...op }) => op,
+  )
 }
 
 /** A path's segments, without its query string; a trailing slash is an empty last segment. */
