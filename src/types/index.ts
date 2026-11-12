@@ -3,6 +3,7 @@ import type { ITestCaseHookParameter } from '@cucumber/cucumber'
 import type { ComponentTestWorld } from '../support/world'
 import type { BasePage } from '../pages/base.page'
 import type { AnyAdapter } from '../support/adapter'
+import type { MigrationsOptions } from '../support/migrations'
 
 /** Maps an OpenAPI operationId to its HTTP method and URL path. */
 export interface OperationEntry {
@@ -188,6 +189,13 @@ export interface FrameworkConfig {
    * Postgres and Redis ones, in this order. See {@link Adapter}.
    */
   adapters?: AnyAdapter[]
+  /**
+   * A command that migrates the database before the suite, once per worker
+   * under a Postgres advisory lock, against `databaseUrl` or, under
+   * `workerIsolation.database`, the template the workers copy. It must be
+   * idempotent. See {@link MigrationsOptions}.
+   */
+  migrations?: MigrationsOptions
   /** GraphQL mocking for the GraphQL steps. */
   graphql?: {
     /** Each service's GraphQL endpoint path. A service with no entry uses `/graphql`. */

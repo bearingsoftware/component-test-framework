@@ -1,6 +1,6 @@
 # Valkey / Redis
 
-`registerRedisSteps(options?)` adds steps for keys and pub/sub. They need `redisUrl`.
+`registerRedisSteps(options?)` adds steps for keys and pub/sub. They need `redisUrl`. The Redis client and step tests run in CI against both Redis 7 and Valkey 8 (`valkey/valkey:8-alpine`).
 
 **Keys:**
 

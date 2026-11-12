@@ -55,6 +55,8 @@ export {
 export type { WorkerInfo } from './support/worker'
 export { prepareWorkerDatabase } from './support/worker-database'
 export type { WorkerDatabaseOptions } from './support/worker-database'
+export { runMigrations } from './support/migrations'
+export type { MigrationsOptions } from './support/migrations'
 
 // Waiting
 export {

@@ -25,6 +25,7 @@ export function builtinAdapters(
       postgresAdapter({
         url: config.databaseUrl,
         cleanupTables: config.cleanupTables,
+        migrations: config.migrations,
         workerDatabase:
           database && options.databaseUrl
             ? {

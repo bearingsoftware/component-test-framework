@@ -123,6 +123,24 @@ export class DbClient {
     )
   }
 
+  /**
+   * Insert one row, quoting the column names so they keep their case. {@link seed}
+   * writes them as given, so Postgres folds them to lower case.
+   */
+  async insertRow(table: string, row: Record<string, unknown>): Promise<void> {
+    const columns = Object.keys(row)
+    const names = columns.map((c) => `"${c.replace(/"/g, '""')}"`).join(', ')
+    const params = columns.map((_, i) => `$${i + 1}`).join(', ')
+    if (columns.length === 0) {
+      await this.pool.query(`INSERT INTO ${table} DEFAULT VALUES`)
+      return
+    }
+    await this.pool.query(
+      `INSERT INTO ${table} (${names}) VALUES (${params})`,
+      columns.map((c) => row[c]),
+    )
+  }
+
   /** Close the connection pool. */
   async close(): Promise<void> {
     await this.pool.end()

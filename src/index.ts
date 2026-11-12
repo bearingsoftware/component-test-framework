@@ -46,6 +46,8 @@ export {
 export type { WorkerInfo } from './support/worker'
 export { prepareWorkerDatabase } from './support/worker-database'
 export type { WorkerDatabaseOptions } from './support/worker-database'
+export { runMigrations } from './support/migrations'
+export type { MigrationsOptions } from './support/migrations'
 export { countRows, assertSafeTableName, requireDb, queryOnce } from './support/db'
 export { sendOperation, fillPath, EMPTY_REQUEST } from './support/requests'
 export type { SendOperationOptions } from './support/requests'
@@ -110,6 +112,7 @@ export * as sseSteps from './steps/api/sse.steps'
 export * as responseSteps from './steps/common/response-assertion.steps'
 /** @deprecated Use registerDbSteps() from /core. */
 export * as dbAssertionSteps from './steps/common/db-assertion.steps'
+export * as dbSeedSteps from './steps/common/db-seed.steps'
 /** @deprecated Use registerWiremockSteps() from /core. */
 export * as wiremockSteps from './steps/common/wiremock.steps'
 /** @deprecated Use registerRedisSteps() from /core. */
