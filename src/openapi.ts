@@ -10,3 +10,12 @@ export { checkOperationMaps, readAllowlist } from './openapi/check'
 export type { CheckPair, CheckOptions, CheckResult, Problem } from './openapi/check'
 export { auditCoverage, findFeatureFiles, DEFAULT_REFERENCE_PATTERNS } from './openapi/audit'
 export type { AuditOptions, AuditResult, AuditedOperation } from './openapi/audit'
+export { generateStubs, checkStubs } from './openapi/stubs'
+export type {
+  GenerateStubsOptions,
+  GeneratedStubs,
+  CheckStubsOptions,
+  CheckStubsResult,
+} from './openapi/stubs'
+export { validateSchema } from './openapi/schema'
+export type { SchemaError } from './openapi/schema'

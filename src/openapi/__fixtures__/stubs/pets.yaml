@@ -1,0 +1,86 @@
+openapi: 3.0.3
+info: { title: Pets, version: '1' }
+servers:
+  - url: http://localhost:8080/api
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '200':
+          description: The pets
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: 'schemas.yaml#/Pet' }
+              example:
+                - { id: 1, name: Rex, tag: dog }
+                - { id: 2, name: Tom, tag: null }
+    post:
+      operationId: createPet
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: 'schemas.yaml#/Pet' }
+              examples:
+                created:
+                  value: { id: 3, name: Kit }
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema: { $ref: 'schemas.yaml#/Problem' }
+              example: { message: name is required }
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      responses:
+        '200':
+          description: The pet
+          content:
+            application/json:
+              schema: { $ref: 'schemas.yaml#/Pet' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          description: Unexpected
+    delete:
+      operationId: deletePet
+      responses:
+        '204':
+          description: Deleted
+  /pets/{petId}/toys:
+    get:
+      operationId: listToys
+      responses:
+        '200':
+          description: The toys
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }
+  /tree:
+    get:
+      operationId: getTree
+      responses:
+        '200':
+          description: A tree
+          content:
+            application/json:
+              schema: { $ref: 'schemas.yaml#/Node' }
+              example:
+                value: root
+                children:
+                  - { value: leaf }
+components:
+  responses:
+    NotFound:
+      description: No such pet
+      content:
+        application/json:
+          schema: { $ref: 'schemas.yaml#/Problem' }
+          example: { message: no such pet }
