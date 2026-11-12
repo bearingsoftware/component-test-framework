@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.3.16](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.15...v0.3.16) (2026-11-12)
+
+
+### Features
+
+* **cli:** add ctf api-diff to classify breaking OpenAPI changes ([3dc2aa1](https://github.com/bearingsoftware/component-test-framework/commit/3dc2aa138b335f2642244063e588c8dc9a27b443))
+* **cli:** add ctf steps, audit-coverage --statuses and --status-pattern ([f712003](https://github.com/bearingsoftware/component-test-framework/commit/f712003dc182d8bb884ca5c55b56cd2f01a05d2b))
+* **cli:** add ctf stubs to generate and check WireMock stubs from a spec ([d80c397](https://github.com/bearingsoftware/component-test-framework/commit/d80c397d062361fa5f0dd2a1ca425add0b32dc1a))
+* **cli:** ctf api-diff, a breaking-change classifier for OpenAPI (COMPONENT-27 part B) ([1578b5d](https://github.com/bearingsoftware/component-test-framework/commit/1578b5d18583d4e3617f5b2679a9c77217679c0d))
+* **cli:** ctf steps and response-status coverage in audit-coverage (COMPONENT-27 part A) ([2fbe619](https://github.com/bearingsoftware/component-test-framework/commit/2fbe619f68900deea55bc70475383fd0044b3b62))
+* **cli:** ctf stubs — WireMock stubs from OpenAPI, with a drift check (COMPONENT-26) ([28196a5](https://github.com/bearingsoftware/component-test-framework/commit/28196a5a183d43b48d37cbb55d769bd0f3c719b7))
+* **openapi:** audit response statuses per scenario ([83b4e80](https://github.com/bearingsoftware/component-test-framework/commit/83b4e802293367aacff0eed629d11c8cf5b88a35))
+* **openapi:** load response details and validate JSON schemas ([3832f6f](https://github.com/bearingsoftware/component-test-framework/commit/3832f6fe9865a34b9292de1f2266ba88fcd625f0))
+* **testcontainers:** opt-in startContainers() for cucumber.mjs (COMPONENT-25) ([5f33ba2](https://github.com/bearingsoftware/component-test-framework/commit/5f33ba2dc6bf92b5ab3c3f3a265bfcc64e493cac))
+* **testcontainers:** startContainers entry point and ctf init --containers ([bb97ce0](https://github.com/bearingsoftware/component-test-framework/commit/bb97ce0bcc42fa79033ee18939ac0f347a3826ff))
+
+
+### Bug Fixes
+
+* **cli:** keep generated priorities above 5, check ANY bodies against every operation, add --templated ([9071c27](https://github.com/bearingsoftware/component-test-framework/commit/9071c270206af0b9e9c9c0abd2658a604876fe1d))
+* **cli:** order overlapping stubs, serve null examples, resolve ANY and urlPattern queries ([755e199](https://github.com/bearingsoftware/component-test-framework/commit/755e199e6009991f355a13d2335803858295f17d))
+* **cli:** restore globals on a failed capture, skip non-English features, narrow the missing-cucumber check ([f23d429](https://github.com/bearingsoftware/component-test-framework/commit/f23d42958d8c68cf6e72ca60031b19f60216caf1))
+* **openapi:** match media types without parameters, split request property removal ([e360b1c](https://github.com/bearingsoftware/component-test-framework/commit/e360b1ca71cb40535d0713d98a4b4e6138b5a32e))
+* **testcontainers:** narrow missing-package detection, bound the exit-time docker rm ([bd9e8dc](https://github.com/bearingsoftware/component-test-framework/commit/bd9e8dcfe9294940aa26a4f5a1d2cf884a721792))
+
 ## [0.3.15](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.14...v0.3.15) (2026-11-12)
 
 
