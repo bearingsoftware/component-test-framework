@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.15](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.14...v0.3.15) (2026-11-12)
+
+
+### Features
+
+* **postgres:** migrations hook, seed steps and Valkey parity (COMPONENT-24) ([7913a3e](https://github.com/bearingsoftware/component-test-framework/commit/7913a3e8177e51f4667b411c4493fd1fb514fc3c))
+* **postgres:** run migrations before the suite under an advisory lock ([d40a3ac](https://github.com/bearingsoftware/component-test-framework/commit/d40a3aca10cd85a60e264cc4a9a57a80f622773a))
+* **postgres:** seed steps for data tables and JSON or SQL fixtures ([8f774db](https://github.com/bearingsoftware/component-test-framework/commit/8f774db52109b4674179b4f08a4718b3e6794f6f))
+* **wiremock:** add a typed REST stub builder and GraphQL mocking ([d44414c](https://github.com/bearingsoftware/component-test-framework/commit/d44414cb723b160a037f7f8018d17516e0f24979))
+* **wiremock:** typed REST stub builder and GraphQL mocking (COMPONENT-23) ([ead3f5f](https://github.com/bearingsoftware/component-test-framework/commit/ead3f5f9c2e45d8e02ea61a848339dd2f8b9cf65))
+
+
+### Bug Fixes
+
+* **postgres:** hold the migrations lock through the worker copy ([4fccc48](https://github.com/bearingsoftware/component-test-framework/commit/4fccc488dd4e2d5bc901798027c2dc2269d622ce))
+* **wiremock:** let operationName pick the operation in GraphQL matching ([a8a4311](https://github.com/bearingsoftware/component-test-framework/commit/a8a43117a32c75d9a5f6a631890b8160a9ce594e))
+
 ## [0.3.14](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.13...v0.3.14) (2026-11-12)
 
 
