@@ -8,6 +8,7 @@ import { generateOperationMap } from './openapi/generate'
 import { checkOperationMaps, readAllowlist, type CheckPair } from './openapi/check'
 import { auditCoverage, findFeatureFiles, DEFAULT_REFERENCE_PATTERNS } from './openapi/audit'
 import { readOperationMap } from './openapi/map-file'
+import { checkStubs, existingFiles, generateStubs } from './openapi/stubs'
 import { initProject, nextSteps, PIECES, type Piece } from './cli/init'
 
 const HELP = `Usage: ctf <command> [options]
@@ -42,6 +43,21 @@ Commands:
       --pattern <regex>             How features name an operation, the name in group 1
                                     (repeatable; default: "to the (\\w+) operation")
       --fail-on-gaps                Exit 1 when any operation is unexercised
+      --json                        Print the result as JSON
+
+  stubs <spec> --out <dir>        Write WireMock mappings from an OpenAPI spec's examples,
+                                  to <dir>/mappings, one file per operation
+      --include <regex>             Only operations whose name matches
+      --exclude <regex>             Leave out operations whose name matches
+      --all-statuses                A mapping for every documented status, not just the
+                                    lowest 2xx
+      --force                       Overwrite files that already exist
+
+  stubs --check <spec> <dir>      Fail when the mappings in <dir>/mappings no longer
+                                  match the spec
+      --allowlist <file>            Known gaps, one mapping file name per line;
+                                    an entry that matches nothing fails as stale
+      --templated                   WireMock templates every response: skip bodies with {{
       --json                        Print the result as JSON
 
 Exit status: 0 when all is well, 1 when a check finds problems (or the audit
@@ -239,6 +255,82 @@ function audit(args: string[]): number {
   return values['fail-on-gaps'] && result.gaps.length > 0 ? 1 : 0
 }
 
+function stubs(args: string[]): number {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      out: { type: 'string' },
+      check: { type: 'boolean' },
+      include: { type: 'string' },
+      exclude: { type: 'string' },
+      'all-statuses': { type: 'boolean' },
+      force: { type: 'boolean' },
+      allowlist: { type: 'string' },
+      json: { type: 'boolean' },
+      templated: { type: 'boolean' },
+      'base-path': { type: 'string' },
+    },
+  })
+  const basePath = values['base-path']
+
+  if (values.check) {
+    if (positionals.length !== 2) throw new UsageError('stubs --check takes a spec and a directory')
+    if (values.out) throw new UsageError('--out is for writing stubs, not for --check')
+    const [spec, dir] = positionals
+    const result = checkStubs(spec, dir, {
+      basePath,
+      allowlist: values.allowlist ? readAllowlist(values.allowlist) : undefined,
+      templated: values.templated,
+    })
+    if (values.json) {
+      console.log(JSON.stringify(result, null, 2))
+    } else {
+      for (const w of result.warnings) console.error(`${w.where}: warning: ${w.message}`)
+      for (const p of result.problems) console.error(`${p.where}: ${p.message}`)
+      for (const key of result.stale) {
+        console.error(`${values.allowlist}: '${key}' no longer matches any problem; remove it`)
+      }
+    }
+    const failures = result.problems.length + result.stale.length
+    if (failures > 0) {
+      if (!values.json) console.error(`\n${failures} problem(s) between the stubs and the spec.`)
+      return 1
+    }
+    if (!values.json) {
+      const allowed = result.allowlisted.length ? ` (${result.allowlisted.length} allowlisted)` : ''
+      console.log(`stubs and spec agree${allowed}`)
+    }
+    return 0
+  }
+
+  if (values.allowlist || values.json || values.templated) {
+    throw new UsageError('--allowlist, --json and --templated are for --check')
+  }
+  const [spec] = positionals
+  if (!spec || positionals.length > 1) throw new UsageError('stubs takes one spec')
+  if (!values.out) throw new UsageError('stubs needs --out <dir>')
+  const { mappings, skipped, warnings } = generateStubs(spec, {
+    basePath,
+    include: regex(values.include),
+    exclude: regex(values.exclude),
+    allStatuses: values['all-statuses'],
+  })
+  const existing = existingFiles(values.out, mappings)
+  if (existing.length > 0 && !values.force) {
+    throw new Error(`won't overwrite ${existing.join(', ')}; pass --force to replace them`)
+  }
+  for (const { file, mapping } of mappings) {
+    const target = path.join(values.out, file)
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.writeFileSync(target, `${JSON.stringify(mapping, null, 2)}\n`)
+    console.log(`wrote ${target}`)
+  }
+  for (const s of skipped) console.error(`skipped ${s.operation}: ${s.reason}`)
+  for (const w of warnings) console.error(`warning: ${w.operation}: ${w.reason}`)
+  return 0
+}
+
 export function main(argv: string[]): number {
   const [command, ...rest] = argv
   try {
@@ -254,6 +346,7 @@ export function main(argv: string[]): number {
     if (command === 'generate-operation-map') return generate(rest)
     if (command === 'check-operation-map') return check(rest)
     if (command === 'audit-coverage') return audit(rest)
+    if (command === 'stubs') return stubs(rest)
     throw new UsageError(`unknown command: ${command}`)
   } catch (err) {
     const usage =

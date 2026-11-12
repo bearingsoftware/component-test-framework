@@ -47,8 +47,14 @@ function readDocument(file: string, cache: Map<string, Json>): Json {
   return doc as Json
 }
 
-/** Follow a `$ref` (`#/a/b`, `other.yaml`, or `other.yaml#/a/b`), and any it leads to, from `file`. */
-function resolveRef(ref: string, file: string, root: Json, cache: Map<string, Json>): Json {
+/** A value from a document, with the document it came from, so its own `$ref`s resolve against it. */
+export interface Located {
+  value: Json
+  file: string
+  root: Json
+}
+
+function resolveLocation(ref: string, file: string, root: Json, cache: Map<string, Json>): Located {
   const seen = new Set<string>()
   for (;;) {
     const [target, pointer = ''] = ref.split('#')
@@ -64,11 +70,18 @@ function resolveRef(ref: string, file: string, root: Json, cache: Map<string, Js
     if (!value || typeof value !== 'object')
       throw new Error(`Can't resolve $ref ${ref} from ${file}`)
     const next = (value as Json).$ref
-    if (typeof next !== 'string') return value as Json
+    if (typeof next !== 'string') return { value: value as Json, file: docFile, root: doc }
     ref = next
     file = docFile
     root = doc
   }
+}
+
+/** Follows a `$ref` from where it was written. Reads other files as needed. */
+export type RefResolver = (ref: string, from: Located) => Located
+
+export function createRefResolver(cache = new Map<string, Json>()): RefResolver {
+  return (ref, from) => resolveLocation(ref, from.file, from.root, cache)
 }
 
 function basePathOf(doc: Json): string {
@@ -90,20 +103,98 @@ function basePathOf(doc: Json): string {
   return decodeURI(pathname).replace(/\/+$/, '')
 }
 
-/** A spec's operations, in the order the spec lists them. */
-export function loadSpec(file: string, options: LoadSpecOptions = {}): SpecOperation[] {
+/** One documented response of an operation. */
+export interface SpecResponse {
+  /** The key in `responses`: `200`, `2XX` or `default`. */
+  status: string
+  /** The media type its body is described under; none for a response without a body. */
+  mediaType?: string
+  /** The body's own example, when the spec has one. */
+  example?: unknown
+  hasExample: boolean
+  /** The body's schema, when the spec has one. */
+  schema?: Located
+}
+
+/** A {@link SpecOperation} with what the spec says about its responses. */
+export interface DetailedOperation extends SpecOperation {
+  responses: SpecResponse[]
+}
+
+function derefLocated(loc: Located, cache: Map<string, Json>): Located {
+  return typeof loc.value.$ref === 'string'
+    ? resolveLocation(loc.value.$ref, loc.file, loc.root, cache)
+    : loc
+}
+
+function isObject(value: unknown): value is Json {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function responseOf(status: string, raw: unknown, ctx: Located, cache: Map<string, Json>) {
+  const response: SpecResponse = { status, hasExample: false }
+  if (!isObject(raw)) return response
+  const res = derefLocated({ ...ctx, value: raw }, cache)
+  const content = res.value.content
+  let media: Json | undefined
+  if (isObject(content) && Object.keys(content).length > 0) {
+    const types = Object.keys(content)
+    response.mediaType =
+      types.find((t) => t === 'application/json') ??
+      types.find((t) => /\+json$/.test(t)) ??
+      types[0]
+    media = isObject(content[response.mediaType]) ? (content[response.mediaType] as Json) : {}
+  } else if (isObject(res.value.schema)) {
+    // Swagger 2: the schema sits on the response, examples are keyed by media type.
+    response.mediaType = 'application/json'
+    media = { schema: res.value.schema }
+    const examples = res.value.examples
+    if (isObject(examples) && 'application/json' in examples) {
+      media.example = examples['application/json']
+    }
+  }
+  if (!media) return response
+
+  let schema: Located | undefined
+  if (isObject(media.schema)) schema = derefLocated({ ...res, value: media.schema }, cache)
+  response.schema = schema
+  if ('example' in media) {
+    response.example = media.example
+    response.hasExample = true
+  } else if (isObject(media.examples)) {
+    const first = Object.values(media.examples)[0]
+    if (isObject(first)) {
+      const ex = derefLocated({ ...res, value: first }, cache).value
+      if ('value' in ex) {
+        response.example = ex.value
+        response.hasExample = true
+      }
+    }
+  }
+  if (!response.hasExample && schema && 'example' in schema.value) {
+    response.example = schema.value.example
+    response.hasExample = true
+  }
+  return response
+}
+
+function walk(
+  file: string,
+  options: LoadSpecOptions,
+  detailed: boolean,
+): { operations: DetailedOperation[]; resolve: RefResolver } {
   const cache = new Map<string, Json>()
   const doc = readDocument(file, cache)
   if (!doc.paths || typeof doc.paths !== 'object') {
     throw new Error(`${file} has no paths: is it an OpenAPI or Swagger document?`)
   }
   const base = (options.basePath ?? basePathOf(doc)).replace(/\/+$/, '')
-  const operations: SpecOperation[] = []
+  const operations: DetailedOperation[] = []
   for (const [route, raw] of Object.entries(doc.paths as Json)) {
-    let item = raw as Json
-    if (typeof item?.$ref === 'string') item = resolveRef(item.$ref, file, doc, cache)
+    let ctx: Located = { value: raw as Json, file, root: doc }
+    if (typeof ctx.value?.$ref === 'string') ctx = resolveLocation(ctx.value.$ref, file, doc, cache)
     for (const method of METHODS) {
-      const op = item?.[method] as Json | undefined
+      const op = ctx.value?.[method] as Json | undefined
       if (!op || typeof op !== 'object') continue
       operations.push({
         operationId: typeof op.operationId === 'string' ? op.operationId : undefined,
@@ -111,10 +202,24 @@ export function loadSpec(file: string, options: LoadSpecOptions = {}): SpecOpera
         path: `${base}${route}`,
         route,
         summary: typeof op.summary === 'string' ? op.summary : undefined,
+        responses:
+          detailed && isObject(op.responses)
+            ? Object.entries(op.responses).map(([status, r]) => responseOf(status, r, ctx, cache))
+            : [],
       })
     }
   }
-  return operations
+  return { operations, resolve: createRefResolver(cache) }
+}
+
+/** A spec's operations with their documented responses, and a resolver for the schemas in them. */
+export function loadSpecDetail(file: string, options: LoadSpecOptions = {}) {
+  return walk(file, options, true)
+}
+
+/** A spec's operations, in the order the spec lists them. */
+export function loadSpec(file: string, options: LoadSpecOptions = {}): SpecOperation[] {
+  return walk(file, options, false).operations.map(({ responses: _responses, ...op }) => op)
 }
 
 /** A path's segments, without its query string; a trailing slash is an empty last segment. */
