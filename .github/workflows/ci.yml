@@ -140,6 +140,34 @@ jobs:
       - name: Run the parallel reference suite
         run: npm run test:parallel
 
+  # COMPONENT-25: the reference suite in container mode. No services: block
+  # and none of DATABASE_URL, REDIS_URL or WIREMOCK_URL set, so
+  # startContainers starts Postgres, Redis and WireMock itself. Ports of its
+  # own: runners share a host with parallel-reference (3100+, 18100+).
+  containers:
+    if: "!startsWith(github.head_ref, 'release-please--')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Install Chromium for the SPA scenarios
+        run: npx playwright install --with-deps chromium
+      - name: Run the startContainers live test
+        env:
+          CTF_TESTCONTAINERS: "1"
+        run: npx vitest run src/testcontainers.integration.test.ts
+      - name: Run the reference suite in container mode
+        env:
+          WEB_PORT: "3301"
+          SERVICE_PORT: "18301"
+          PARALLEL: "4"
+        run: npm run containers:test
+
   playwright-test-example:
     if: "!startsWith(github.head_ref, 'release-please--')"
     runs-on: ubuntu-latest

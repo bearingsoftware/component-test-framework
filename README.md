@@ -72,6 +72,7 @@ Point `API_BASE_URL` at your own service, add its operations to the map, and rep
 - [Testing a single-page app](docs/spa.md): the SPA server, coverage and browser helpers
 - [Playwright Test fixtures](docs/playwright-test.md): the same pieces as Playwright Test fixtures
 - [Email: Mailpit](docs/mailpit.md): email steps
+- [Testcontainers](docs/testcontainers.md): start Postgres, Valkey / Redis and WireMock in Docker from `cucumber.mjs`
 - [Running in parallel](docs/parallel.md): worker isolation, and making suites fast in CI
 - [OpenAPI tooling and `ctf init`](docs/openapi-cli.md): the `ctf` command
 - [Lifecycle](docs/lifecycle.md): starting the service under test, lifecycle hooks and the scenario lifecycle
