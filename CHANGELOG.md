@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.18](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.17...v0.3.18) (2026-11-12)
+
+
+### Features
+
+* **cli:** ctf faults runs the suite with a fault in each stub it hit ([96456f3](https://github.com/bearingsoftware/component-test-framework/commit/96456f3ff0ca114ecb1fad1f8d5f2f8883c8f958))
+* **cli:** ctf faults, an advisory fault-injection test-strength check (COMPONENT-30) ([eef940a](https://github.com/bearingsoftware/component-test-framework/commit/eef940a589eadb8b2c2eb62ed5960d73f76cddf7))
+* **wiremock:** inject a fault into a stub chosen by CTF_FAULT ([a0dd604](https://github.com/bearingsoftware/component-test-framework/commit/a0dd604234770907cf12b88e0e0806c9365a0c8a))
+
+
+### Bug Fixes
+
+* **cli:** ctf faults reports inconclusive runs and refuses a useless baseline ([4548ef7](https://github.com/bearingsoftware/component-test-framework/commit/4548ef70890f04b50d0937f9c33ab2f9f34f6ef2))
+* **cli:** warn when no baseline scenario hit a WireMock stub ([1010c28](https://github.com/bearingsoftware/component-test-framework/commit/1010c28a66f42741fabbec2bb62a94fdd3d010e3))
+
 ## [0.3.17](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.16...v0.3.17) (2026-11-12)
 
 
