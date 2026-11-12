@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.14](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.13...v0.3.14) (2026-11-12)
+
+
+### Features
+
+* **adapters:** adapter interface, with built-ins expressed through it (COMPONENT-21) ([bf77aca](https://github.com/bearingsoftware/component-test-framework/commit/bf77acabf84f7ef59092505ea63436cf1d45a3bc))
+* **adapters:** add the adapter interface and express built-ins through it ([ee96cd7](https://github.com/bearingsoftware/component-test-framework/commit/ee96cd73098558df9124a1e0c23ee5efab8cf4e3))
+* **cli:** add ctf init to scaffold a starter suite ([0d2f33c](https://github.com/bearingsoftware/component-test-framework/commit/0d2f33c9fc0d599187437f716e5a0208174c7836))
+* **cli:** ctf init, docs/ split, runnable examples (COMPONENT-22) ([ba17fe3](https://github.com/bearingsoftware/component-test-framework/commit/ba17fe36a3e18de6eee9fe648487ff852151c9c8))
+
+
+### Bug Fixes
+
+* **adapters:** let registerAdapter be called twice with the same name, type Redis state honestly ([89a7c46](https://github.com/bearingsoftware/component-test-framework/commit/89a7c46db2d16355b58ddfa8cbfa9da3afad3b4a))
+* **cli:** keep an existing tsconfig.json and wait for Postgres on TCP ([591e319](https://github.com/bearingsoftware/component-test-framework/commit/591e319c8d84d14f650bd9fc9fcfd686ffafd001))
+* **cli:** make ctf init work on a first run in a real project ([8043c21](https://github.com/bearingsoftware/component-test-framework/commit/8043c2186dd92ae1fedcd1c1a196ed7720521dc3))
+
 ## [0.3.13](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.12...v0.3.13) (2026-10-11)
 
 
