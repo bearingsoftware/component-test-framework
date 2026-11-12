@@ -17,10 +17,18 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
       version: ${{ steps.release.outputs.version }}
     steps:
+      # The release PR is opened with the release app's token, not GITHUB_TOKEN:
+      # a PR opened with GITHUB_TOKEN triggers no workflows, so the checks the
+      # main ruleset requires never report and the PR stays blocked.
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
       - uses: googleapis/release-please-action@v4
         id: release
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
   publish:
     runs-on: ubuntu-latest
