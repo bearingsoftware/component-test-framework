@@ -6,7 +6,7 @@ npx ctf evidence --base origin/main --spec openapi.yaml --features features --ou
 
 It writes the facts about a change that [risk-gate](https://github.com/bearingsoftware/risk-gate) scores: how well the feature files assert the spec's documented response statuses before and after, and whether the spec's change breaks clients.
 
-**What it is:** everything is computed statically from files. The base side is read with `git archive <base>`, unpacked to a temporary directory, so no pull-request code is ever executed and the job needs no write token. It reuses [`audit-coverage --statuses`](openapi-cli.md#response-statuses) and [`api-diff`](openapi-cli.md#detecting-breaking-changes-ctf-api-diff).
+**What it is:** everything is computed statically from files. The base side is read from the git objects of `<base>` (`git ls-tree` and `git cat-file`, so `export-ignore` doesn't hide files and symlinks aren't followed) into a temporary directory that is removed afterwards, so no pull-request code is ever executed and the job needs no write token. It reuses [`audit-coverage --statuses`](openapi-cli.md#response-statuses) and [`api-diff`](openapi-cli.md#detecting-breaking-changes-ctf-api-diff).
 
 **What it isn't:** a gate. It exits 0 once the files are written, and has no exit 1; 2 means it couldn't run. It holds no run-time data: retries and flake history need runs, so `evidence.json` lists them under `notComputed` and invents no values.
 
@@ -16,11 +16,12 @@ It writes the facts about a change that [risk-gate](https://github.com/bearingso
 |---|---|
 | `--base <git-ref>` | Required. The ref to compare against. It must be fetched: with `actions/checkout`, use `fetch-depth: 0`. An unknown ref exits 2 naming it. |
 | `--head <git-ref>` | Default: the working tree. |
-| `--spec <path>` | Required, repeatable. Each spec is computed on its own, then aggregated. A spec missing at base counts as empty (a new API); one missing at head exits 2. |
+| `--spec <path>` | Required, repeatable. Each spec is computed on its own, then aggregated. A spec absent at base is neutral: its head pairs count on both sides, so a new API doesn't move the coverage (`presentAtBase: false`). A spec missing at head exits 2, including a moved one: pass the new path, and the move reads as a new spec (no api-break comparison). |
 | `--features <dir\|file>` | Required, repeatable. Missing at base counts as no features (a new suite). |
 | `--map <file>` | The suite's operation map, as for `audit-coverage`. |
 | `--base-path`, `--pattern`, `--status-pattern` | As for `audit-coverage` and `api-diff`. |
-| `--allowlist <file>` | An `api-diff` allowlist, read from the head. Allowlisted breaks don't count. |
+| `--allowlist <file>` | An `api-diff` allowlist, read from the **base**, so a change can't accept its own breaks; absent at base means none. `evidence.json` records the entries used and whether the head's copy differs. |
+| `--exclude-tags <list>` | Comma-separated tags whose scenarios don't count towards coverage (default `@skip,@pending,@wip`; replaces the default; empty means none). Tags are inherited from the Feature and Rule. |
 | `--out <dir>` | Required. Where the files go. |
 
 Paths are relative to the working directory, inside a git repository.
@@ -30,6 +31,8 @@ Paths are relative to the working directory, inside a git repository.
 - `coverage-base.txt`, `coverage-head.txt`: the status coverage percent, the number only, two decimals, no `%` (`82.35`). It is asserted (operation, documented status) pairs divided by all documented pairs, times 100. `default` is excluded from both sides. A range such as `2XX` is one pair, met by any asserted status in it. With no documented pairs the file holds `100.00`.
 - `api-break.txt`: `true` or `false`. `true` when `diffSpecs(base, head)` finds a breaking change that the allowlist doesn't suppress, in any spec. A spec new at head contributes nothing.
 - `evidence.json`: the details, below.
+
+Every run first deletes the four files, so a run that exits 2 leaves nothing to be mistaken for an answer.
 
 None of the three text files ends in a newline; each parses with `strconv.ParseFloat` or a `true`/`false` comparison after trimming.
 
@@ -43,10 +46,13 @@ None of the three text files ends in a newline; each parses with `strconv.ParseF
 | `specs` | One entry per `--spec`: `path`, `presentAtBase`, `coverage` (`base` and `head` as two-decimal strings, `pairs` with `asserted` and `total` for each) and `apiBreak`. |
 | `coverage.base`, `.head` | The aggregate percents as numbers. Specs are weighted by their documented pairs. |
 | `coverage.delta` | `head - base`. |
-| `coverage.noDocumentedStatuses` | `true` when the base or the head has no documented pairs, so its percent is the `100.00` default, not a measurement. `coverage.pairs` has the counts. |
+| `coverage.noDocumentedStatuses` | `true` when the base or the head truly has no documented pairs, so its percent is the `100.00` default, not a measurement. `coverage.pairs` has the counts. |
 | `apiDiff.breaking`, `.nonBreaking` | The `api-diff` findings (`rule`, `operation`, `location`, `detail`) over all specs; `breaking` excludes allowlisted ones. |
 | `apiDiff.suppressed` | How many breaking findings the allowlist suppressed. |
-| `scenarios.added`, `.removed`, `.changed` | `{file, name}` for scenarios in the features. A scenario is its file and name; an Outline is one scenario however many rows. `changed` means the same file and name with different step text. |
+| `apiDiff.allowlist` | `null`, or `{path, source: "base", entries, headDiffers}`. |
+| `scenarios.added`, `.removed`, `.changed` | `{file, name}` for scenarios in the features. A scenario is its file and name; an Outline is one scenario however many rows. `changed` means the same file and name with different step text or tags, with `tagsChanged` saying whether the tags differ. A changed Background changes every scenario in its file. An Outline's Examples rows count as its steps. |
+| `scenarios.excluded` | `{tags, head}`: the tags excluded, and the head scenarios they removed from the coverage. |
+| `statusesRemoved` | `{method, path, status}` documented at base but not at head: removing a status raises coverage without a test. |
 | `statusGaps.head` | Documented statuses no scenario asserts at head. |
 | `statusGaps.new`, `.closed` | `{operation, method, path, status}` gaps present at head but not base, and the reverse. |
 | `operations.changedInSpec` | Operations (`METHOD /path`) that any `api-diff` finding touches, breaking or not. |
