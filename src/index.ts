@@ -17,6 +17,8 @@ export { ComponentTestWorld } from './support/world'
 export { loadConfig, requireApiBaseUrl } from './support/config'
 export { loadFixture, listFixtures } from './support/fixtures'
 export { registerHooks } from './support/hooks'
+export { defineAdapter, registerAdapter } from './support/adapter'
+export type { Adapter, AdapterContext } from './support/adapter'
 export {
   spawnServiceUnderTest,
   startService,
@@ -134,3 +136,6 @@ registerRedisStepsOnImport()
 // Helpers exposed so consumers can compose their own raw-request step defs.
 export { rawRequest } from './support/raw-request'
 export { readSSE } from './support/sse'
+export { wiremockAdapter } from './adapters/wiremock'
+export { postgresAdapter } from './adapters/postgres'
+export { redisAdapter } from './adapters/redis'

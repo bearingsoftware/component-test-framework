@@ -13,3 +13,5 @@ export {
   namespaceScenarioName,
 } from './clients/wiremock-client'
 export { registerWiremockSteps } from './steps/register'
+export { wiremockAdapter } from './adapters/wiremock'
+export type { WireMockAdapterOptions } from './adapters/wiremock'
