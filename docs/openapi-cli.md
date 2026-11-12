@@ -147,6 +147,8 @@ A removed request property is breaking only when the head schema at that level s
 
 `diffSpecs` is exported from `@bearingsoftware/component-test-framework/openapi`.
 
+To get the break flag, status coverage and scenario changes together for a pull request, use [`ctf evidence`](evidence.md).
+
 ## Scaffolding a suite: `ctf init`
 
 ```sh

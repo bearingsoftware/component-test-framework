@@ -13,6 +13,7 @@
 - [Testcontainers](testcontainers.md): start Postgres, Valkey / Redis and WireMock in Docker from `cucumber.mjs`
 - [Running in parallel](parallel.md): worker isolation, and making suites fast in CI
 - [OpenAPI tooling and `ctf init`](openapi-cli.md): the `ctf` command
+- [Test evidence](evidence.md): `ctf evidence`, coverage and api-break files for risk-gate
 - [Lifecycle](lifecycle.md): starting the service under test, lifecycle hooks and the scenario lifecycle
 - [Entry points and exports](entry-points.md): the package's entry points and moving to `/core`
 - [Adapters](adapters.md)
