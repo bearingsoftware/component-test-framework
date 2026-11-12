@@ -271,9 +271,11 @@ describe('service lifecycle (COMPONENT-8)', () => {
       expect(Date.now() - begun).toBeLessThan(5_000)
     })
 
-    it('waits for processes the service spawned, not just the service', async () => {
+    const waitsForGrandchild = async (extraEnv: NodeJS.ProcessEnv) => {
       const service = await startService(
-        options({ env: { ...process.env, PORT: String(port), GRANDCHILD_STOP_MS: '700' } }),
+        options({
+          env: { ...process.env, PORT: String(port), GRANDCHILD_STOP_MS: '700', ...extraEnv },
+        }),
       )
       started.push(service)
       const grandchild = await eventually(
@@ -300,7 +302,13 @@ describe('service lifecycle (COMPONENT-8)', () => {
         }
       }
       expect(['gone', 'Z']).toContain(state())
-    })
+    }
+
+    it('waits for processes the service spawned, not just the service', () =>
+      waitsForGrandchild({}))
+
+    it('waits for a spawned process that closed its output', () =>
+      waitsForGrandchild({ GRANDCHILD_CLOSE_OUTPUT: '1' }))
 
     it('can be stopped twice, and will not start again once stopped', async () => {
       const service = spawnServiceUnderTest(options())

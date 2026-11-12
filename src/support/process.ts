@@ -88,7 +88,30 @@ function within(promise: Promise<unknown>, ms: number): Promise<void> {
   })
 }
 
-/** One spawned process: the child, why it ended (if it has), and when its output closed. */
+/**
+ * Resolves once no member of process group `pgid` is left, or after `ms`.
+ * A closed pipe doesn't mean that: a member can close or redirect its output
+ * and keep running, and one that has just closed its pipes is still shutting
+ * down. POSIX only; Windows has no groups, so it resolves at once there.
+ */
+function groupGone(pgid: number | undefined, ms: number): Promise<void> {
+  if (!pgid || process.platform === 'win32') return Promise.resolve()
+  const deadline = Date.now() + ms
+  return new Promise((resolve) => {
+    const check = () => {
+      try {
+        process.kill(-pgid, 0)
+      } catch {
+        return resolve()
+      }
+      if (Date.now() >= deadline) return resolve()
+      setTimeout(check, 10).unref()
+    }
+    check()
+  })
+}
+
+/** One spawned process: the child, why it ended (if it has), and when it and its group have gone. */
 interface Running {
   child: ChildProcess
   /** Set when the process exits or fails to start, e.g. "exited with code 2". */
@@ -154,7 +177,9 @@ class ManagedService {
     const running: Running = {
       child,
       ended: null,
-      gone: Promise.all([exited, ...outputClosed]).then(() => undefined),
+      gone: Promise.all([exited, ...outputClosed])
+        .then(() => groupGone(child.pid, (this.opts.stopGraceMs ?? DEFAULT_STOP_GRACE) + KILL_WAIT))
+        .then(() => undefined),
     }
     this.running = running
     this.stopping = false
@@ -205,9 +230,9 @@ class ManagedService {
     } catch {
       /* already gone */
     }
-    // Done when the process has exited and the whole group has gone, which is
-    // when its output closes. The direct child exiting isn't enough: a
-    // process it spawned can still hold the port.
+    // Done when the process has exited and every member of its group has gone.
+    // The direct child exiting isn't enough: a process it spawned can still
+    // hold the port, and so can one that closed its output.
     const graceful = await Promise.race([
       running.gone.then(() => true),
       new Promise<boolean>((resolve) =>
