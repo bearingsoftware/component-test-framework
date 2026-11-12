@@ -24,6 +24,7 @@ All configuration is loaded from environment variables via `loadConfig()`. Overr
 | `hooks` | _(none)_ | Suite code at fixed points: `afterReset`, `onScenarioFailed`, `beforePageClose`. See [Lifecycle hooks](lifecycle.md#lifecycle-hooks) |
 | `pages` | _(none)_ | Page object classes by name, created for every `@ui` scenario. Needs `webBaseUrl` |
 | `wiremockBaseline` | _(none)_ | WireMock stub directories, relative to `fixturesDir`, loaded after every reset |
+| `migrations` | _(none)_ | A shell `command` that migrates the database before the suite, with optional `cwd`, `env` and `timeoutMs` (default 120000). Must be idempotent. See [Migrations](postgres.md#migrations) |
 | `cleanup` | _(none)_ | Cleanup after each scenario for what `cleanupTables` doesn't cover |
 | `serviceWaitTimeout` | `30000` | How long waits for background work (DB record waits, opt-in WireMock and DB steps) poll, in ms |
 

@@ -77,6 +77,10 @@ After a scenario the order is: `onScenarioFailed` (if it failed), cleanup, `befo
 
 `wiremockBaseline` directories use WireMock's layout, `<dir>/mappings/*.json`, and need `wiremockUrl`. A missing directory, a baseline without WireMock, and `pages` without `webBaseUrl` are reported when `registerHooks` is called, not in every scenario.
 
+## Before the suite
+
+Each `BeforeAll` hook runs in the order it was registered. The `migrations` option runs in the Postgres adapter's `BeforeAll`, which `registerHooks` registers, and before the worker database copy when `workerIsolation.database` is set. A service registered with `registerServiceUnderTest` before `registerHooks` therefore starts, and runs its `beforeStart`, before the migrations. Call `runMigrations` in that `beforeStart`, or register the service after `registerHooks`. See [Migrations](postgres.md#migrations).
+
 ## Scenario lifecycle
 
 Each scenario follows this lifecycle:
