@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { randomUUID } from 'crypto'
+import { describe, it, expect, beforeEach, afterAll } from 'vitest'
 import { WireMockClient } from '../clients/wiremock-client'
 import { graphql } from './graphql'
 
@@ -6,7 +7,7 @@ import { graphql } from './graphql'
 // operation-name matching is proved: the stubs are JSON, and only WireMock
 // can say what they match.
 const url = process.env.WIREMOCK_URL ?? ''
-const NS = '/__gql-it'
+const NS = `/__gql-it-${randomUUID().slice(0, 8)}`
 const PATH = '/v1/graphql/'
 
 interface GqlResult {
@@ -36,6 +37,7 @@ describe.skipIf(!url)('GraphQL mocking against WireMock (COMPONENT-23)', () => {
     'mutation obtainKrakenToken($input: ObtainJSONWebTokenInput!) {\n  obtainKrakenToken(input: $input) {\n    token\n  }\n}'
 
   beforeEach(() => client.resetAll())
+  afterAll(() => client.resetAll())
 
   it('matches an operation named only in the query text', async () => {
     await client.register(

@@ -1,11 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { randomUUID } from 'crypto'
+import { describe, it, expect, beforeEach, afterAll } from 'vitest'
 import { WireMockClient } from '../clients/wiremock-client'
 import { stub } from './rest'
 
 // Against a real WireMock; skipped without WIREMOCK_URL. Each file keeps to
 // its own path prefix, so test files running at once don't reset each other.
 const url = process.env.WIREMOCK_URL ?? ''
-const NS = '/__rest-it'
+const NS = `/__rest-it-${randomUUID().slice(0, 8)}`
 
 describe.skipIf(!url)('REST stub builder against WireMock (COMPONENT-23)', () => {
   const client = new WireMockClient(url, undefined, { namespace: NS })
@@ -18,6 +19,7 @@ describe.skipIf(!url)('REST stub builder against WireMock (COMPONENT-23)', () =>
     })
 
   beforeEach(() => client.resetAll())
+  afterAll(() => client.resetAll())
 
   it('serves a JSON response with headers', async () => {
     await client.register(
