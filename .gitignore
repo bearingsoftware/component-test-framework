@@ -14,3 +14,7 @@ tests/parallel/reports/
 tests/playwright-test/coverage/
 tests/playwright-test/.nyc_output/
 test-results/
+
+# The examples suites output, and the scaffold check's scratch directories
+examples/*/reports/
+examples/.scaffold-*/

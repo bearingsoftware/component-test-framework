@@ -1,5 +1,93 @@
 # Changelog
 
+## [0.3.18](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.17...v0.3.18) (2026-11-12)
+
+
+### Features
+
+* **cli:** ctf faults runs the suite with a fault in each stub it hit ([96456f3](https://github.com/bearingsoftware/component-test-framework/commit/96456f3ff0ca114ecb1fad1f8d5f2f8883c8f958))
+* **cli:** ctf faults, an advisory fault-injection test-strength check (COMPONENT-30) ([eef940a](https://github.com/bearingsoftware/component-test-framework/commit/eef940a589eadb8b2c2eb62ed5960d73f76cddf7))
+* **wiremock:** inject a fault into a stub chosen by CTF_FAULT ([a0dd604](https://github.com/bearingsoftware/component-test-framework/commit/a0dd604234770907cf12b88e0e0806c9365a0c8a))
+
+
+### Bug Fixes
+
+* **cli:** ctf faults reports inconclusive runs and refuses a useless baseline ([4548ef7](https://github.com/bearingsoftware/component-test-framework/commit/4548ef70890f04b50d0937f9c33ab2f9f34f6ef2))
+* **cli:** warn when no baseline scenario hit a WireMock stub ([1010c28](https://github.com/bearingsoftware/component-test-framework/commit/1010c28a66f42741fabbec2bb62a94fdd3d010e3))
+
+## [0.3.17](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.16...v0.3.17) (2026-11-12)
+
+
+### Features
+
+* **cli:** ctf evidence, static test evidence for risk-gate (COMPONENT-27 part C) ([1932477](https://github.com/bearingsoftware/component-test-framework/commit/193247700b1d7bbc05aaa2cd21737e3c4a28c37a))
+
+
+### Bug Fixes
+
+* **cli:** honour Examples tags, make exclusions additive, report missing objects ([b89479c](https://github.com/bearingsoftware/component-test-framework/commit/b89479ce71926ff381a170c89eb47b1798691b34))
+* **process:** count only ESRCH as gone, treat zombie-only groups as gone, bound the waits ([1b3c52c](https://github.com/bearingsoftware/component-test-framework/commit/1b3c52c0c2b2f7c64fd535c61f8b38ab35c994fd))
+* **process:** stop() waits for the whole process group (COMPONENT-29) ([464eddb](https://github.com/bearingsoftware/component-test-framework/commit/464eddb8e63ddd2d970c791a737a8ab1e34d34a6))
+
+## [0.3.16](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.15...v0.3.16) (2026-11-12)
+
+
+### Features
+
+* **cli:** add ctf api-diff to classify breaking OpenAPI changes ([3dc2aa1](https://github.com/bearingsoftware/component-test-framework/commit/3dc2aa138b335f2642244063e588c8dc9a27b443))
+* **cli:** add ctf steps, audit-coverage --statuses and --status-pattern ([f712003](https://github.com/bearingsoftware/component-test-framework/commit/f712003dc182d8bb884ca5c55b56cd2f01a05d2b))
+* **cli:** add ctf stubs to generate and check WireMock stubs from a spec ([d80c397](https://github.com/bearingsoftware/component-test-framework/commit/d80c397d062361fa5f0dd2a1ca425add0b32dc1a))
+* **cli:** ctf api-diff, a breaking-change classifier for OpenAPI (COMPONENT-27 part B) ([1578b5d](https://github.com/bearingsoftware/component-test-framework/commit/1578b5d18583d4e3617f5b2679a9c77217679c0d))
+* **cli:** ctf steps and response-status coverage in audit-coverage (COMPONENT-27 part A) ([2fbe619](https://github.com/bearingsoftware/component-test-framework/commit/2fbe619f68900deea55bc70475383fd0044b3b62))
+* **cli:** ctf stubs — WireMock stubs from OpenAPI, with a drift check (COMPONENT-26) ([28196a5](https://github.com/bearingsoftware/component-test-framework/commit/28196a5a183d43b48d37cbb55d769bd0f3c719b7))
+* **openapi:** audit response statuses per scenario ([83b4e80](https://github.com/bearingsoftware/component-test-framework/commit/83b4e802293367aacff0eed629d11c8cf5b88a35))
+* **openapi:** load response details and validate JSON schemas ([3832f6f](https://github.com/bearingsoftware/component-test-framework/commit/3832f6fe9865a34b9292de1f2266ba88fcd625f0))
+* **testcontainers:** opt-in startContainers() for cucumber.mjs (COMPONENT-25) ([5f33ba2](https://github.com/bearingsoftware/component-test-framework/commit/5f33ba2dc6bf92b5ab3c3f3a265bfcc64e493cac))
+* **testcontainers:** startContainers entry point and ctf init --containers ([bb97ce0](https://github.com/bearingsoftware/component-test-framework/commit/bb97ce0bcc42fa79033ee18939ac0f347a3826ff))
+
+
+### Bug Fixes
+
+* **cli:** keep generated priorities above 5, check ANY bodies against every operation, add --templated ([9071c27](https://github.com/bearingsoftware/component-test-framework/commit/9071c270206af0b9e9c9c0abd2658a604876fe1d))
+* **cli:** order overlapping stubs, serve null examples, resolve ANY and urlPattern queries ([755e199](https://github.com/bearingsoftware/component-test-framework/commit/755e199e6009991f355a13d2335803858295f17d))
+* **cli:** restore globals on a failed capture, skip non-English features, narrow the missing-cucumber check ([f23d429](https://github.com/bearingsoftware/component-test-framework/commit/f23d42958d8c68cf6e72ca60031b19f60216caf1))
+* **openapi:** match media types without parameters, split request property removal ([e360b1c](https://github.com/bearingsoftware/component-test-framework/commit/e360b1ca71cb40535d0713d98a4b4e6138b5a32e))
+* **testcontainers:** narrow missing-package detection, bound the exit-time docker rm ([bd9e8dc](https://github.com/bearingsoftware/component-test-framework/commit/bd9e8dcfe9294940aa26a4f5a1d2cf884a721792))
+
+## [0.3.15](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.14...v0.3.15) (2026-11-12)
+
+
+### Features
+
+* **postgres:** migrations hook, seed steps and Valkey parity (COMPONENT-24) ([7913a3e](https://github.com/bearingsoftware/component-test-framework/commit/7913a3e8177e51f4667b411c4493fd1fb514fc3c))
+* **postgres:** run migrations before the suite under an advisory lock ([d40a3ac](https://github.com/bearingsoftware/component-test-framework/commit/d40a3aca10cd85a60e264cc4a9a57a80f622773a))
+* **postgres:** seed steps for data tables and JSON or SQL fixtures ([8f774db](https://github.com/bearingsoftware/component-test-framework/commit/8f774db52109b4674179b4f08a4718b3e6794f6f))
+* **wiremock:** add a typed REST stub builder and GraphQL mocking ([d44414c](https://github.com/bearingsoftware/component-test-framework/commit/d44414cb723b160a037f7f8018d17516e0f24979))
+* **wiremock:** typed REST stub builder and GraphQL mocking (COMPONENT-23) ([ead3f5f](https://github.com/bearingsoftware/component-test-framework/commit/ead3f5f9c2e45d8e02ea61a848339dd2f8b9cf65))
+
+
+### Bug Fixes
+
+* **postgres:** hold the migrations lock through the worker copy ([4fccc48](https://github.com/bearingsoftware/component-test-framework/commit/4fccc488dd4e2d5bc901798027c2dc2269d622ce))
+* **wiremock:** let operationName pick the operation in GraphQL matching ([a8a4311](https://github.com/bearingsoftware/component-test-framework/commit/a8a43117a32c75d9a5f6a631890b8160a9ce594e))
+
+## [0.3.14](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.13...v0.3.14) (2026-11-12)
+
+
+### Features
+
+* **adapters:** adapter interface, with built-ins expressed through it (COMPONENT-21) ([bf77aca](https://github.com/bearingsoftware/component-test-framework/commit/bf77acabf84f7ef59092505ea63436cf1d45a3bc))
+* **adapters:** add the adapter interface and express built-ins through it ([ee96cd7](https://github.com/bearingsoftware/component-test-framework/commit/ee96cd73098558df9124a1e0c23ee5efab8cf4e3))
+* **cli:** add ctf init to scaffold a starter suite ([0d2f33c](https://github.com/bearingsoftware/component-test-framework/commit/0d2f33c9fc0d599187437f716e5a0208174c7836))
+* **cli:** ctf init, docs/ split, runnable examples (COMPONENT-22) ([ba17fe3](https://github.com/bearingsoftware/component-test-framework/commit/ba17fe36a3e18de6eee9fe648487ff852151c9c8))
+
+
+### Bug Fixes
+
+* **adapters:** let registerAdapter be called twice with the same name, type Redis state honestly ([89a7c46](https://github.com/bearingsoftware/component-test-framework/commit/89a7c46db2d16355b58ddfa8cbfa9da3afad3b4a))
+* **cli:** keep an existing tsconfig.json and wait for Postgres on TCP ([591e319](https://github.com/bearingsoftware/component-test-framework/commit/591e319c8d84d14f650bd9fc9fcfd686ffafd001))
+* **cli:** make ctf init work on a first run in a real project ([8043c21](https://github.com/bearingsoftware/component-test-framework/commit/8043c2186dd92ae1fedcd1c1a196ed7720521dc3))
+
 ## [0.3.13](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.12...v0.3.13) (2026-10-11)
 
 

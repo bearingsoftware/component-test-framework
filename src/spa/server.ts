@@ -1,4 +1,5 @@
-import { BeforeAll, AfterAll } from '@cucumber/cucumber'
+import { defineAdapter, registerAdapter } from '../support/adapter'
+import type { Adapter } from '../support/adapter'
 import { workerPort } from '../support/worker'
 import { startSpaServer, type SpaServer, type SpaServerOptions } from './spa-server'
 
@@ -35,6 +36,19 @@ export function registerSpaServer(options: RegisterSpaServerOptions): {
   port: number
   baseUrl: string
 } {
+  const { port, baseUrl } = registerAdapter(spaServerAdapter(options))
+  return { port, baseUrl }
+}
+
+/** What {@link spaServerAdapter} keeps as its state. */
+export interface SpaServerState {
+  port: number
+  baseUrl: string
+  server: SpaServer | null
+}
+
+/** {@link registerSpaServer} as an adapter: starts before the suite, stops after. */
+export function spaServerAdapter(options: RegisterSpaServerOptions): Adapter<SpaServerState> {
   const portEnvVar = options.portEnvVar ?? 'WEB_PORT'
   const fromEnv = process.env[portEnvVar]
   const basePort = Number(fromEnv ? fromEnv : (options.defaultPort ?? 3100))
@@ -46,23 +60,26 @@ export function registerSpaServer(options: RegisterSpaServerOptions): {
     )
   }
   const port = workerPort(basePort)
-  let server: SpaServer | null = null
 
-  BeforeAll({ timeout: 30_000 }, async function () {
-    try {
-      server = await startSpaServer({ ...options, port })
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
-        throw new Error(
-          `Port ${port} is in use (${portEnvVar}${port === basePort ? '' : ` plus the worker number`}). ` +
-            `Is another run still going?`,
-        )
+  return defineAdapter<SpaServerState>({
+    name: `spa-server:${port}`,
+    setup: () => ({ port, baseUrl: `http://localhost:${port}`, server: null }),
+    beforeAll: async (_ctx, state) => {
+      try {
+        state.server = await startSpaServer({ ...options, port })
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+          throw new Error(
+            `Port ${port} is in use (${portEnvVar}${port === basePort ? '' : ` plus the worker number`}). ` +
+              `Is another run still going?`,
+          )
+        }
+        throw err
       }
-      throw err
-    }
+    },
+    afterAll: async (_ctx, state) => {
+      await state.server?.close()
+    },
+    afterAllTimeout: 15_000,
   })
-  AfterAll({ timeout: 15_000 }, async function () {
-    await server?.close()
-  })
-  return { port, baseUrl: `http://localhost:${port}` }
 }

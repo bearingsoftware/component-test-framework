@@ -13,9 +13,11 @@ jobs:
       contents: read
       pull-requests: write
       checks: write
-    uses: bearingsoftware/risk-gate/.github/workflows/risk-gate.yml@1f754a4bec9bc33596fab7a859745698a0df361a # main
+      packages: read   # FINCH-549: install the pinned ctf for evidence (compute)
+      actions: read    # FINCH-549: read the CI run and its ctf-evidence artifact
+    uses: bearingsoftware/risk-gate/.github/workflows/risk-gate.yml@21169ece377a54b2b8f9e27722ef2f8b6b5df81f # main
     with:
-      risk-gate-ref: 1f754a4bec9bc33596fab7a859745698a0df361a
+      risk-gate-ref: 21169ece377a54b2b8f9e27722ef2f8b6b5df81f
       runs-on: '["ubuntu-latest"]'
       mode: enforce
     secrets:

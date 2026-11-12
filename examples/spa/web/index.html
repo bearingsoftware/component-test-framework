@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Greeting</title>
+  </head>
+  <body>
+    <h1 data-testid="greeting">loading</h1>
+    <script>
+      // /api/* is forwarded to WireMock by the SPA server, /api removed.
+      fetch('/api/greeting')
+        .then((res) => res.json())
+        .then((body) => {
+          document.querySelector('[data-testid="greeting"]').textContent = body.message
+        })
+    </script>
+  </body>
+</html>

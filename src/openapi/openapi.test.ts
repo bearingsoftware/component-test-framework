@@ -212,7 +212,7 @@ describe('auditCoverage', () => {
   it('lists operations no feature references, ignoring comments, and names unknown references', () => {
     const result = auditCoverage({
       operations: loadSpec(shop),
-      featureFiles: findFeatureFiles([fixtures]),
+      featureFiles: findFeatureFiles([path.join(fixtures, 'features')]),
     })
     expect(result.gaps.map((op) => op.name)).toEqual([
       'listOrders',
@@ -279,7 +279,7 @@ describe('ctf CLI', () => {
   })
 
   it('audits, failing only when asked to', () => {
-    const args = ['audit-coverage', shop, '--features', fixtures]
+    const args = ['audit-coverage', shop, '--features', path.join(fixtures, 'features')]
     expect(quiet(() => main(args))).toBe(0)
     expect(quiet(() => main([...args, '--fail-on-gaps']))).toBe(1)
     expect(quiet(() => main(['audit-coverage', shop]))).toBe(2)

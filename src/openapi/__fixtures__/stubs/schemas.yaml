@@ -1,0 +1,22 @@
+Pet:
+  type: object
+  required: [id, name]
+  additionalProperties: false
+  properties:
+    id: { type: integer }
+    name: { type: string }
+    tag: { type: string, nullable: true }
+  example: { id: 7, name: Fido }
+Problem:
+  type: object
+  required: [message]
+  properties:
+    message: { type: string }
+Node:
+  type: object
+  required: [value]
+  properties:
+    value: { type: string }
+    children:
+      type: array
+      items: { $ref: '#/Node' }

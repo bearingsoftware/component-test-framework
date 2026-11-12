@@ -1,0 +1,37 @@
+openapi: 3.0.3
+info:
+  title: Notes API
+  version: '1'
+paths:
+  /notes:
+    post:
+      operationId: createNote
+      summary: Save a note once moderation approves it
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+      responses:
+        '201':
+          description: The note was saved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [title]
+                properties:
+                  title: { type: string }
+        '422':
+          description: Moderation rejected the note
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error: { type: string }

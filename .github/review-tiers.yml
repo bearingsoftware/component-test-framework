@@ -27,3 +27,11 @@ release:
 attestation:
   label: tier2-self-reviewed
   permitted: ["chattersley"]
+
+evidence:                        # FINCH-549: recorded only (apply: false); never affects score, floors or tier
+  source: compute
+  apply: false
+  compute:
+    package: "@bearingsoftware/component-test-framework@0.3.17"
+    specs: ["examples/api/openapi.yaml"]
+    features: ["examples/api/features"]

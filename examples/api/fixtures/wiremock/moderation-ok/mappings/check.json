@@ -1,0 +1,4 @@
+{
+  "request": { "method": "POST", "urlPath": "/moderation/check" },
+  "response": { "status": 200, "jsonBody": { "ok": true } }
+}

@@ -1,23 +1,21 @@
-import * as fs from 'fs'
-import * as path from 'path'
-import {
-  Before,
-  BeforeAll,
-  After,
-  AfterAll,
-  Status,
-  setDefaultTimeout,
-  setWorldConstructor,
-} from '@cucumber/cucumber'
+import { Before, After, AfterAll, setDefaultTimeout, setWorldConstructor } from '@cucumber/cucumber'
 import type { ITestCaseHookParameter } from '@cucumber/cucumber'
 import type { Browser } from '@playwright/test'
 import { ComponentTestWorld } from './world'
-import { WireMockClient } from '../clients/wiremock-client'
-import { DbClient } from '../clients/db-client'
-import { RedisClient } from '../clients/redis-client'
 import type { FrameworkConfig, FrameworkOptions } from '../types'
-import { currentWorker, wiremockNamespace, workerDatabaseUrl, workerRedisUrl } from './worker'
-import { prepareWorkerDatabase } from './worker-database'
+import { currentWorker, workerDatabaseUrl, workerRedisUrl } from './worker'
+import {
+  initAdapters,
+  beforeAllHooks,
+  runBeforeScenario,
+  runAll,
+  afterScenarioSteps,
+  teardownSteps,
+  afterAllSteps,
+  failed,
+} from './adapter'
+import type { AdapterContext } from './adapter'
+import { builtinAdapters } from '../adapters/builtin'
 
 /**
  * Register framework hooks with Cucumber. Call this once in the consumer's
@@ -112,83 +110,19 @@ export function registerHooks(options: FrameworkOptions): void {
   if (config.pages && Object.keys(config.pages).length > 0 && !config.webBaseUrl) {
     throw new Error('The pages option needs webBaseUrl, the base URL page objects navigate from.')
   }
-  if (config.wiremockBaseline?.length) {
-    if (!config.wiremockUrl) {
-      throw new Error('wiremockBaseline needs wiremockUrl: set WIREMOCK_URL or pass wiremockUrl.')
-    }
-    for (const dir of config.wiremockBaseline) {
-      const mappings = path.join(path.resolve(config.fixturesDir, dir), 'mappings')
-      if (!fs.existsSync(mappings)) {
-        throw new Error(
-          `wiremockBaseline directory has no mappings folder: ${mappings}. ` +
-            `Stub directories use WireMock's layout, <dir>/mappings/*.json.`,
-        )
-      }
-    }
-  }
-
-  if (config.wiremockStubsDir && !fs.existsSync(config.wiremockStubsDir)) {
-    console.warn(
-      `[component-test-framework] wiremockStubsDir does not exist: ${config.wiremockStubsDir}. ` +
-        `Steps that register stubs from files will fail.`,
-    )
-  }
-
   const worker = currentWorker()
-  const isolation = worker.parallel ? options.workerIsolation : undefined
-  const wiremock = new WireMockClient(config.wiremockUrl, undefined, {
-    namespace: isolation?.wiremock ? wiremockNamespace(worker.id) : undefined,
-  })
-  let db: DbClient | undefined
-  let redis: RedisClient | undefined
+  const ctx: AdapterContext = { config, worker }
+  const adapters = [...builtinAdapters(options, config, worker), ...(config.adapters ?? [])]
+  initAdapters(adapters, ctx)
 
-  if (config.databaseUrl) {
-    db = new DbClient(config.databaseUrl)
-  }
-  if (config.redisUrl) {
-    redis = new RedisClient(config.redisUrl)
-  }
-
-  // --- Before the suite: this worker's database, copied from the template ---
-  if (isolation?.database && options.databaseUrl) {
-    const sourceUrl = options.databaseUrl
-    const template =
-      typeof isolation.database === 'object' ? isolation.database.template : undefined
-    BeforeAll({ timeout: 60_000 }, async function () {
-      await prepareWorkerDatabase(sourceUrl, { template })
-    })
-  }
-
-  // --- Before the suite: wait for WireMock to accept admin requests ---
-  if (config.wiremockUrl) {
-    BeforeAll({ timeout: 30_000 }, async function () {
-      await wiremock.waitForReady(30_000)
-    })
-  }
+  beforeAllHooks(adapters, ctx)
 
   // --- Before every scenario ---
   Before(async function (this: ComponentTestWorld) {
     this.config = config
     this.operationMap = config.operationMap ?? {}
-    this.wiremock = wiremock
-    this.db = db
-    this.redis = redis
     this.resetScenario()
-
-    // Reset WireMock state
-    if (config.wiremockUrl) {
-      await wiremock.resetAll()
-    }
-
-    // Stubs most scenarios need, loaded after every reset
-    for (const dir of config.wiremockBaseline ?? []) {
-      await wiremock.loadMappingsFromDir(path.resolve(config.fixturesDir, dir))
-    }
-
-    // Flush Redis cache
-    if (redis) {
-      await redis.flushDb()
-    }
+    await runBeforeScenario(adapters, this)
 
     await config.hooks?.afterReset?.(this)
   })
@@ -222,50 +156,28 @@ export function registerHooks(options: FrameworkOptions): void {
     }
   })
 
-  AfterAll(async function () {
-    await sharedBrowser?.close()
-    sharedBrowser = null
+  const afterAllTimeouts = adapters.map((a) => a.afterAllTimeout ?? 0)
+  AfterAll({ timeout: Math.max(0, ...afterAllTimeouts) || undefined }, async function () {
+    await runAll([
+      async () => {
+        await sharedBrowser?.close()
+        sharedBrowser = null
+      },
+      ...afterAllSteps(adapters, ctx),
+    ])
   })
 
-  // --- After every scenario: failure hook, stray pub/sub subscription, cleanup ---
+  // --- After every scenario: failure hooks, adapter teardown, cleanup ---
   // Registered after the @ui After, so Cucumber runs it first: the page is
-  // still open for onScenarioFailed.
+  // still open for onScenarioFailed. Every step runs even when an earlier one
+  // throws, so one failed screenshot can't leave state behind for the next
+  // scenario; the first error is reported once they have all run.
   After(async function (this: ComponentTestWorld, scenario: ITestCaseHookParameter) {
-    // Cleanup runs even when onScenarioFailed throws, so one failed
-    // screenshot can't leave state behind for the next scenario. Its error
-    // is reported once cleanup is done.
-    let hookError: unknown
-    if (FAILED_STATUSES.has(String(scenario.result?.status))) {
-      try {
-        await config.hooks?.onScenarioFailed?.(this, scenario)
-      } catch (err) {
-        hookError = err
-      }
-    }
-    // Steps' subscriptions, and one a suite's own step left as the active one.
-    const subscriptions = new Set(this.subscriptions ?? [])
-    if (this.activeSubscription) subscriptions.add(this.activeSubscription)
-    for (const sub of subscriptions) {
-      try {
-        await sub.close()
-      } catch {
-        /* best-effort */
-      }
-    }
-    this.subscriptions = []
-    this.activeSubscription = undefined
-    if (db && config.cleanupTables && config.cleanupTables.length > 0) {
-      await db.cleanTables(config.cleanupTables)
-    }
-    await config.cleanup?.(this)
-    if (hookError) throw hookError
+    await runAll([
+      () => failed(scenario) && config.hooks?.onScenarioFailed?.(this, scenario),
+      ...afterScenarioSteps(adapters, this, scenario),
+      ...teardownSteps(adapters, this, scenario),
+      () => config.cleanup?.(this),
+    ])
   })
 }
-
-/** Results that fail the run (undefined and pending ones under --strict). */
-const FAILED_STATUSES = new Set<string>([
-  Status.FAILED,
-  Status.AMBIGUOUS,
-  Status.UNDEFINED,
-  Status.PENDING,
-])

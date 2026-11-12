@@ -2,9 +2,9 @@
 // app. A static server that forwards API calls to WireMock, browser-side
 // coverage, failure screenshots, and browser helpers. Registers nothing on
 // import; istanbul and axe are loaded only when used.
-export { startSpaServer, registerSpaServer } from './spa/server'
+export { startSpaServer, registerSpaServer, spaServerAdapter } from './spa/server'
 export type { SpaServerOptions, SpaServer, RegisterSpaServerOptions } from './spa/server'
-export { createCoverageCollector, registerCoverage } from './spa/coverage'
+export { createCoverageCollector, registerCoverage, coverageAdapter } from './spa/coverage'
 export type { CoverageCollectorOptions, CoverageCollector, CoverageRun } from './spa/coverage'
 export {
   saveFailureArtifacts,

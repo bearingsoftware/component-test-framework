@@ -1,6 +1,11 @@
 import { createHash } from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
+import { operationBodyPatterns } from '../mocking/graphql'
+import type { OperationKind } from '../mocking/graphql'
+import type { Buildable } from '../mocking/rest'
+import { applyFault, faultFromEnv, selectorMatches, stubKey } from '../faults/inject'
+import type { FaultSpec } from '../faults/inject'
 
 /** Filters for {@link WireMockClient.getRequestCount} and {@link WireMockClient.findRequests}. */
 export interface RequestFilter {
@@ -16,6 +21,8 @@ export interface RequestFilter {
    * e.g. `$[?(@.status == 'active')]`.
    */
   bodyJsonPath?: string
+  /** Raw WireMock body patterns the request body must all match. */
+  bodyPatterns?: Record<string, unknown>[]
 }
 
 /** Options for {@link WireMockClient}. */
@@ -62,7 +69,15 @@ export class WireMockClient {
     readonly baseUrl: string,
     private readonly requestTimeout = 10_000,
     private readonly options: WireMockClientOptions = {},
-  ) {}
+  ) {
+    this.fault = faultFromEnv()
+    this.recordHits = Boolean(process.env.CTF_FAULT_HITS)
+  }
+
+  /** Fault injection (COMPONENT-30): from CTF_FAULT, which `ctf faults` sets. Unset means none. */
+  private readonly fault: FaultSpec | undefined
+  /** CTF_FAULT_HITS names a file `ctf faults` reads the stubs each scenario hit from. */
+  private readonly recordHits: boolean
 
   /** The namespace prefix, or undefined when this client has WireMock to itself. */
   get namespace(): string | undefined {
@@ -178,7 +193,51 @@ export class WireMockClient {
 
   /** A mapping as this client registers it: unchanged, or moved under its namespace. */
   private scoped(mapping: Record<string, unknown>): Record<string, unknown> {
-    return this.options.namespace ? namespaceStub(mapping, this.options.namespace) : mapping
+    let m = mapping
+    if (this.fault && selectorMatches(this.fault.stub, stubKey(m))) {
+      m = applyFault(m, this.fault.fault)
+    }
+    if (this.recordHits) {
+      m = {
+        ...m,
+        metadata: { ...((m.metadata as object | undefined) ?? {}), ctfStubKey: stubKey(mapping) },
+      }
+    }
+    return this.options.namespace ? namespaceStub(m, this.options.namespace) : m
+  }
+
+  /**
+   * The keys (see `stubKey`) of the stubs that answered this client's requests
+   * since the last reset, once per request. Only stubs registered while
+   * CTF_FAULT_HITS was set carry a key.
+   */
+  async servedStubKeys(): Promise<string[]> {
+    const res = await this.fetch(this.url('/__admin/requests'))
+    await this.expectOk(res, 'servedStubKeys')
+    const data = (await res.json()) as {
+      requests?: { wasMatched?: boolean; stubMapping?: { metadata?: Record<string, unknown> } }[]
+    }
+    const ns = this.options.namespace
+    return (data.requests ?? []).flatMap((r) => {
+      const meta = r.stubMapping?.metadata
+      const key = meta?.ctfStubKey
+      if (!r.wasMatched || typeof key !== 'string') return []
+      if (ns && meta?.[NAMESPACE_KEY] !== ns) return []
+      return [key]
+    })
+  }
+
+  /**
+   * Register stubs from builders (see `stub` and `graphql`) or plain
+   * mappings. One is added directly; several are imported in one request.
+   * Either way worker namespacing applies.
+   */
+  async register(...stubs: (Buildable | Record<string, unknown>)[]): Promise<void> {
+    const mappings = stubs.map((s) =>
+      'build' in s && typeof s.build === 'function' ? s.build() : s,
+    )
+    if (mappings.length === 1) return this.addStub(mappings[0] as Record<string, unknown>)
+    await this.importStubs(mappings as Record<string, unknown>[])
   }
 
   /** Register a single stub mapping. */
@@ -363,6 +422,26 @@ export class WireMockClient {
     return data.count
   }
 
+  /**
+   * How many POSTs to a GraphQL endpoint ran an operation, matched by name as
+   * the stubs do: by `operationName` or by the name in the query text.
+   */
+  async graphqlRequestCount(
+    endpoint: string,
+    operationName: string,
+    options: { kind?: OperationKind; variables?: Record<string, unknown> } = {},
+  ): Promise<number> {
+    return this.getRequestCount(endpoint, {
+      method: 'POST',
+      exactPath: true,
+      bodyPatterns: operationBodyPatterns(
+        options.kind ?? 'operation',
+        operationName,
+        options.variables,
+      ),
+    })
+  }
+
   /** Verify that a URL path pattern was called exactly N times. */
   async verifyCallCount(
     urlPathPattern: string,
@@ -407,7 +486,11 @@ export function requestPattern(path: string, filter: RequestFilter = {}): Record
     ? { urlPath: path }
     : { urlPathPattern: path }
   if (filter.method) pattern.method = filter.method.toUpperCase()
-  if (filter.bodyJsonPath) pattern.bodyPatterns = [{ matchesJsonPath: filter.bodyJsonPath }]
+  const bodyPatterns = [
+    ...(filter.bodyJsonPath ? [{ matchesJsonPath: filter.bodyJsonPath }] : []),
+    ...(filter.bodyPatterns ?? []),
+  ]
+  if (bodyPatterns.length > 0) pattern.bodyPatterns = bodyPatterns
   return pattern
 }
 

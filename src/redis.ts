@@ -10,3 +10,5 @@ export type {
 } from './clients/redis-client'
 export { registerRedisSteps } from './steps/register'
 export type { RedisStepOptions } from './steps/common/redis.steps'
+export { redisAdapter } from './adapters/redis'
+export type { RedisAdapterOptions } from './adapters/redis'

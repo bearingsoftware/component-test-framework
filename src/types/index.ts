@@ -2,6 +2,8 @@ import type { Page } from '@playwright/test'
 import type { ITestCaseHookParameter } from '@cucumber/cucumber'
 import type { ComponentTestWorld } from '../support/world'
 import type { BasePage } from '../pages/base.page'
+import type { AnyAdapter } from '../support/adapter'
+import type { MigrationsOptions } from '../support/migrations'
 
 /** Maps an OpenAPI operationId to its HTTP method and URL path. */
 export interface OperationEntry {
@@ -155,7 +157,7 @@ export interface FrameworkConfig {
    * cleanup when both are set.
    */
   cleanup?: (world: ComponentTestWorld) => unknown | Promise<unknown>
-  /** Tables to truncate between scenarios (with CASCADE). */
+  /** Tables to clear between scenarios: DELETE, falling back to TRUNCATE … CASCADE. */
   cleanupTables?: string[]
   /**
    * Keep Cucumber `--parallel` workers apart: WireMock by path prefix,
@@ -182,6 +184,23 @@ export interface FrameworkConfig {
    * 30s, which the record waits have always used.
    */
   serviceWaitTimeout?: number
+  /**
+   * Adapters for other technologies, run after the built-in WireMock,
+   * Postgres and Redis ones, in this order. See {@link Adapter}.
+   */
+  adapters?: AnyAdapter[]
+  /**
+   * A command that migrates the database before the suite, once per worker
+   * under a Postgres advisory lock, against `databaseUrl` or, under
+   * `workerIsolation.database`, the template the workers copy. It must be
+   * idempotent. See {@link MigrationsOptions}.
+   */
+  migrations?: MigrationsOptions
+  /** GraphQL mocking for the GraphQL steps. */
+  graphql?: {
+    /** Each service's GraphQL endpoint path. A service with no entry uses `/graphql`. */
+    endpoints?: Record<string, string>
+  }
 }
 
 /**
