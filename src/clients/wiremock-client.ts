@@ -4,6 +4,8 @@ import * as path from 'path'
 import { operationBodyPatterns } from '../mocking/graphql'
 import type { OperationKind } from '../mocking/graphql'
 import type { Buildable } from '../mocking/rest'
+import { applyFault, faultFromEnv, selectorMatches, stubKey } from '../faults/inject'
+import type { FaultSpec } from '../faults/inject'
 
 /** Filters for {@link WireMockClient.getRequestCount} and {@link WireMockClient.findRequests}. */
 export interface RequestFilter {
@@ -67,7 +69,15 @@ export class WireMockClient {
     readonly baseUrl: string,
     private readonly requestTimeout = 10_000,
     private readonly options: WireMockClientOptions = {},
-  ) {}
+  ) {
+    this.fault = faultFromEnv()
+    this.recordHits = Boolean(process.env.CTF_FAULT_HITS)
+  }
+
+  /** Fault injection (COMPONENT-30): from CTF_FAULT, which `ctf faults` sets. Unset means none. */
+  private readonly fault: FaultSpec | undefined
+  /** CTF_FAULT_HITS names a file `ctf faults` reads the stubs each scenario hit from. */
+  private readonly recordHits: boolean
 
   /** The namespace prefix, or undefined when this client has WireMock to itself. */
   get namespace(): string | undefined {
@@ -183,7 +193,38 @@ export class WireMockClient {
 
   /** A mapping as this client registers it: unchanged, or moved under its namespace. */
   private scoped(mapping: Record<string, unknown>): Record<string, unknown> {
-    return this.options.namespace ? namespaceStub(mapping, this.options.namespace) : mapping
+    let m = mapping
+    if (this.fault && selectorMatches(this.fault.stub, stubKey(m))) {
+      m = applyFault(m, this.fault.fault)
+    }
+    if (this.recordHits) {
+      m = {
+        ...m,
+        metadata: { ...((m.metadata as object | undefined) ?? {}), ctfStubKey: stubKey(mapping) },
+      }
+    }
+    return this.options.namespace ? namespaceStub(m, this.options.namespace) : m
+  }
+
+  /**
+   * The keys (see `stubKey`) of the stubs that answered this client's requests
+   * since the last reset, once per request. Only stubs registered while
+   * CTF_FAULT_HITS was set carry a key.
+   */
+  async servedStubKeys(): Promise<string[]> {
+    const res = await this.fetch(this.url('/__admin/requests'))
+    await this.expectOk(res, 'servedStubKeys')
+    const data = (await res.json()) as {
+      requests?: { wasMatched?: boolean; stubMapping?: { metadata?: Record<string, unknown> } }[]
+    }
+    const ns = this.options.namespace
+    return (data.requests ?? []).flatMap((r) => {
+      const meta = r.stubMapping?.metadata
+      const key = meta?.ctfStubKey
+      if (!r.wasMatched || typeof key !== 'string') return []
+      if (ns && meta?.[NAMESPACE_KEY] !== ns) return []
+      return [key]
+    })
   }
 
   /**

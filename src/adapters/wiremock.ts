@@ -45,6 +45,17 @@ export function wiremockAdapter(options: WireMockAdapterOptions): Adapter<WireMo
       }
     },
     setup: () => new WireMockClient(url, undefined, { namespace: options.namespace }),
+    ...(url &&
+      process.env.CTF_FAULT_HITS && {
+        async afterScenario(_world, scenario, client: WireMockClient) {
+          const stubs = [...new Set(await client.servedStubKeys())]
+          const { uri, name } = scenario.pickle
+          fs.appendFileSync(
+            process.env.CTF_FAULT_HITS as string,
+            `${JSON.stringify({ uri, name, stubs })}\n`,
+          )
+        },
+      }),
     ...(url && {
       beforeAll: (_ctx: unknown, client: WireMockClient) => client.waitForReady(30_000),
       async beforeScenario(world, client: WireMockClient) {
