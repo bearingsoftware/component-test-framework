@@ -100,15 +100,24 @@ export type { PartialMatchOptions } from './utils/match'
 
 // Step definitions — importing these modules registers them with Cucumber.
 // Consumers should import the ones they need in their support setup.
+/** @deprecated Use registerApiSteps() from /core. */
 export * as apiSteps from './steps/api/generic-api.steps'
+/** @deprecated Use registerRawApiSteps() from /core. */
 export * as rawApiSteps from './steps/api/raw-api.steps'
+/** @deprecated Use registerSseSteps() from /core. */
 export * as sseSteps from './steps/api/sse.steps'
+/** @deprecated Use registerResponseSteps() from /core. */
 export * as responseSteps from './steps/common/response-assertion.steps'
+/** @deprecated Use registerDbSteps() from /core. */
 export * as dbAssertionSteps from './steps/common/db-assertion.steps'
+/** @deprecated Use registerWiremockSteps() from /core. */
 export * as wiremockSteps from './steps/common/wiremock.steps'
+/** @deprecated Use registerRedisSteps() from /core. */
 export * as redisSteps from './steps/common/redis.steps'
 import { registerRedisSteps as registerRedisStepsOnImport } from './steps/register'
+/** @deprecated Use registerServiceSteps() from /core. */
 export * as serviceSteps from './steps/worker/generic-service.steps'
+/** @deprecated Use registerUiSteps() from /core. */
 export * as uiSteps from './steps/ui/generic-ui.steps'
 
 // Opt-in steps: registered only when called, so they can't clash with a
