@@ -94,6 +94,7 @@ function within(promise: Promise<unknown>, ms: number): Promise<void> {
  * anywhere else it is false.
  */
 function onlyZombies(pgid: number): boolean {
+  // Reads every process's stat, so it costs on a host with thousands; callers rate-limit it.
   let members = 0
   try {
     for (const entry of readdirSync('/proc')) {
@@ -101,8 +102,10 @@ function onlyZombies(pgid: number): boolean {
       let stat: string
       try {
         stat = readFileSync(`/proc/${entry}/stat`, 'utf8')
-      } catch {
-        continue
+      } catch (err) {
+        // Exited since the listing, or unreadable: only the first is safe to skip.
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue
+        return false
       }
       // comm is parenthesised and may hold spaces and ")", so split after the last one.
       const [state, , pgrp] = stat.slice(stat.lastIndexOf(')') + 2).split(' ')

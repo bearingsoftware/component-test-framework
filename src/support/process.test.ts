@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as net from 'net'
 import * as os from 'os'
 import * as path from 'path'
+import { spawn, spawnSync } from 'child_process'
 
 type HookFn = (this: unknown) => unknown
 interface Hook {
@@ -40,6 +41,8 @@ import {
   type ServiceOptions,
 } from './process'
 import { eventually } from './eventually'
+
+const hasPerl = spawnSync('perl', ['-e', '1']).status === 0
 
 const FAKE_SERVICE = path.join(__dirname, '__fixtures__', 'fake-service.cjs')
 
@@ -348,24 +351,27 @@ describe('service lifecycle (COMPONENT-8)', () => {
       }
     })
 
-    it.runIf(process.platform === 'linux')(
+    it.runIf(process.platform === 'linux' && hasPerl)(
       'counts a group of unreaped zombies as gone',
       async () => {
-        // Job control puts `true` in its own group; its parent, still alive,
-        // never reaps it, so that group is nothing but a zombie.
-        const { spawn } = await import('child_process')
-        const parent = spawn('bash', ['-c', 'set -m; true & echo $!; sleep 30'], {
-          detached: true,
-          stdio: ['ignore', 'pipe', 'ignore'],
-        })
+        // perl never waits, so its child stays a zombie. The child moves to
+        // its own group first, so that group is nothing but the zombie.
+        const parent = spawn(
+          'perl',
+          [
+            '-e',
+            '$| = 1; my $p = fork; if (!$p) { setpgrp(0, 0); exit 0 } print "$p\\n"; sleep 30',
+          ],
+          { detached: true, stdio: ['ignore', 'pipe', 'ignore'] },
+        )
         try {
           const pgid = await new Promise<number>((resolve) =>
             parent.stdout.once('data', (d) => resolve(Number(String(d).trim()))),
           )
           await eventually(
             () => {
-              if (fs.readFileSync(`/proc/${pgid}/stat`, 'utf8').split(' ')[2] !== 'Z')
-                throw new Error('not a zombie yet')
+              const state = fs.readFileSync(`/proc/${pgid}/stat`, 'utf8').split(' ')[2]
+              if (state !== 'Z') throw new Error(`expected a zombie, found state ${state}`)
             },
             { timeout: 5_000, interval: 20 },
           )
