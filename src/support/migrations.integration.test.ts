@@ -50,6 +50,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
   await c.connect()
   await c.query('CREATE TABLE IF NOT EXISTS widgets (id serial PRIMARY KEY, name text)')
   await sleep(Number(process.env.MIG_SLEEP ?? 0))
+  if (process.env.MIG_SIGNAL) fs.writeFileSync(process.env.MIG_SIGNAL, 'connected')
+  // Hold the connection until the test releases the barrier.
+  for (let i = 0; process.env.MIG_RELEASE && !fs.existsSync(process.env.MIG_RELEASE) && i < 600; i++) await sleep(50)
   await c.end()
   fs.appendFileSync(process.env.MIG_LOG, 'end ' + id + ' ' + Date.now() + '\\n')
 })().catch((e) => { console.error(e.message); process.exit(3) })
@@ -161,38 +164,64 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
     await holder
   })
 
-  it('keeps the lock through the copy: two workers, each migrating while connected to the template', async () => {
-    const tpl = `${run}_two`
-    databases.push(tpl, `${tpl}_w1`, `${tpl}_w2`)
-    await admin((c) => c.query(`CREATE DATABASE "${tpl}"`))
-    const source = urlFor(tpl)
-    const worker = (id: string) => {
-      const mine = { ...options(3000) }
-      return runMigrations(source, mine, {
-        whileLocked: () => {
-          // prepareWorkerDatabase reads the worker id when called, so set it just before.
-          Object.assign(process.env, {
-            CUCUMBER_PARALLEL: 'true',
-            CUCUMBER_WORKER_ID: id,
-            CUCUMBER_TOTAL_WORKERS: '2',
-          })
-          return prepareWorkerDatabase(source, { templateBusyTimeoutMs: 1000 })
-        },
-      })
+  /** A migration command that connects to the template, signals it, and holds the connection until released. */
+  const holding = (tag: string) => {
+    const signal = path.join(dir, `${tag}.signal`)
+    const release = path.join(dir, `${tag}.release`)
+    return {
+      signal,
+      release,
+      options: {
+        command: `node "${script}"`,
+        env: { MIG_LOG: log, MIG_SIGNAL: signal, MIG_RELEASE: release },
+      },
     }
+  }
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+  const withWorkerEnv = async (fn: () => Promise<void>) => {
+    Object.assign(process.env, {
+      CUCUMBER_PARALLEL: 'true',
+      CUCUMBER_WORKER_ID: '1',
+      CUCUMBER_TOTAL_WORKERS: '2',
+    })
     try {
-      // Each command holds a connection to the template for 3s. If the lock
-      // were released before the copy, the other worker's command would hold
-      // the template during this copy, which gives up after 1s.
-      await Promise.all([worker('1'), worker('2')])
+      await fn()
     } finally {
       delete process.env.CUCUMBER_PARALLEL
       delete process.env.CUCUMBER_WORKER_ID
       delete process.env.CUCUMBER_TOTAL_WORKERS
     }
+  }
+
+  it('keeps the lock through the copy: the second worker cannot connect to the template meanwhile', async () => {
+    const tpl = `${run}_two`
+    databases.push(tpl, `${tpl}_w1`)
+    await admin((c) => c.query(`CREATE DATABASE "${tpl}"`))
+    const source = urlFor(tpl)
+    const b = holding('direct')
+    await withWorkerEnv(async () => {
+      // Worker A copies once the lock is released, or after 1.5s if worker
+      // B's command never gets to connect. With the lock held through the
+      // copy, B can't connect, so A copies at once after the wait. Released
+      // early (the bug), B connects first, signals, and holds the template
+      // open, so A's copy hits "in use" and fails after 0.5s.
+      const a = runMigrations(source, options(), {
+        whileLocked: async () => {
+          for (let i = 0; i < 30 && !fs.existsSync(b.signal); i++) await sleep(50)
+          await prepareWorkerDatabase(source, { templateBusyTimeoutMs: 500 })
+        },
+      })
+      await sleep(300)
+      const second = runMigrations(source, b.options)
+      try {
+        await a
+      } finally {
+        fs.writeFileSync(b.release, 'go')
+        await second.catch(() => {})
+      }
+    })
     const tables = `SELECT count(*) AS n FROM information_schema.tables WHERE table_name = 'widgets'`
     expect(await count(`${tpl}_w1`, tables)).toBe(1)
-    expect(await count(`${tpl}_w2`, tables)).toBe(1)
   }, 30_000)
 
   it('migrates the template before the adapter copies it for the worker', async () => {

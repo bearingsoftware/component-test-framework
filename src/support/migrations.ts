@@ -90,11 +90,14 @@ export async function runMigrations(
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pg = require('pg') as typeof import('pg')
   const lock: Client = new pg.Client({ connectionString: maintenance.toString() })
+  // A dropped connection loses the lock, so it fails the run rather than going uncaught.
+  const dropped = new Promise<never>((_, reject) => lock.on('error', reject))
+  dropped.catch(() => {})
   await lock.connect()
   const key = `ctf-migrations:${name}`
   const lockTimeoutMs =
     extras.lockTimeoutMs ?? 2 * (options.timeoutMs ?? DEFAULT_TIMEOUT_MS) + 30_000
-  try {
+  const locked = async () => {
     const deadline = Date.now() + lockTimeoutMs
     for (;;) {
       const { rows } = await lock.query(
@@ -112,9 +115,12 @@ export async function runMigrations(
     }
     await runMigrationCommand(databaseUrl, options)
     await extras.whileLocked?.()
+  }
+  try {
+    await Promise.race([locked(), dropped])
   } finally {
     // Closing the connection releases the lock.
-    await lock.end()
+    await lock.end().catch(() => {})
   }
 }
 
