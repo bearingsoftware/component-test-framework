@@ -357,11 +357,18 @@ describe('collectEvidence', () => {
     ])
     const custom = evidence(
       { 'api.yaml': spec(ONE), 'features/a.feature': feats('@smoke') },
-      { 'api.yaml': spec(ONE), 'features/a.feature': feats('@smoke') },
+      { 'api.yaml': spec(ONE), 'features/a.feature': feats('@SMOKE') },
       { excludeTags: ['@smoke'] },
     )
     expect(custom.files.head).toBe('50.00')
-    expect(custom.result.scenarios.excluded.tags).toEqual(['@smoke'])
+    expect(custom.result.scenarios.excluded.tags).toEqual(['@skip', '@pending', '@wip', '@smoke'])
+    const only = evidence(
+      { 'api.yaml': spec(ONE), 'features/a.feature': feats('@smoke') },
+      { 'api.yaml': spec(ONE), 'features/a.feature': feats('@skip') },
+      { excludeTags: ['@smoke'], noDefaultExclusions: true },
+    )
+    expect(only.files.head).toBe('100.00')
+    expect(only.result.scenarios.excluded.tags).toEqual(['@smoke'])
   })
 
   it('lists documented statuses the head no longer documents', () => {
@@ -411,5 +418,56 @@ describe('collectEvidence', () => {
     expect(result.scenarios.changed).toEqual([
       { file: 'features/a.feature', name: 'status', tagsChanged: false },
     ])
+  })
+
+  it('honours tags on an Examples block, row by row', () => {
+    const wide = { '/a': { id: 'getA', statuses: ['200', '404', '500'] } }
+    const outline = (skip404: boolean, skip500: boolean) =>
+      'Feature: F\n  Scenario Outline: status\n    When I send the request r to the getA operation\n' +
+      '    Then the response status should be <s>\n\n' +
+      '    Examples:\n      | s |\n      | 200 |\n\n' +
+      `    ${skip404 ? '@skip' : '@keep'}\n    Examples:\n      | s |\n      | 404 |\n\n` +
+      `    ${skip500 ? '@skip' : '@keep'}\n    Examples:\n      | s |\n      | 500 |\n`
+    const { files, result } = evidence(
+      { 'api.yaml': spec(wide), 'features/a.feature': outline(false, false) },
+      { 'api.yaml': spec(wide), 'features/a.feature': outline(true, false) },
+    )
+    expect(files).toEqual({ base: '100.00', head: '66.67', apiBreak: 'false' })
+    expect(result.scenarios.excluded.head).toEqual([])
+    const all = evidence(
+      { 'api.yaml': spec(wide) },
+      {
+        'api.yaml': spec(wide),
+        'features/a.feature': outline(true, true).replace(
+          'Examples:\n      | s |\n      | 200 |',
+          '@skip\n    Examples:\n      | s |\n      | 200 |',
+        ),
+      },
+    )
+    expect(all.files.head).toBe('0.00')
+    expect(all.result.scenarios.excluded.head).toEqual([
+      { file: 'features/a.feature', name: 'status' },
+    ])
+  })
+
+  it('exits 2 naming a file whose object is missing', () => {
+    const { dir, out } = repo(
+      { 'api.yaml': spec(ONE), 'features/a.feature': feature([['a', call('getA', '200')]]) },
+      { 'api.yaml': spec(ONE), 'features/a.feature': feature([['b', call('getA', '404')]]) },
+    )
+    const sha = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD~1:features/a.feature'], {
+      encoding: 'utf-8',
+    }).trim()
+    fs.rmSync(path.join(dir, '.git', 'objects', sha.slice(0, 2), sha.slice(2)))
+    expect(() =>
+      collectEvidence({
+        base: 'HEAD~1',
+        head: 'HEAD',
+        specs: ['api.yaml'],
+        features: ['features'],
+        out,
+        cwd: dir,
+      }),
+    ).toThrow(/features\/a\.feature.*missing/)
   })
 })

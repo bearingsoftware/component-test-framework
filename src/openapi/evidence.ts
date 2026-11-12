@@ -30,8 +30,10 @@ export interface EvidenceOptions {
    * can't accept its own breaks. One absent at base means no allowlist.
    */
   allowlist?: string
-  /** Scenarios with any of these tags don't count. Default {@link DEFAULT_EXCLUDE_TAGS}. */
+  /** Tags whose scenarios don't count, in addition to {@link DEFAULT_EXCLUDE_TAGS}. Case-insensitive. */
   excludeTags?: string[]
+  /** Don't exclude {@link DEFAULT_EXCLUDE_TAGS}; only {@link excludeTags}. */
+  noDefaultExclusions?: boolean
   patterns?: RegExp[]
   statusPatterns?: RegExp[]
   /** Directory the four files are written to. */
@@ -42,6 +44,15 @@ export interface EvidenceOptions {
 
 /** Scenarios tagged with these are not counted as asserting anything. */
 export const DEFAULT_EXCLUDE_TAGS = ['@skip', '@pending', '@wip']
+
+/** The tags excluded after the defaults and the options, lower-cased. */
+export function effectiveExcludeTags(options: EvidenceOptions): string[] {
+  const all = [
+    ...(options.noDefaultExclusions ? [] : DEFAULT_EXCLUDE_TAGS),
+    ...(options.excludeTags ?? []),
+  ]
+  return [...new Set(all.map((t) => (t.startsWith('@') ? t : `@${t}`).toLowerCase()))]
+}
 
 /** Thrown when evidence can't be computed, as opposed to there being nothing to report. */
 export class EvidenceError extends Error {}
@@ -68,6 +79,8 @@ interface Scenario {
   excluded: boolean
   /** Heading lines, one per Scenario (an Outline has one). */
   headings: number[]
+  /** `Examples:` lines whose own tags exclude them, while the Outline still counts. */
+  blankedExamples: number[]
 }
 
 interface Side {
@@ -118,9 +131,9 @@ function materialise(cwd: string, sha: string, dir: string) {
   }
   const entries: { sha: string; size: number; file: string }[] = []
   for (const record of listing.stdout.split('\0')) {
-    const m = /^(\d+) blob\s+([0-9a-f]+)\s+(\d+)\t([\s\S]*)$/.exec(record)
+    const m = /^(\d+) blob\s+([0-9a-f]+)\s+(\d+|BAD)\t([\s\S]*)$/.exec(record)
     if (!m || m[1] === '120000') continue
-    entries.push({ sha: m[2], size: Number(m[3]), file: m[4] })
+    entries.push({ sha: m[2], size: Number(m[3]) || 0, file: m[4] })
   }
   const root = path.resolve(dir)
   let chunk: typeof entries = []
@@ -137,9 +150,18 @@ function materialise(cwd: string, sha: string, dir: string) {
     let pos = 0
     for (const entry of chunk) {
       const eol = out.stdout.indexOf(0x0a, pos)
-      const size = Number(out.stdout.subarray(pos, eol).toString().split(' ')[2])
+      const header = out.stdout.subarray(pos, eol).toString().split(' ')
+      if (header[1] !== 'blob') {
+        throw new EvidenceError(
+          `${entry.file} (object ${entry.sha}) is missing from the repository; ` +
+            `fetch the full history and objects, not a shallow or partial clone`,
+        )
+      }
+      const size = Number(header[2])
       const target = path.resolve(root, entry.file)
-      if (target.startsWith(root + path.sep)) {
+      if (!target.startsWith(root + path.sep)) {
+        console.warn(`ctf evidence: skipping ${entry.file}: it is outside the checkout`)
+      } else {
         fs.mkdirSync(path.dirname(target), { recursive: true })
         fs.writeFileSync(target, out.stdout.subarray(eol + 1, eol + 1 + size))
       }
@@ -180,18 +202,37 @@ function inheritedTags(lines: string[], heading: number): string[] {
   return tags
 }
 
+/** The `Examples:` blocks of the Outline whose heading is at `heading` (0-based), with their tags. */
+function examplesOf(lines: string[], heading: number): { line: number; tags: string[] }[] {
+  const out: { line: number; tags: string[] }[] = []
+  for (let i = heading + 1; i < lines.length; i++) {
+    const t = lines[i].trim()
+    if (SECTION.test(t)) break
+    if (/^(Examples|Scenarios):/.test(t)) out.push({ line: i + 1, tags: tagsAbove(lines, i) })
+  }
+  return out
+}
+
 const SECTION = /^(Feature|Rule|Background|Scenario Outline|Scenario Template|Scenario|Example):/
 
 /** The feature files, copied under `mirror` with excluded scenarios blanked, keeping line numbers. */
 function mirrorFeatures(root: string, scenarios: Scenario[], mirror: string) {
   const byFile = new Map<string, number[]>()
+  const examplesByFile = new Map<string, number[]>()
   for (const s of scenarios) {
     if (s.excluded) byFile.set(s.file, [...(byFile.get(s.file) ?? []), ...s.headings])
+    else examplesByFile.set(s.file, [...(examplesByFile.get(s.file) ?? []), ...s.blankedExamples])
   }
   return (file: string) => {
     const rel = path.relative(root, file)
     const lines = fs.readFileSync(file, 'utf-8').split('\n')
-    for (const heading of byFile.get(rel.split(path.sep).join('/')) ?? []) {
+    const key = rel.split(path.sep).join('/')
+    for (const at of examplesByFile.get(key) ?? []) {
+      let i = at - 1
+      lines[i++] = ''
+      while (i < lines.length && /^\s*(\||$)/.test(lines[i])) lines[i++] = ''
+    }
+    for (const heading of byFile.get(key) ?? []) {
       let i = heading - 1
       lines[i++] = ''
       while (i < lines.length) {
@@ -233,7 +274,12 @@ function scenariosOf(
       const name = (lines[line - 1] ?? '').replace(/^\s*[^:]+:\s*/, '').trim()
       const key = `${rel}\u0000${name}`
       const tags = inheritedTags(lines, line - 1)
-      const excluded = tags.some((t) => excludeTags.includes(t))
+      const isExcluded = (list: string[]) => list.some((t) => excludeTags.includes(t.toLowerCase()))
+      const examples = examplesOf(lines, line - 1)
+      const blanked = examples.filter((e) => isExcluded(e.tags)).map((e) => e.line)
+      const excluded =
+        isExcluded(tags) || (examples.length > 0 && blanked.length === examples.length)
+      tags.push(...examples.flatMap((e) => e.tags))
       const existing = byKey.get(key)
       if (existing) {
         existing.steps += `\n${entry.steps.join('\n')}`
@@ -241,6 +287,7 @@ function scenariosOf(
         existing.tags = [...new Set([...existing.tags, ...tags])].sort()
         existing.excluded &&= excluded
         existing.headings.push(line)
+        existing.blankedExamples.push(...blanked)
       } else {
         byKey.set(key, {
           file: rel,
@@ -250,6 +297,7 @@ function scenariosOf(
           tags: [...new Set(tags)].sort(),
           excluded,
           headings: [line],
+          blankedExamples: blanked,
         })
       }
     }
@@ -272,7 +320,7 @@ function loadFeatures(
   const files = findFeatureFiles(
     options.features.map((f) => path.join(root, f)).filter((f) => fs.existsSync(f)),
   )
-  const scenarios = scenariosOf(files, root, patterns, options.excludeTags ?? DEFAULT_EXCLUDE_TAGS)
+  const scenarios = scenariosOf(files, root, patterns, effectiveExcludeTags(options))
   const copy = mirrorFeatures(root, scenarios, mirror)
   for (const file of files) copy(file)
   return { scenarios, mirror }
@@ -508,7 +556,7 @@ function compute(
       return before.steps !== s.steps || tagsChanged ? [{ ...ref(s), tagsChanged }] : []
     }),
     excluded: {
-      tags: options.excludeTags ?? DEFAULT_EXCLUDE_TAGS,
+      tags: effectiveExcludeTags(options),
       head: headScenarios.filter((s) => s.excluded).map(ref),
     },
   }

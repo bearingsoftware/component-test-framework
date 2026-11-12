@@ -93,8 +93,9 @@ Commands:
       --features <dir|file>         Feature files to read (repeatable, required)
       --map <file>                  The suite's operation map
       --allowlist <file>            api-diff allowlist, read from the base
-      --exclude-tags <list>         Comma-separated tags whose scenarios don't count
-                                    (default @skip,@pending,@wip)
+      --exclude-tags <list>         Comma-separated tags whose scenarios don't count, in
+                                    addition to @skip, @pending and @wip
+      --no-default-exclusions       Exclude only the --exclude-tags
       --base-path <path>            As for audit-coverage and api-diff
       --pattern <regex>             How features name an operation (as audit-coverage)
       --status-pattern <regex>      How features assert a status (as audit-coverage)
@@ -339,6 +340,7 @@ function evidence(args: string[]): number {
       map: { type: 'string' },
       allowlist: { type: 'string' },
       'exclude-tags': { type: 'string' },
+      'no-default-exclusions': { type: 'boolean' },
       pattern: { type: 'string', multiple: true },
       'status-pattern': { type: 'string', multiple: true },
       out: { type: 'string' },
@@ -363,6 +365,7 @@ function evidence(args: string[]): number {
       ?.split(',')
       .map((t) => t.trim())
       .filter(Boolean),
+    noDefaultExclusions: values['no-default-exclusions'],
     patterns: values.pattern?.map((p) => regex(p) as RegExp),
     statusPatterns: values['status-pattern']?.map((p) => regex(p) as RegExp),
     out: values.out,
