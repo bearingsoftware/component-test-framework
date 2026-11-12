@@ -110,6 +110,8 @@
     "publish:restore": "node scripts/restore-after-publish.mjs",
     "test:smoke": "tsc && cucumber-js --config tests/smoke/cucumber.js",
     "test:parallel": "tsc && node -e \"for (const d of ['coverage', '.nyc_output', 'reports']) require('fs').rmSync('tests/parallel/' + d, { recursive: true, force: true })\" && node tests/parallel/prepare.js && cucumber-js --config tests/parallel/cucumber.js && node tests/parallel/check-coverage.js",
+    "test:docs": "node scripts/check-doc-links.mjs",
+    "examples:test": "tsc && node examples/run.js",
     "test:playwright-test": "tsc && node -e \"for (const d of ['coverage', '.nyc_output']) require('fs').rmSync('tests/playwright-test/' + d, { recursive: true, force: true })\" && playwright test -c tests/playwright-test && node tests/playwright-test/check-coverage.js"
   },
   "peerDependencies": {
