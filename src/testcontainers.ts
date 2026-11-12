@@ -25,8 +25,7 @@ interface Stoppable {
   stop(): Promise<unknown>
 }
 
-const INSTALL_HINT =
-  'npm install -D testcontainers @testcontainers/postgresql @testcontainers/redis, or set DATABASE_URL/REDIS_URL/WIREMOCK_URL to use your own'
+const USE_YOUR_OWN = 'or set DATABASE_URL/REDIS_URL/WIREMOCK_URL to use your own'
 
 const ORDER = ['postgres', 'redis', 'wiremock']
 const running: Stoppable[] = []
@@ -36,13 +35,18 @@ async function load<T>(name: string, importer: () => Promise<T>): Promise<T> {
   try {
     return await importer()
   } catch (err) {
-    const { code, cause } = err as NodeJS.ErrnoException & { cause?: NodeJS.ErrnoException }
-    if (
-      ![code, cause?.code].some((c) => c === 'ERR_MODULE_NOT_FOUND' || c === 'MODULE_NOT_FOUND')
-    ) {
-      throw err
-    }
-    throw new Error(`startContainers needs ${name}: run ${INSTALL_HINT}`)
+    const { cause } = err as { cause?: unknown }
+    // Only the package being loaded missing means "not installed"; a missing dependency of it is a real error.
+    const notInstalled = [err, cause].some((e) => {
+      const { code, message } = (e ?? {}) as NodeJS.ErrnoException
+      return (
+        (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') &&
+        typeof message === 'string' &&
+        message.includes(`'${name}'`)
+      )
+    })
+    if (!notInstalled) throw err
+    throw new Error(`startContainers needs ${name}: run npm install -D ${name}, ${USE_YOUR_OWN}`)
   }
 }
 
@@ -68,7 +72,10 @@ function stopOnExit(): void {
   process.on('exit', () => {
     const ids = running.splice(0).map((c) => c.getId())
     if (ids.length === 0) return
-    const result = spawnSync('docker', ['rm', '--force', '--volumes', ...ids], { stdio: 'ignore' })
+    const result = spawnSync('docker', ['rm', '--force', '--volumes', ...ids], {
+      stdio: 'ignore',
+      timeout: 15_000,
+    })
     if (result.status !== 0) {
       console.error('startContainers: removing the containers failed; Ryuk will clean up')
     }
@@ -160,7 +167,7 @@ export async function startContainers(
     )
   }
   const settled = await Promise.allSettled(tasks)
-  if (!reuse && running.length > 0) stopOnExit()
+  if (running.length > 0) stopOnExit()
   const failure = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected')
   if (failure) {
     await stopContainers()

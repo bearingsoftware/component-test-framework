@@ -59,11 +59,11 @@ export default cucumberPreset()
 
 ## Which variable wins
 
-A service starts only when its variable is unset: `DATABASE_URL` for Postgres, `REDIS_URL` for Redis and `WIREMOCK_URL` for WireMock. When it is set, that service is yours and nothing starts. CI that already provides services sets the variables, so no container starts there and `testcontainers` is not even imported. This reads `process.env`, not `loadConfig()`, because `loadConfig` defaults the WireMock URL.
+A service starts only when its variable is unset (an empty string counts as unset): `DATABASE_URL` for Postgres, `REDIS_URL` for Redis and `WIREMOCK_URL` for WireMock. When it is set, that service is yours and nothing starts. CI that already provides services sets the variables, so no container starts there and `testcontainers` is not even imported. This reads `process.env`, not `loadConfig()`, because `loadConfig` defaults the WireMock URL.
 
 When it does start a service, it sets the variable from the container, on a random port.
 
-If a package is missing, the error names the `npm install` command and says to set the variables to use your own.
+If a package is missing, the error names the package and its `npm install` command, and says to set the variables to use your own.
 
 ## Parallel runs
 
