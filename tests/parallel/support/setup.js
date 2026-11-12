@@ -9,6 +9,7 @@ const path = require('path')
 const { Given, When, Then } = require('@cucumber/cucumber')
 const core = require('../../../dist/core')
 const postgres = require('../../../dist/postgres')
+const wiremock = require('../../../dist/wiremock')
 const spa = require('../../../dist/spa')
 
 const WIREMOCK_URL = process.env.WIREMOCK_URL ?? 'http://localhost:58443'
@@ -68,6 +69,7 @@ core.registerHooks({
   cleanupTables: ['orders'],
   defaultStepTimeout: 30_000,
   workerIsolation: isolation,
+  graphql: { endpoints: { octopus: '/v1/graphql/' } },
   hooks: {
     beforePageClose: (world) => coverage.collect(world.page),
   },
@@ -158,4 +160,50 @@ Then('the shop shows the widget price {int}', async function (price) {
 
 Then('the shop was served by this worker', async function () {
   assert.equal(await this.page.locator('#worker').textContent(), String(core.currentWorker().id))
+})
+
+// COMPONENT-23: the REST stub builder and GraphQL steps. The query text names
+// the operation and there is no operationName, as in joule-genie's client.
+Given('a builder stub quotes {int} for {word}', async function (price, sku) {
+  await this.wiremock.register(
+    wiremock.stub.get(`/pricing/prices/${sku}`).willReturn(200, { price }),
+  )
+})
+
+async function graphqlCall(world, payload) {
+  const base = isolation.wiremock ? core.workerWiremockUrl(WIREMOCK_URL) : WIREMOCK_URL
+  const res = await fetch(`${base}/v1/graphql/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  world.graphqlResponse = await res.json()
+}
+
+When('a client obtains a Kraken token with no operationName', async function () {
+  await graphqlCall(this, {
+    query:
+      'mutation obtainKrakenToken($input: ObtainJSONWebTokenInput!) {\n obtainKrakenToken(input: $input) { token } }',
+    variables: { input: { APIKey: 'k' } },
+  })
+})
+
+When('a client queries the account {string}', async function (accountNumber) {
+  await graphqlCall(this, {
+    query:
+      'query account($accountNumber: String!) { account(accountNumber: $accountNumber) { number } }',
+    variables: { accountNumber },
+  })
+})
+
+Then('the Kraken token is {string}', function (token) {
+  assert.equal(this.graphqlResponse.data.obtainKrakenToken.token, token)
+})
+
+Then('the GraphQL response data is {}', function (json) {
+  assert.deepEqual(this.graphqlResponse.data, JSON.parse(json))
+})
+
+Then('the GraphQL response error code is {string}', function (code) {
+  assert.equal(this.graphqlResponse.errors[0].extensions.code, code)
 })

@@ -37,6 +37,80 @@ Scenario: Handle vendor API failure
   And the sunsynk API at "/api/v1/inverter/readings" was called 1 time
 ```
 
+## Stub builder
+
+For a common mock, build the stub in code rather than writing WireMock JSON. `stub` is exported from `@bearingsoftware/component-test-framework/wiremock`, and `client.register(...)` sends one stub, or several in one import, with worker namespacing applied:
+
+```typescript
+import { stub } from '@bearingsoftware/component-test-framework/wiremock'
+
+await this.wiremock.register(
+  stub.get('/pricing/prices/WIDGET').willReturn(200, { price: 7 }),
+  stub.post('/orders').withJsonBody({ sku: 'WIDGET' }).willReturn(201, { id: 'o1' }, { Location: '/orders/o1' }),
+  stub.get('/slow').withQuery({ page: '2' }).withHeader('Authorization', /^Bearer /).withDelay(500).willReturnStatus(503),
+  stub.any('/pricing/.*').pathPattern().priority(1).willReturnStatus(500),
+  stub.get('/state').inScenario('flow', 'Started', 'Second').willReturn(200, { n: 1 }),
+)
+```
+
+`.build()` returns the plain mapping, for `addStub` or a mapping file.
+
+Matching rules:
+
+- The path is exact. `pathPattern()` makes it a regular expression that must match the whole path. `any` matches every method.
+- `withJsonBody` is a partial match: extra properties in the request are ignored, array order is not.
+- `withQuery` and `withHeader` take an exact string or a `RegExp`. A `RegExp` matches where `test` would, anywhere in the value, so `/^Bearer /` matches `Bearer abc`. Only the `i` flag is supported.
+- Other query parameters and headers are ignored.
+- `willReturn(status, json?, headers?)` sets `Content-Type: application/json` when there is a body. `willReturnStatus` sends no body. `willReturnBody(status, text, contentType)` sends text.
+- A lower `priority` wins. At equal priority the stub registered last wins.
+
+## GraphQL
+
+`graphql.endpoint(path)` (default `/graphql`) stubs operations on a GraphQL endpoint without hand-written matchers:
+
+```typescript
+import { graphql } from '@bearingsoftware/component-test-framework/wiremock'
+
+const octopus = graphql.endpoint('/v1/graphql/')
+await this.wiremock.register(
+  octopus.mutation('obtainKrakenToken').willReturnData({ obtainKrakenToken: { token: 't' } }),
+  octopus.query('account').withVariables({ accountNumber: 'A-1' }).willReturnData({ account: { number: 'A-1' } }),
+  octopus.query('account').willReturnErrors([{ message: 'not found', extensions: { code: 'NOT_FOUND' } }]),
+  octopus.query('account').willReturn({ data: { account: null }, errors: [{ message: 'partial' }] }),
+  octopus.operation('anything').withHttpStatus(500),
+)
+const calls = await this.wiremock.graphqlRequestCount('/v1/graphql/', 'obtainKrakenToken', { kind: 'mutation' })
+```
+
+Matching rules:
+
+- A stub matches a POST to the endpoint path.
+- The operation matches by `operationName` or by the name the query text declares, `(query|mutation|subscription) <Name>`. A client that sends no `operationName`, only `mutation obtainKrakenToken($input: ...) {` in `query`, matches. This is how joule-genie's Go client calls Octopus Kraken.
+- The name must match whole: `obtainKrakenToken` does not match `obtainKrakenTokenV2`.
+- `query` and `mutation` stubs check the keyword where the query text declares one, so a `query` stub does not answer a `mutation` of the same name. `operation` accepts any keyword. A request that gives `operationName` and a shorthand query (`{ x }`) declares none, and matches.
+- `withVariables` is a partial match on `variables`: extra variables are ignored.
+- Responses are HTTP 200 with JSON `{data}`, `{errors}` or both. `withHttpStatus` replaces the status, for a transport failure.
+- The last stub registered wins when several match, so register the general stub before the one with variables.
+- `graphqlRequestCount(endpoint, name, { kind?, variables? })` counts with the same name rule.
+
+Steps. The endpoint of each service comes from the `graphql` option, `{ endpoints: { octopus: '/v1/graphql/' } }`; a service with no entry uses `/graphql`. The second word is `query`, `mutation` or `operation`:
+
+| Step | Purpose |
+|------|---------|
+| `Given the {word} GraphQL {word} {word} returns:` | Doc string of the JSON `data` |
+| `Given the {word} GraphQL {word} {word} returns the errors:` | Doc string of a JSON array of errors |
+| `Given the {word} GraphQL {word} {word} with variables {string} returns:` | The string is inline JSON; doc string is the `data` |
+| `Then the {word} GraphQL {word} {word} was called {int} time(s)` | Wait until the operation has been called exactly N times |
+
+```gherkin
+Given the octopus GraphQL mutation obtainKrakenToken returns:
+  """
+  {"obtainKrakenToken": {"token": "t"}}
+  """
+When I send the request tariff/refresh to the refreshTariff operation
+Then the octopus GraphQL mutation obtainKrakenToken was called 1 time
+```
+
 ## Scenarios
 
 A WireMock [scenario](https://wiremock.org/docs/stateful-behaviour/) is a set of stubs sharing a `scenarioName`, each answering only in its `requiredScenarioState`. Stubs move it on by themselves with `newScenarioState`. A test can also move it, to make a vendor recover mid-scenario without loading other stubs:
