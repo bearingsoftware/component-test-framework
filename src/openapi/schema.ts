@@ -95,6 +95,8 @@ function check(
         errors.push(...sub(properties[name], child, `${pointer}/${escape(name)}`))
       else if (schema.additionalProperties === false) {
         fail(`additional property '${name}' is not allowed`, `${pointer}/${escape(name)}`)
+      } else if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
+        errors.push(...sub(schema.additionalProperties, child, `${pointer}/${escape(name)}`))
       }
     }
   }
@@ -107,7 +109,7 @@ function check(
 /**
  * Check a value against a JSON Schema, for the keywords that decide a
  * response's shape: `type` (also as a list, and with `nullable`), `required`,
- * `properties`, `additionalProperties: false`, `items`, `enum`, `const`,
+ * `properties`, `additionalProperties` (false or a schema), `items`, `enum`, `const`,
  * `allOf`, `oneOf`, `anyOf` and `$ref`. Formats, patterns and numeric or
  * length limits aren't checked.
  */

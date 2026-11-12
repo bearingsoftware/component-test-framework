@@ -43,6 +43,7 @@ describe('generateStubs', () => {
         file: 'mappings/listPets.json',
         mapping: {
           name: 'listPets',
+          priority: 7,
           metadata: meta('listPets'),
           request: { method: 'GET', urlPathTemplate: '/api/pets' },
           response: {
@@ -59,6 +60,7 @@ describe('generateStubs', () => {
         file: 'mappings/createPet.json',
         mapping: {
           name: 'createPet',
+          priority: 7,
           metadata: meta('createPet'),
           request: { method: 'POST', urlPathTemplate: '/api/pets' },
           response: { status: 201, headers: json, jsonBody: { id: 3, name: 'Kit' } },
@@ -68,6 +70,7 @@ describe('generateStubs', () => {
         file: 'mappings/getPet.json',
         mapping: {
           name: 'getPet',
+          priority: 7,
           metadata: meta('getPet'),
           request: { method: 'GET', urlPathTemplate: '/api/pets/{petId}' },
           response: { status: 200, headers: json, jsonBody: { id: 7, name: 'Fido' } },
@@ -77,6 +80,7 @@ describe('generateStubs', () => {
         file: 'mappings/deletePet.json',
         mapping: {
           name: 'deletePet',
+          priority: 7,
           metadata: meta('deletePet'),
           request: { method: 'DELETE', urlPathTemplate: '/api/pets/{petId}' },
           response: { status: 204 },
@@ -86,6 +90,7 @@ describe('generateStubs', () => {
         file: 'mappings/getTree.json',
         mapping: {
           name: 'getTree',
+          priority: 7,
           metadata: meta('getTree'),
           request: { method: 'GET', urlPathTemplate: '/api/tree' },
           response: {
@@ -93,6 +98,38 @@ describe('generateStubs', () => {
             headers: json,
             jsonBody: { value: 'root', children: [{ value: 'leaf' }] },
           },
+        },
+      },
+      {
+        file: 'mappings/getMine.json',
+        mapping: {
+          name: 'getMine',
+          // Three fixed segments, one more than /pets/{petId}, so it is tried first.
+          priority: 6,
+          metadata: meta('getMine'),
+          request: { method: 'GET', urlPathTemplate: '/api/pets/mine' },
+          response: { status: 200, headers: json, jsonBody: { id: 99, name: 'Mine' } },
+        },
+      },
+      {
+        file: 'mappings/getFlag.json',
+        mapping: {
+          name: 'getFlag',
+          priority: 7,
+          metadata: meta('getFlag'),
+          request: { method: 'GET', urlPathTemplate: '/api/flag' },
+          response: { status: 200, headers: json, jsonBody: false },
+        },
+      },
+      {
+        file: 'mappings/getNothing.json',
+        mapping: {
+          name: 'getNothing',
+          priority: 7,
+          metadata: meta('getNothing'),
+          request: { method: 'GET', urlPathTemplate: '/api/nothing' },
+          // WireMock serves a jsonBody of null as an empty body.
+          response: { status: 200, headers: json, body: 'null' },
         },
       },
     ])
@@ -111,6 +148,9 @@ describe('generateStubs', () => {
       'mappings/getPet-404.json',
       'mappings/deletePet.json',
       'mappings/getTree.json',
+      'mappings/getMine.json',
+      'mappings/getFlag.json',
+      'mappings/getNothing.json',
     ])
     expect(mappings.find((m) => m.file === 'mappings/getPet-404.json')?.mapping).toEqual({
       name: 'getPet 404',
@@ -121,7 +161,7 @@ describe('generateStubs', () => {
     })
     expect(
       mappings
-        .filter((m) => 'priority' in m.mapping)
+        .filter((m) => (m.mapping as { priority: number }).priority === 10)
         .map((m) => (m.mapping as { name: string }).name),
     ).toEqual(['createPet 400', 'getPet 404'])
     expect(skipped.map((s) => s.operation)).toEqual(['getPet default', 'listToys 200'])
@@ -174,6 +214,64 @@ paths:
       headers: { 'Content-Type': 'text/plain' },
       body: 'hello',
     })
+  })
+
+  it('stubs a null example as the text null, and a false one as false', () => {
+    const find = (name: string) =>
+      generateStubs(pets).mappings.find((m) => m.file === `mappings/${name}.json`)?.mapping as {
+        response: object
+      }
+    expect(find('getNothing').response).toEqual({ status: 200, headers: json, body: 'null' })
+    expect(find('getFlag').response).toEqual({ status: 200, headers: json, jsonBody: false })
+  })
+
+  it('gives a path with more fixed segments a lower priority number, all under 10', () => {
+    const priorities = Object.fromEntries(
+      generateStubs(pets).mappings.map((m) => [
+        m.file,
+        (m.mapping as { priority: number }).priority,
+      ]),
+    )
+    expect(priorities['mappings/getMine.json']).toBeLessThan(priorities['mappings/getPet.json'])
+    expect(Math.max(...Object.values(priorities))).toBeLessThan(10)
+  })
+
+  it('warns, and still writes the stub, when an example does not fit its schema', () => {
+    const dir = tmpDir()
+    const spec = path.join(dir, 'bad.yaml')
+    fs.writeFileSync(
+      spec,
+      `openapi: 3.0.3
+paths:
+  /a:
+    get:
+      operationId: a
+      responses:
+        '200':
+          description: x
+          content: { application/json: { schema: { type: object, required: [id] }, example: {} } }
+`,
+    )
+    const { mappings, warnings } = generateStubs(spec)
+    expect(mappings).toHaveLength(1)
+    expect(warnings).toEqual([
+      {
+        operation: 'a 200',
+        reason: "the example doesn't fit its schema, at /id: missing required property 'id'",
+      },
+    ])
+    expect(generateStubs(pets).warnings).toEqual([])
+  })
+
+  it('fails when two operations would be written to the same file', () => {
+    const dir = tmpDir()
+    const spec = path.join(dir, 'clash.yaml')
+    const op = (id: string) =>
+      `{ get: { operationId: ${id}, responses: { '200': { description: x } } } }`
+    fs.writeFileSync(spec, `openapi: 3.0.3\npaths:\n  /a: ${op("'a/b'")}\n  /b: ${op("'a_b'")}\n`)
+    expect(() => generateStubs(spec)).toThrow(
+      "operations 'a/b' and 'a_b' would both be written to mappings/a_b.json",
+    )
   })
 
   it("leaves loadSpec's result as it was", () => {
@@ -240,7 +338,7 @@ describe('checkStubs', () => {
     expect(problems.map((p) => [p.key, p.message])).toEqual([
       [
         'ambiguous.json',
-        "unresolved: GET urlPathPattern /api/pets/.* matches 2 operations, so its responses can't be checked",
+        'unresolved: GET urlPathPattern /api/pets/.* matches 3 operations at different paths',
       ],
       [
         'body.json',
@@ -328,19 +426,151 @@ describe('checkStubs', () => {
     expect(problems[1].message).toBe('GET /api/nope matches no operation in the spec')
   })
 
-  it('does not check a fault, a proxy or a templated body', () => {
+  it('does not check a fault, a proxy, or a body that goes through response templating', () => {
     const dir = writeMappings({
-      'fault.json': { request: { method: 'GET', url: '/api/tree' }, response: { fault: 'RESET' } },
+      // Each has a status the spec doesn't document, which would be a finding if it were checked.
+      'fault.json': {
+        request: { method: 'GET', url: '/api/tree' },
+        response: { fault: 'RESET', status: 418 },
+      },
       'proxy.json': {
         request: { method: 'GET', url: '/api/tree' },
-        response: { proxyBaseUrl: 'http://x' },
+        response: { proxyBaseUrl: 'http://x', status: 418 },
       },
       'template.json': {
+        request: { method: 'GET', url: '/api/pets/1' },
+        response: {
+          status: 200,
+          transformers: ['response-template'],
+          jsonBody: { id: '{{randomInt}}', name: 'a' },
+        },
+      },
+    })
+    expect(checkStubs(pets, dir).problems).toEqual([])
+    // Without the transformer, `{{` is just text, and the body is checked.
+    const plain = writeMappings({
+      'plain.json': {
         request: { method: 'GET', url: '/api/pets/1' },
         response: { status: 200, jsonBody: { id: '{{randomInt}}', name: 'a' } },
       },
     })
-    expect(checkStubs(pets, dir).problems).toEqual([])
+    expect(checkStubs(pets, plain).problems).toHaveLength(1)
+  })
+
+  it('takes a 2XX range as documenting the statuses it covers', () => {
+    const dir = tmpDir()
+    const spec = path.join(dir, 'range.yaml')
+    fs.writeFileSync(
+      spec,
+      `openapi: 3.0.3
+paths:
+  /a:
+    get:
+      operationId: a
+      responses:
+        '2XX':
+          description: ok
+          content: { application/json: { schema: { type: object, required: [x] }, example: { x: 1 } } }
+`,
+    )
+    const mappings = writeMappings({
+      'ok.json': {
+        request: { method: 'GET', url: '/a' },
+        response: { status: 201, jsonBody: { x: 1 } },
+      },
+      'bad-body.json': {
+        request: { method: 'GET', url: '/a' },
+        response: { status: 201, jsonBody: {} },
+      },
+      'bad-status.json': {
+        request: { method: 'GET', url: '/a' },
+        response: { status: 500, jsonBody: {} },
+      },
+    })
+    expect(checkStubs(spec, mappings).problems.map((p) => [p.key, p.message])).toEqual([
+      [
+        'bad-body.json',
+        "the 201 response of GET /a has a body that doesn't fit its schema, at /x: missing required property 'x'",
+      ],
+      ['bad-status.json', "GET /a doesn't document a 500 response"],
+    ])
+    // With nothing more exact, the range is stubbed as a 200.
+    const { mappings: made, skipped } = generateStubs(spec)
+    expect(skipped).toEqual([])
+    expect((made[0].mapping as { response: { status: number } }).response.status).toBe(200)
+  })
+
+  it('checks a pattern on `urlPattern` against the path and a query', () => {
+    const dir = writeMappings({
+      'query.json': {
+        request: { method: 'GET', urlPattern: '/api/tree\\?a=1' },
+        response: { status: 200, jsonBody: { value: 'a' } },
+      },
+      'bare.json': {
+        request: { method: 'GET', urlPattern: '/api/tree' },
+        response: { status: 200, jsonBody: { value: 1 } },
+      },
+      'any-query.json': {
+        request: { method: 'GET', urlPattern: '/api/tree(\\?.*)?' },
+        response: { status: 418 },
+      },
+    })
+    expect(checkStubs(pets, dir).problems.map((p) => [p.key, p.message.slice(0, 40)])).toEqual([
+      ['any-query.json', "GET /api/tree doesn't document a 418 res"],
+      ['bare.json', 'the 200 response of GET /api/tree has a '],
+    ])
+  })
+
+  it('takes a method of ANY, or none, when the operations share a path', () => {
+    const dir = tmpDir()
+    const spec = path.join(dir, 'any.yaml')
+    fs.writeFileSync(
+      spec,
+      `openapi: 3.0.3
+paths:
+  /pets:
+    get:
+      operationId: list
+      responses:
+        '200':
+          description: ok
+          content: { application/json: { schema: { type: array }, example: [] } }
+    post:
+      operationId: create
+      responses:
+        '201':
+          description: ok
+          content: { application/json: { schema: { type: object }, example: {} } }
+  /pets/{id}:
+    get:
+      operationId: one
+      responses: { '200': { description: ok } }
+  /pets/mine:
+    post:
+      operationId: mine
+      responses: { '200': { description: ok } }
+`,
+    )
+    const mappings = writeMappings({
+      // A list is accepted by GET; a 201 object by POST.
+      'list.json': { request: { url: '/pets' }, response: { status: 200, jsonBody: [] } },
+      'created.json': {
+        request: { method: 'ANY', url: '/pets' },
+        response: { status: 201, jsonBody: {} },
+      },
+      'neither-status.json': { request: { url: '/pets' }, response: { status: 404 } },
+      'neither-body.json': { request: { url: '/pets' }, response: { status: 200, jsonBody: {} } },
+      // GET /pets/mine isn't an operation, but POST /pets/mine and GET /pets/{id} are: two paths.
+      'split.json': { request: { url: '/pets/mine' }, response: { status: 200 } },
+    })
+    expect(checkStubs(spec, mappings).problems.map((p) => [p.key, p.message])).toEqual([
+      [
+        'neither-body.json',
+        "the 200 response of GET /pets has a body that doesn't fit its schema, at (the body): expected array, got object",
+      ],
+      ['neither-status.json', "GET|POST /pets doesn't document a 404 response"],
+      ['split.json', 'unresolved: ANY /pets/mine matches 2 operations at different paths'],
+    ])
   })
 
   it('takes an allowlist by file name, and reports an entry that matches nothing as stale', () => {
@@ -386,6 +616,9 @@ describe('ctf stubs', () => {
     expect(fs.readdirSync(path.join(dir, 'mappings')).sort()).toEqual([
       'createPet.json',
       'deletePet.json',
+      'getFlag.json',
+      'getMine.json',
+      'getNothing.json',
       'getPet.json',
       'getTree.json',
       'listPets.json',
@@ -407,8 +640,17 @@ describe('ctf stubs', () => {
   it('takes --all-statuses, --include and --exclude', () => {
     const dir = tmpDir()
     expect(
-      run(['stubs', pets, '--out', dir, '--all-statuses', '--include', '^get', '--exclude', 'Tree'])
-        .code,
+      run([
+        'stubs',
+        pets,
+        '--out',
+        dir,
+        '--all-statuses',
+        '--include',
+        '^getP',
+        '--exclude',
+        'Tree',
+      ]).code,
     ).toBe(0)
     expect(fs.readdirSync(path.join(dir, 'mappings')).sort()).toEqual([
       'getPet-404.json',

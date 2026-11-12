@@ -76,6 +76,36 @@ paths:
                 value: root
                 children:
                   - { value: leaf }
+  /pets/mine:
+    get:
+      operationId: getMine
+      responses:
+        '200':
+          description: The caller's pet
+          content:
+            application/json:
+              schema: { $ref: 'schemas.yaml#/Pet' }
+              example: { id: 99, name: Mine }
+  /flag:
+    get:
+      operationId: getFlag
+      responses:
+        '200':
+          description: A boolean
+          content:
+            application/json:
+              schema: { type: boolean }
+              example: false
+  /nothing:
+    get:
+      operationId: getNothing
+      responses:
+        '200':
+          description: A null
+          content:
+            application/json:
+              schema: { type: object, nullable: true }
+              example: null
 components:
   responses:
     NotFound:

@@ -1,7 +1,13 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { createHash } from 'crypto'
-import { findOperation, loadSpecDetail, type DetailedOperation, type SpecResponse } from './spec'
+import {
+  findOperation,
+  loadSpecDetail,
+  type DetailedOperation,
+  type Located,
+  type SpecResponse,
+} from './spec'
 import { namedOperations } from './generate'
 import { validateSchema } from './schema'
 import type { Problem } from './check'
@@ -27,6 +33,8 @@ export interface GeneratedStubs {
   /** `file` is relative to the output directory: `mappings/<name>.json`. */
   mappings: { file: string; mapping: object }[]
   skipped: { operation: string; reason: string }[]
+  /** Examples that don't fit their own schema. The stub is written all the same. */
+  warnings: { operation: string; reason: string }[]
 }
 
 function specHashOf(specFile: string): string {
@@ -47,9 +55,10 @@ export function generateStubs(
   specFile: string,
   options: GenerateStubsOptions = {},
 ): GeneratedStubs {
-  const { operations } = loadSpecDetail(specFile, { basePath: options.basePath })
+  const { operations, resolve } = loadSpecDetail(specFile, { basePath: options.basePath })
   const specHash = specHashOf(specFile)
-  const result: GeneratedStubs = { mappings: [], skipped: [] }
+  const result: GeneratedStubs = { mappings: [], skipped: [], warnings: [] }
+  const fileOwners = new Map<string, string>()
 
   for (const op of namedOperations(operations)) {
     if (options.include && !options.include.test(op.name)) continue
@@ -58,54 +67,83 @@ export function generateStubs(
     const concrete = op.responses
       .filter((r) => /^\d{3}$/.test(r.status))
       .sort((a, b) => Number(a.status) - Number(b.status))
-    const primary = concrete.find((r) => r.status.startsWith('2'))
+    // A `2XX` range has no code of its own, so it stands in as a 200 when nothing is more exact.
+    const range = op.responses.find((r) => r.status.toUpperCase() === '2XX')
+    const primary = concrete.find((r) => r.status.startsWith('2')) ?? range
     if (!primary) {
       result.skipped.push({ operation: op.name, reason: 'no 2xx response is documented' })
       continue
     }
+    const codeOf = (r: SpecResponse) => (r === range && r === primary ? 200 : Number(r.status))
     if (options.allStatuses) {
-      for (const r of op.responses.filter((r) => !/^\d{3}$/.test(r.status))) {
+      for (const r of op.responses.filter((r) => !/^\d{3}$/.test(r.status) && r !== primary)) {
         result.skipped.push({
           operation: `${op.name} ${r.status}`,
           reason: 'not a single status code, so there is nothing to match',
         })
       }
     }
-    for (const response of options.allStatuses ? concrete : [primary]) {
+    for (const response of options.allStatuses
+      ? [...concrete, ...(range === primary ? [range] : [])]
+      : [primary]) {
       const isPrimary = response === primary
-      const built = stubFor(op, response, specHash, isPrimary)
+      const status = codeOf(response)
+      const built = stubFor(op, response, status, specHash, isPrimary)
       if (typeof built === 'string') {
         result.skipped.push({ operation: `${op.name} ${response.status}`, reason: built })
         continue
       }
-      const base = op.name.replace(/[^A-Za-z0-9._-]/g, '_')
-      result.mappings.push({
-        file: `mappings/${base}${isPrimary ? '' : `-${response.status}`}.json`,
-        mapping: built,
-      })
+      if (response.hasExample && response.schema) {
+        for (const e of validateSchema(response.example, response.schema, resolve)) {
+          result.warnings.push({
+            operation: `${op.name} ${response.status}`,
+            reason: `the example doesn't fit its schema, at ${e.pointer || '(the body)'}: ${e.message}`,
+          })
+        }
+      }
+      const file = `mappings/${op.name.replace(/[^A-Za-z0-9._-]/g, '_')}${isPrimary ? '' : `-${status}`}.json`
+      const owner = fileOwners.get(file)
+      if (owner !== undefined && owner !== op.name) {
+        throw new Error(`operations '${owner}' and '${op.name}' would both be written to ${file}`)
+      }
+      fileOwners.set(file, op.name)
+      result.mappings.push({ file, mapping: built })
     }
   }
   return result
+}
+
+/** How many of a path's segments are fixed text, not parameters. */
+function literalSegments(route: string): number {
+  return route.split('/').filter((s) => s && !s.includes('{')).length
 }
 
 /** A mapping, or the reason there isn't one. */
 function stubFor(
   op: DetailedOperation & { name: string },
   response: SpecResponse,
+  status: number,
   specHash: string,
   isPrimary: boolean,
 ): object | string {
-  const reply: Record<string, unknown> = { status: Number(response.status) }
+  const reply: Record<string, unknown> = { status }
   if (response.mediaType) {
     if (!response.hasExample) return `no example for the ${response.mediaType} response`
     reply.headers = { 'Content-Type': response.mediaType }
-    if (isJson(response.mediaType)) reply.jsonBody = response.example
+    // WireMock serves a `jsonBody` of null as an empty body, so null goes out as text.
+    if (isJson(response.mediaType) && response.example === null) reply.body = 'null'
+    else if (isJson(response.mediaType)) reply.jsonBody = response.example
     else if (typeof response.example === 'string') reply.body = response.example
     else return `the example for ${response.mediaType} isn't a string`
   }
+  // WireMock tries the lowest number first: a path with more fixed segments
+  // (`/pets/mine`) goes before `/pets/{id}`, and both before the error stubs.
+  const priority = isPrimary
+    ? Math.max(1, LOWER_PRIORITY - 1 - literalSegments(op.path))
+    : LOWER_PRIORITY
   return {
     name: isPrimary ? op.name : `${op.name} ${response.status}`,
-    ...(isPrimary ? {} : { priority: LOWER_PRIORITY }),
+    priority,
     metadata: { generatedBy: GENERATED_BY, operation: op.name, specHash },
     request: { method: op.method, urlPathTemplate: op.path },
     response: reply,
@@ -142,9 +180,16 @@ function asObject(value: unknown): Mapping {
 
 const SAMPLES = ['1', 'abc', '00000000-0000-0000-0000-000000000000']
 
-type Found = { op: DetailedOperation } | { problem: string }
+type Found = { ops: DetailedOperation[] } | { problem: string }
 
-/** The one operation a mapping's request goes to, or why it can't be told. */
+/** Sample queries to try a `urlPattern` with, as WireMock matches it against the path and query. */
+const QUERIES = ['', '?a=1', '?a=1&b=2']
+
+/**
+ * The operations a mapping's request goes to, or why that can't be told.
+ * With a method there is one; with `ANY` or none, there may be one per
+ * method, but all at the same path.
+ */
 function operationOf(request: Mapping, operations: DetailedOperation[]): Found {
   const method = typeof request.method === 'string' ? request.method.toUpperCase() : 'ANY'
   const methods = method === 'ANY' ? METHODS : [method]
@@ -158,6 +203,7 @@ function operationOf(request: Mapping, operations: DetailedOperation[]): Found {
     candidates = methods.flatMap(
       (m) => findOperation(operations, m, request[literal] as string) ?? [],
     )
+    if (candidates.length === 0) return { problem: `${shown} matches no operation in the spec` }
   } else {
     const key = ['urlPathPattern', 'urlPattern'].find((k) => typeof request[k] === 'string')
     if (!key) return { problem: 'unresolved: the request has no URL matcher' }
@@ -169,24 +215,28 @@ function operationOf(request: Mapping, operations: DetailedOperation[]): Found {
     } catch {
       return { problem: `unresolved: ${shown} is not a regular expression this check can read` }
     }
-    // A regex can't be matched to a template, so try it on paths with sample values filled in.
+    // A regex can't be matched to a template, so try it on paths with sample
+    // values filled in, and for `urlPattern`, a sample query after them.
+    const queries = key === 'urlPattern' ? QUERIES : ['']
     candidates = operations.filter(
       (op) =>
         methods.includes(op.method) &&
-        SAMPLES.some((sample) => re.test(op.path.replace(/\{[^}]*\}/g, sample))),
+        SAMPLES.some((sample) =>
+          queries.some((q) => re.test(op.path.replace(/\{[^}]*\}/g, sample) + q)),
+        ),
     )
-    if (candidates.length !== 1) {
+    if (candidates.length === 0) {
       return {
-        problem: `unresolved: ${shown} ${candidates.length === 0 ? 'matches no operation' : `matches ${candidates.length} operations`}, so its responses can't be checked`,
+        problem: `unresolved: ${shown} matches no operation, so its responses can't be checked`,
       }
     }
   }
-  const distinct = [...new Set(candidates)]
-  if (distinct.length === 0) return { problem: `${shown} matches no operation in the spec` }
-  if (distinct.length > 1) {
-    return { problem: `unresolved: ${shown} matches ${distinct.length} operations` }
+  if (new Set(candidates.map((op) => op.path)).size > 1) {
+    return {
+      problem: `unresolved: ${shown} matches ${candidates.length} operations at different paths`,
+    }
   }
-  return { op: distinct[0] }
+  return { ops: candidates }
 }
 
 function documented(op: DetailedOperation, status: number): SpecResponse | undefined {
@@ -268,13 +318,15 @@ function checkMapping(
   // A fault or a proxied response has no status or body of its own.
   if (reply.fault !== undefined || reply.proxyBaseUrl !== undefined) return
 
-  const { op } = found
+  const { ops } = found
   const status = typeof reply.status === 'number' ? reply.status : 200
-  const response = documented(op, status)
-  if (!response) {
-    return add(`${op.method} ${op.path} doesn't document a ${status} response`)
-  }
-  if (!response.schema) return
+  const describe = (list: DetailedOperation[]) =>
+    `${list.map((op) => op.method).join('|')} ${list[0].path}`
+  const responses = ops.flatMap((op) => documented(op, status) ?? [])
+  if (responses.length === 0) return add(`${describe(ops)} doesn't document a ${status} response`)
+  const label = describe(ops.filter((op) => documented(op, status)))
+  // With no schema, a response takes any body.
+  if (responses.some((r) => !r.schema)) return
 
   let body: unknown
   if (reply.jsonBody !== undefined) body = reply.jsonBody
@@ -285,14 +337,20 @@ function checkMapping(
       return
     }
   } else return
-  // A templated body isn't the final one.
-  if (JSON.stringify(body).includes('{{')) return
+  // A body that goes through response templating isn't the final one.
+  if (asArray(reply.transformers).includes('response-template')) return
 
-  for (const error of validateSchema(body, response.schema, resolve)) {
+  const attempts = responses.map((r) => validateSchema(body, r.schema as Located, resolve))
+  if (attempts.some((errors) => errors.length === 0)) return
+  for (const error of attempts[0]) {
     add(
-      `the ${status} response of ${op.method} ${op.path} has a body that doesn't fit its schema, at ${error.pointer || '(the body)'}: ${error.message}`,
+      `the ${status} response of ${label} has a body that doesn't fit its schema, at ${error.pointer || '(the body)'}: ${error.message}`,
     )
   }
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : []
 }
 
 /** Where the mapping files `generateStubs` made would go, that already exist. */

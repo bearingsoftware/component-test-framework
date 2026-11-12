@@ -306,7 +306,7 @@ function stubs(args: string[]): number {
   const [spec] = positionals
   if (!spec || positionals.length > 1) throw new UsageError('stubs takes one spec')
   if (!values.out) throw new UsageError('stubs needs --out <dir>')
-  const { mappings, skipped } = generateStubs(spec, {
+  const { mappings, skipped, warnings } = generateStubs(spec, {
     basePath,
     include: regex(values.include),
     exclude: regex(values.exclude),
@@ -323,6 +323,7 @@ function stubs(args: string[]): number {
     console.log(`wrote ${target}`)
   }
   for (const s of skipped) console.error(`skipped ${s.operation}: ${s.reason}`)
+  for (const w of warnings) console.error(`warning: ${w.operation}: ${w.reason}`)
   return 0
 }
 

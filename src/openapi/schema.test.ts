@@ -62,6 +62,19 @@ describe('validateSchema', () => {
     expect(errors({ a: 1, b: 2 }, { type: 'object' })).toEqual([])
   })
 
+  it('checks additionalProperties as a schema, for the properties not listed', () => {
+    const schema = {
+      properties: { id: { type: 'integer' } },
+      additionalProperties: { type: 'string' },
+    }
+    expect(errors({ id: 1, a: 'x' }, schema)).toEqual([])
+    expect(errors({ id: 1, a: 2 }, schema)).toEqual([
+      { pointer: '/a', message: 'expected string, got integer' },
+    ])
+    // `true` and an absent keyword allow anything.
+    expect(errors({ a: 2 }, { additionalProperties: true })).toEqual([])
+  })
+
   it('escapes ~ and / in pointers', () => {
     expect(errors({ 'a/b~c': 1 }, { properties: { 'a/b~c': { type: 'string' } } })).toEqual([
       { pointer: '/a~1b~0c', message: 'expected string, got integer' },
