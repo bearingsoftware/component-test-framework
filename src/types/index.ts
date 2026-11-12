@@ -196,6 +196,11 @@ export interface FrameworkConfig {
    * idempotent. See {@link MigrationsOptions}.
    */
   migrations?: MigrationsOptions
+  /** GraphQL mocking for the GraphQL steps. */
+  graphql?: {
+    /** Each service's GraphQL endpoint path. A service with no entry uses `/graphql`. */
+    endpoints?: Record<string, string>
+  }
 }
 
 /**

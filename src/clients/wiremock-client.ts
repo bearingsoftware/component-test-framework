@@ -1,6 +1,9 @@
 import { createHash } from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
+import { operationBodyPatterns } from '../mocking/graphql'
+import type { OperationKind } from '../mocking/graphql'
+import type { Buildable } from '../mocking/rest'
 
 /** Filters for {@link WireMockClient.getRequestCount} and {@link WireMockClient.findRequests}. */
 export interface RequestFilter {
@@ -16,6 +19,8 @@ export interface RequestFilter {
    * e.g. `$[?(@.status == 'active')]`.
    */
   bodyJsonPath?: string
+  /** Raw WireMock body patterns the request body must all match. */
+  bodyPatterns?: Record<string, unknown>[]
 }
 
 /** Options for {@link WireMockClient}. */
@@ -179,6 +184,19 @@ export class WireMockClient {
   /** A mapping as this client registers it: unchanged, or moved under its namespace. */
   private scoped(mapping: Record<string, unknown>): Record<string, unknown> {
     return this.options.namespace ? namespaceStub(mapping, this.options.namespace) : mapping
+  }
+
+  /**
+   * Register stubs from builders (see `stub` and `graphql`) or plain
+   * mappings. One is added directly; several are imported in one request.
+   * Either way worker namespacing applies.
+   */
+  async register(...stubs: (Buildable | Record<string, unknown>)[]): Promise<void> {
+    const mappings = stubs.map((s) =>
+      'build' in s && typeof s.build === 'function' ? s.build() : s,
+    )
+    if (mappings.length === 1) return this.addStub(mappings[0] as Record<string, unknown>)
+    await this.importStubs(mappings as Record<string, unknown>[])
   }
 
   /** Register a single stub mapping. */
@@ -363,6 +381,26 @@ export class WireMockClient {
     return data.count
   }
 
+  /**
+   * How many POSTs to a GraphQL endpoint ran an operation, matched by name as
+   * the stubs do: by `operationName` or by the name in the query text.
+   */
+  async graphqlRequestCount(
+    endpoint: string,
+    operationName: string,
+    options: { kind?: OperationKind; variables?: Record<string, unknown> } = {},
+  ): Promise<number> {
+    return this.getRequestCount(endpoint, {
+      method: 'POST',
+      exactPath: true,
+      bodyPatterns: operationBodyPatterns(
+        options.kind ?? 'operation',
+        operationName,
+        options.variables,
+      ),
+    })
+  }
+
   /** Verify that a URL path pattern was called exactly N times. */
   async verifyCallCount(
     urlPathPattern: string,
@@ -407,7 +445,11 @@ export function requestPattern(path: string, filter: RequestFilter = {}): Record
     ? { urlPath: path }
     : { urlPathPattern: path }
   if (filter.method) pattern.method = filter.method.toUpperCase()
-  if (filter.bodyJsonPath) pattern.bodyPatterns = [{ matchesJsonPath: filter.bodyJsonPath }]
+  const bodyPatterns = [
+    ...(filter.bodyJsonPath ? [{ matchesJsonPath: filter.bodyJsonPath }] : []),
+    ...(filter.bodyPatterns ?? []),
+  ]
+  if (bodyPatterns.length > 0) pattern.bodyPatterns = bodyPatterns
   return pattern
 }
 

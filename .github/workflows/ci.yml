@@ -51,6 +51,11 @@ jobs:
         ports: ["56393:6379"]
         options: >-
           --health-cmd "valkey-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30
+      # COMPONENT-23: the stub builder and GraphQL integration tests run
+      # against a real WireMock; without WIREMOCK_URL they skip.
+      wiremock:
+        image: wiremock/wiremock:3.13.2
+        ports: ["58445:8080"]
     env:
       REDIS_URL: redis://localhost:56391
     steps:
@@ -66,11 +71,14 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Wait for Mailpit
         run: timeout 60 sh -c 'until curl -sf http://localhost:58025/api/v1/info; do sleep 1; done'
+      - name: Wait for WireMock
+        run: timeout 60 sh -c 'until curl -sf http://localhost:58445/__admin/health; do sleep 1; done'
       - name: Run unit tests
         env:
           MAILPIT_URL: http://localhost:58025
           MAILPIT_SMTP: localhost:51025
           DATABASE_URL: postgres://postgres:postgres@localhost:55442/ctf_unit
+          WIREMOCK_URL: http://localhost:58445
         run: npm run test:unit
       - name: Run the Redis client tests against Valkey
         env:
