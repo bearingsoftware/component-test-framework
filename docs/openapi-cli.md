@@ -101,6 +101,28 @@ It prints each spec operation no feature file references, and on stderr, any nam
 
 The same functions are exported from `@bearingsoftware/component-test-framework/openapi` for scripts of your own.
 
+## Detecting breaking changes: `ctf api-diff`
+
+```sh
+npx ctf api-diff base/openapi.yaml head/openapi.yaml --allowlist api-diff-allowlist.txt --out-flag api-break.txt
+```
+
+It compares the spec on the base branch with the one on the PR head, from a client's point of view: a change is breaking when an existing client could fail. Operations are matched by method and path, and path parameter names don't count (`/pets/{id}` is `/pets/{petId}`).
+
+**Breaking:** `operation-removed`; `response-status-removed` (a documented 2xx that the head no longer has, with no `default` or `2XX` to cover it); `request-param-added-required` (a new required parameter, or an optional one made required); `request-param-removed`; `request-body-required-added` (the body becomes required, or a property becomes required); `request-property-type-changed` (a request type narrows, enum values are removed, or a property or body is removed); `response-property-removed` (including a required property made optional); `response-property-type-changed` (a response type widens); `response-enum-added`; `media-type-removed` (request or 2xx response).
+
+**Non-breaking, listed but never failing:** `operation-added`, `response-status-added`, `optional-param-added`, `response-property-added`, `request-enum-added`, and `description-changed` (summary and description, shown only with `--json`).
+
+Types: a request type may widen (`integer` to `number`, or adding `null`) and a response type may narrow; the reverse of each is breaking. `allOf` parts are merged, `$ref`s are followed (recursive ones too), and `oneOf`/`anyOf` are compared by their branch types, so a branch removed from a response is fine and one removed from a request is breaking. Formats, patterns, and numeric or length limits are not compared.
+
+Removing a request property or body is breaking, though a server may ignore the field: a client that still sends it can fail against a server that rejects unknown fields, and the diff can't see which.
+
+**Exit status:** 0 with no breaking change, 1 with one (or a stale allowlist entry), 2 when it can't run. `--out-flag <file>` writes `true` or `false` for "a breaking change was found" (not counting allowlisted ones) on exits 0 and 1, and writes nothing on 2. `--json` prints `{ version: 1, breaking, nonBreaking }`, each finding with its `rule`, `operation`, `location` (a JSON pointer into the spec) and `detail`.
+
+**`--allowlist`:** one entry per line, `METHOD /path` or `METHOD /path <rule>`. It suppresses the matching breaking findings, and an entry that matches none fails as stale, as in `check-operation-map`.
+
+`diffSpecs` is exported from `@bearingsoftware/component-test-framework/openapi`.
+
 ## Scaffolding a suite: `ctf init`
 
 ```sh
