@@ -7,22 +7,22 @@ Services under test run against real infrastructure (PostgreSQL, Redis) while ex
 ## Installation
 
 ```bash
-npm install --save-dev @bearingsoftware/component-test-framework @cucumber/cucumber typescript ts-node @types/node
+npm install --save-dev @bearingsoftware/component-test-framework @cucumber/cucumber typescript@5 ts-node @types/node
 ```
 
 Playwright (`@playwright/test`) is optional -- only needed if you use the `@ui` tagged features. It is loaded when the first `@ui` scenario starts, so suites without UI scenarios don't need it installed to run. The published type declarations still reference Playwright's types, so type-checking with `skipLibCheck: false` needs it installed.
 
 ## Quick start
 
-With Docker running, in an empty directory with a `package.json` and the packages above installed:
+With Docker running, in a project with a `package.json` and the packages above installed:
 
 ```bash
 npx ctf init                # writes cucumber.js, support/, features/, docker-compose.yml, .env.example
-docker compose up -d        # WireMock, on port 8443
+docker compose up -d --wait # WireMock, on port 8443
 npx cucumber-js
 ```
 
-`ctf init` takes `--with wiremock,postgres,redis,mailpit,spa` to add services (the default is `wiremock`) and `--force` to overwrite files. The scenario it writes stubs an endpoint on WireMock, calls it through an operation in `support/operation-map.ts`, and checks the response:
+`ctf init` takes `--with wiremock,postgres,redis,mailpit,spa` to add services (the default is `wiremock`) and `--force` to overwrite files. It prints the packages it needs, such as `@cucumber/cucumber ts-node typescript@5 @types/node`. The scenario it writes stubs an endpoint on WireMock, calls it through an operation in `support/operation-map.ts`, and checks the response:
 
 ```gherkin
 Scenario: A stubbed endpoint answers
@@ -35,17 +35,30 @@ Scenario: A stubbed endpoint answers
 `support/setup.ts` wires the framework in, with `/core` and one `register…Steps()` call per group of steps the suite uses:
 
 ```typescript
-import { loadConfig, registerHooks, registerApiSteps, registerResponseSteps } from '@bearingsoftware/component-test-framework/core'
+import {
+  loadConfig,
+  registerHooks,
+  registerApiSteps,
+  registerResponseSteps,
+} from '@bearingsoftware/component-test-framework/core'
 import { registerWiremockSteps } from '@bearingsoftware/component-test-framework/wiremock'
 import { operationMap } from './operation-map'
+
+const config = loadConfig()
+
+registerHooks({
+  ...config,
+  operationMap,
+  // WireMock stands in for the API under test. Set API_BASE_URL to use your own.
+  apiBaseUrl: process.env.API_BASE_URL ?? config.wiremockUrl,
+})
 
 registerApiSteps()
 registerResponseSteps()
 registerWiremockSteps()
-registerHooks({ ...loadConfig(), operationMap })
 ```
 
-Point `API_BASE_URL` at your own service, add its operations to the map, and replace the example. Copy `.env.example` to `.env` or export its variables to change ports and URLs.
+Point `API_BASE_URL` at your own service, add its operations to the map, and replace the example. To change ports, copy `.env.example` to `.env`: `docker compose` reads its `*_PORT` values, and the generated `cucumber.js` loads the rest (a variable already set in your environment wins).
 
 ## Where next
 

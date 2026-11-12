@@ -8,7 +8,7 @@ import { generateOperationMap } from './openapi/generate'
 import { checkOperationMaps, readAllowlist, type CheckPair } from './openapi/check'
 import { auditCoverage, findFeatureFiles, DEFAULT_REFERENCE_PATTERNS } from './openapi/audit'
 import { readOperationMap } from './openapi/map-file'
-import { initProject, PIECES, type Piece } from './cli/init'
+import { initProject, nextSteps, PIECES, type Piece } from './cli/init'
 
 const HELP = `Usage: ctf <command> [options]
 
@@ -90,9 +90,7 @@ function init(args: string[]): number {
   for (const file of initProject(dir, names as Piece[], values.force ?? false)) {
     console.log(`wrote ${path.join(dir, file)}`)
   }
-  console.log(
-    `\nNext:${dir === '.' ? '' : `\n  cd ${dir}`}\n  docker compose up -d\n  npx cucumber-js`,
-  )
+  console.log(nextSteps(dir, names as Piece[]))
   return 0
 }
 

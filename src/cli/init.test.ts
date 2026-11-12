@@ -34,6 +34,7 @@ const BASE = [
   'features/example.feature',
   'support/operation-map.ts',
   'support/setup.ts',
+  'tsconfig.json',
 ]
 
 const IMAGES: Record<Exclude<Piece, 'spa'>, string> = {
@@ -167,4 +168,73 @@ describe('ctf init', () => {
       expect(diagnostics).toEqual([])
     },
   )
+})
+
+describe('ctf init output details', () => {
+  it('lists services in a fixed order whatever order --with gives', () => {
+    main(['init', dir, '--with', 'mailpit,redis,postgres,wiremock'])
+    const compose = read('docker-compose.yml')
+    const at = (name: string) => compose.indexOf(`  ${name}:\n`)
+    expect([at('wiremock'), at('postgres'), at('redis'), at('mailpit')]).toEqual(
+      [at('wiremock'), at('postgres'), at('redis'), at('mailpit')].sort((a, b) => a - b),
+    )
+    expect(at('wiremock')).toBeGreaterThanOrEqual(0)
+    const setup = read('support/setup.ts')
+    const calls = [
+      'registerWiremockSteps()',
+      'registerDbSteps()',
+      'registerRedisSteps()',
+      'registerMailpitSteps()',
+    ]
+    const positions = calls.map((c) => setup.indexOf(c))
+    expect(positions).toEqual([...positions].sort((a, b) => a - b))
+    expect(positions.every((p) => p >= 0)).toBe(true)
+  })
+
+  it('gives every compose service a healthcheck and the ports .env.example names', () => {
+    main(['init', dir, '--with', 'wiremock,postgres,redis,mailpit'])
+    const compose = read('docker-compose.yml')
+    expect(compose.match(/healthcheck:/g)).toHaveLength(4)
+    const env = read('.env.example')
+    for (const port of [
+      'WIREMOCK_PORT',
+      'POSTGRES_PORT',
+      'REDIS_PORT',
+      'MAILPIT_PORT',
+      'MAILPIT_SMTP_PORT',
+    ]) {
+      expect(compose).toContain(`\${${port}:-`)
+      expect(env).toContain(`${port}=`)
+    }
+  })
+
+  it('prints the install command for the chosen pieces, with --wait', () => {
+    main(['init', dir])
+    let out = vi.mocked(console.log).mock.calls.flat().join('\n')
+    expect(out).toContain(
+      'npm install --save-dev @cucumber/cucumber ts-node typescript@5 @types/node\n',
+    )
+    expect(out).toContain('docker compose up -d --wait')
+    expect(out).not.toContain('playwright')
+
+    vi.mocked(console.log).mockClear()
+    main(['init', dir, '--force', '--with', 'spa'])
+    out = vi.mocked(console.log).mock.calls.flat().join('\n')
+    expect(out).toContain('@types/node @playwright/test')
+    expect(out).toContain('npx playwright install chromium')
+  })
+
+  it('loads .env in the generated cucumber.js only when it exists', () => {
+    main(['init', dir])
+    expect(read('cucumber.js')).toContain('process.loadEnvFile(envFile)')
+    expect(read('cucumber.js')).toContain('fs.existsSync(envFile)')
+  })
+
+  it("matches the setup.ts shown in the README's quick start", () => {
+    main(['init', dir])
+    const readme = fs.readFileSync(path.join(REPO, 'README.md'), 'utf-8')
+    const quick = readme.slice(readme.indexOf('## Quick start'))
+    const snippet = /```typescript\n([\s\S]*?)```/.exec(quick)?.[1]
+    expect(snippet).toBe(read('support/setup.ts'))
+  })
 })

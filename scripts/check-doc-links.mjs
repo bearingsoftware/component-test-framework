@@ -1,4 +1,4 @@
-// Fails on a broken relative link or #anchor in README.md and docs/**.
+// Fails on a broken relative link or #anchor in README.md, docs/** and examples/**.
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
@@ -7,7 +7,11 @@ const root = path.resolve(import.meta.dirname, '..')
 function markdownFiles(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const full = path.join(dir, e.name)
-    return e.isDirectory() ? markdownFiles(full) : e.name.endsWith('.md') ? [full] : []
+    return e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules'
+      ? markdownFiles(full)
+      : e.name.endsWith('.md')
+        ? [full]
+        : []
   })
 }
 
@@ -50,7 +54,11 @@ function anchors(file) {
   return anchorCache.get(file)
 }
 
-const files = [path.join(root, 'README.md'), ...markdownFiles(path.join(root, 'docs'))]
+const files = [
+  path.join(root, 'README.md'),
+  ...markdownFiles(path.join(root, 'docs')),
+  ...markdownFiles(path.join(root, 'examples')),
+]
 const problems = []
 for (const file of files) {
   const rel = path.relative(root, file)

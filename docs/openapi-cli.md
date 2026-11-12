@@ -74,11 +74,11 @@ The same functions are exported from `@bearingsoftware/component-test-framework/
 npx ctf init [dir] [--with wiremock,postgres,redis,mailpit,spa] [--force]
 ```
 
-Writes a starter suite into `dir` (default `.`): `cucumber.js` (from `cucumberPreset()`), `support/setup.ts` (`/core` and the adapters' `register…Steps()` calls), `support/operation-map.ts`, `features/example.feature` (one scenario that passes against the compose file), `docker-compose.yml` with only the chosen services, and `.env.example`. `--with` defaults to `wiremock`; `spa` also adds WireMock, and a `web/` page and page object for the SPA server to serve. It refuses to overwrite an existing file, naming it, unless you pass `--force`. Then:
+Writes a starter suite into `dir` (default `.`): `cucumber.js` (from `cucumberPreset()`), `support/setup.ts` (`/core` and the adapters' `register…Steps()` calls), `support/operation-map.ts`, `features/example.feature` (one scenario that passes against the compose file), `docker-compose.yml` with only the chosen services, `.env.example` and a `tsconfig.json` (CommonJS output, which ts-node needs on a current Node). `--with` defaults to `wiremock`; `spa` also adds WireMock, and a `web/` page and page object for the SPA server to serve. It refuses to overwrite an existing file, naming it, unless you pass `--force`. Every compose service has a healthcheck, so `--wait` returns once they're ready. The generated `cucumber.js` loads `.env` when it exists, and `.env.example` holds the compose ports (`WIREMOCK_PORT`, ...) beside the URLs built from them. `ctf init` prints the install command for the pieces you chose, adding `@playwright/test` and `npx playwright install chromium` for `spa`. Then:
 
 ```sh
-docker compose up -d
+docker compose up -d --wait
 npx cucumber-js
 ```
 
-The images are the ones this repository's CI uses: `wiremock/wiremock:3.13.2`, `postgres:17-alpine`, `redis:7-alpine` and `axllent/mailpit:v1.33`. The generated suite needs `@cucumber/cucumber`, `typescript`, `ts-node` and `@types/node` installed. The exit status is 0, or 2 for a usage mistake or a file it won't overwrite.
+The images are the ones this repository's CI uses: `wiremock/wiremock:3.13.2`, `postgres:17-alpine`, `redis:7-alpine` and `axllent/mailpit:v1.33`. The generated suite needs `@cucumber/cucumber`, `typescript` 5 (ts-node does not run on TypeScript 7), `ts-node` and `@types/node` installed. The exit status is 0, or 2 for a usage mistake or a file it won't overwrite.

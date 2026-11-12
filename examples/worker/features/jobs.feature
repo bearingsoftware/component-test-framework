@@ -9,3 +9,4 @@ Feature: Job worker
   Scenario: A job that fails is recorded as failed
     When I publish "{\"id\":\"43\",\"fail\":true}" to Valkey channel "jobs"
     Then the worker_jobs table contains 1 row matching "job_id = '43' AND status = 'failed'"
+    And the Valkey key "job:43" eventually contains JSON matching "{\"status\":\"failed\"}"

@@ -15,9 +15,29 @@ export function normalisePieces(pieces: Piece[]): Piece[] {
   return PIECES.filter((p) => wanted.has(p))
 }
 
-const CUCUMBER_JS = `const { cucumberPreset } = require('${PKG}/preset')
+const CUCUMBER_JS = `const fs = require('fs')
+const path = require('path')
+const { cucumberPreset } = require('${PKG}/preset')
+
+// Variables already in the environment win over .env (Node 20.12 and later).
+const envFile = path.join(__dirname, '.env')
+if (fs.existsSync(envFile) && typeof process.loadEnvFile === 'function') process.loadEnvFile(envFile)
 
 module.exports = { default: cucumberPreset() }
+`
+
+// ts-node's defaults on a current Node leave import statements in the output,
+// which Node then loads as ES modules and can't resolve extensionless paths.
+const TSCONFIG = `{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  }
+}
 `
 
 const OPERATION_MAP = `import type { OperationMap } from '${PKG}/core'
@@ -142,6 +162,11 @@ const SERVICES: Record<Exclude<Piece, 'spa'>, string> = {
     image: wiremock/wiremock:3.13.2
     ports:
       - "\${WIREMOCK_PORT:-8443}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/__admin/health || exit 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
 `,
   postgres: `  postgres:
     image: postgres:17-alpine
@@ -149,17 +174,32 @@ const SERVICES: Record<Exclude<Piece, 'spa'>, string> = {
       POSTGRES_PASSWORD: postgres
     ports:
       - "\${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
 `,
   redis: `  redis:
     image: redis:7-alpine
     ports:
       - "\${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
 `,
   mailpit: `  mailpit:
     image: axllent/mailpit:v1.33
     ports:
       - "\${MAILPIT_PORT:-8025}:8025"
       - "\${MAILPIT_SMTP_PORT:-1025}:1025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
 `,
 }
 
@@ -171,15 +211,24 @@ function dockerCompose(pieces: Piece[]): string {
 }
 
 function envExample(pieces: Piece[]): string {
-  const lines: string[] = []
+  const lines: string[] = [
+    '# docker compose reads the *_PORT values; cucumber.js loads the rest.',
+    '# The URLs below are built from the same ports.',
+  ]
   if (pieces.includes('wiremock')) {
-    lines.push('WIREMOCK_URL=http://localhost:8443', '# API_BASE_URL=http://localhost:8080')
+    lines.push('WIREMOCK_PORT=8443', 'WIREMOCK_URL=http://localhost:8443')
+    lines.push('# API_BASE_URL=http://localhost:8080')
   }
   if (pieces.includes('postgres')) {
-    lines.push('DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres')
+    lines.push(
+      'POSTGRES_PORT=5432',
+      'DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres',
+    )
   }
-  if (pieces.includes('redis')) lines.push('REDIS_URL=redis://localhost:6379')
-  if (pieces.includes('mailpit')) lines.push('MAILPIT_URL=http://localhost:8025')
+  if (pieces.includes('redis')) lines.push('REDIS_PORT=6379', 'REDIS_URL=redis://localhost:6379')
+  if (pieces.includes('mailpit')) {
+    lines.push('MAILPIT_PORT=8025', 'MAILPIT_SMTP_PORT=1025', 'MAILPIT_URL=http://localhost:8025')
+  }
   if (pieces.includes('spa')) lines.push('WEB_PORT=3100')
   return `${lines.join('\n')}\n`
 }
@@ -209,6 +258,7 @@ const WEB_INDEX = `<!doctype html>
 export function templates(pieces: Piece[]): Record<string, string> {
   const files: Record<string, string> = {
     'cucumber.js': CUCUMBER_JS,
+    'tsconfig.json': TSCONFIG,
     'support/setup.ts': setupTs(pieces),
     'support/operation-map.ts': OPERATION_MAP,
     'features/example.feature': exampleFeature(pieces),
@@ -240,4 +290,20 @@ export function initProject(dir: string, pieces: Piece[], force: boolean): strin
     fs.writeFileSync(target, files[name])
   }
   return names
+}
+
+/** What to run after `ctf init`, for what these pieces need. */
+export function nextSteps(dir: string, pieces: Piece[]): string {
+  const chosen = normalisePieces(pieces)
+  const spa = chosen.includes('spa')
+  const packages = ['@cucumber/cucumber', 'ts-node', 'typescript@5', '@types/node']
+  if (spa) packages.push('@playwright/test')
+  const steps = [
+    ...(dir === '.' ? [] : [`cd ${dir}`]),
+    `npm install --save-dev ${packages.join(' ')}`,
+    ...(spa ? ['npx playwright install chromium'] : []),
+    'docker compose up -d --wait',
+    'npx cucumber-js',
+  ]
+  return `\nNext:\n${steps.map((l) => `  ${l}`).join('\n')}`
 }
