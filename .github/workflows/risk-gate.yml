@@ -13,9 +13,11 @@ jobs:
       contents: read
       pull-requests: write
       checks: write
-    uses: bearingsoftware/risk-gate/.github/workflows/risk-gate.yml@7e93cad7ec0e519e4300e9a0d4111ada51ce4901 # main
+      packages: read   # FINCH-549: install the pinned ctf for evidence (compute)
+      actions: read    # FINCH-549: read the CI run and its ctf-evidence artifact
+    uses: bearingsoftware/risk-gate/.github/workflows/risk-gate.yml@21169ece377a54b2b8f9e27722ef2f8b6b5df81f # main
     with:
-      risk-gate-ref: 7e93cad7ec0e519e4300e9a0d4111ada51ce4901
+      risk-gate-ref: 21169ece377a54b2b8f9e27722ef2f8b6b5df81f
       runs-on: '["ubuntu-latest"]'
     secrets:
       anthropic-api-key: ${{ secrets.RISK_GATE_ANTHROPIC_API_KEY }}
