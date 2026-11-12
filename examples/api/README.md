@@ -12,3 +12,5 @@ npm run examples:test
 ```
 
 It reads `WIREMOCK_URL`, `DATABASE_URL` and `EXAMPLE_API_PORT`. The support code is JavaScript so it runs with no TypeScript setup; for the TypeScript version of a suite, use `ctf init` ([docs](../../docs/openapi-cli.md#scaffolding-a-suite-ctf-init)).
+
+`openapi.yaml` describes the service; `ctf evidence --base origin/main --spec examples/api/openapi.yaml --features examples/api/features --out evidence` ([docs](../../docs/evidence.md)) computes its test evidence.
