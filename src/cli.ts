@@ -57,6 +57,7 @@ Commands:
                                   match the spec
       --allowlist <file>            Known gaps, one mapping file name per line;
                                     an entry that matches nothing fails as stale
+      --templated                   WireMock templates every response: skip bodies with {{
       --json                        Print the result as JSON
 
 Exit status: 0 when all is well, 1 when a check finds problems (or the audit
@@ -267,6 +268,7 @@ function stubs(args: string[]): number {
       force: { type: 'boolean' },
       allowlist: { type: 'string' },
       json: { type: 'boolean' },
+      templated: { type: 'boolean' },
       'base-path': { type: 'string' },
     },
   })
@@ -279,6 +281,7 @@ function stubs(args: string[]): number {
     const result = checkStubs(spec, dir, {
       basePath,
       allowlist: values.allowlist ? readAllowlist(values.allowlist) : undefined,
+      templated: values.templated,
     })
     if (values.json) {
       console.log(JSON.stringify(result, null, 2))
@@ -301,8 +304,9 @@ function stubs(args: string[]): number {
     return 0
   }
 
-  if (values.allowlist || values.json)
-    throw new UsageError('--allowlist and --json are for --check')
+  if (values.allowlist || values.json || values.templated) {
+    throw new UsageError('--allowlist, --json and --templated are for --check')
+  }
   const [spec] = positionals
   if (!spec || positionals.length > 1) throw new UsageError('stubs takes one spec')
   if (!values.out) throw new UsageError('stubs needs --out <dir>')

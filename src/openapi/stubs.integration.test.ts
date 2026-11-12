@@ -86,6 +86,39 @@ describe.skipIf(!url)('ctf stubs against WireMock (COMPONENT-26)', () => {
     await load()
   })
 
+  it('loses to a hand-written stub at the default priority, even on a deep path', async () => {
+    const spec = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ctf-stubs-it-')), 'deep.yaml')
+    fs.writeFileSync(
+      spec,
+      `openapi: 3.0.3
+paths:
+  /a/b/c/d/{id}:
+    get:
+      operationId: deep
+      responses:
+        '200':
+          description: ok
+          content: { application/json: { schema: { type: object }, example: { from: spec } } }
+`,
+    )
+    const [{ mapping }] = generateStubs(spec).mappings
+    const mine = {
+      request: { method: 'GET', urlPath: '/a/b/c/d/1' },
+      response: { status: 200, jsonBody: { from: 'mine' } },
+    }
+    for (const order of [
+      [mapping, mine],
+      [mine, mapping],
+    ]) {
+      await client.resetAll()
+      await client.importStubs(order as Record<string, unknown>[])
+      expect(await (await call('GET', '/a/b/c/d/1')).json()).toEqual({ from: 'mine' })
+      expect(await (await call('GET', '/a/b/c/d/2')).json()).toEqual({ from: 'spec' })
+    }
+    await client.resetAll()
+    await load()
+  })
+
   it('keeps the lower-priority status stubs from shadowing the 2xx', async () => {
     expect((await call('GET', '/api/pets/9')).status).toBe(200)
   })

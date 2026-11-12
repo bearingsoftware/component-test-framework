@@ -1,13 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { createHash } from 'crypto'
-import {
-  findOperation,
-  loadSpecDetail,
-  type DetailedOperation,
-  type Located,
-  type SpecResponse,
-} from './spec'
+import { findOperation, loadSpecDetail, type DetailedOperation, type SpecResponse } from './spec'
 import { namedOperations } from './generate'
 import { validateSchema } from './schema'
 import type { Problem } from './check'
@@ -137,9 +131,10 @@ function stubFor(
     else return `the example for ${response.mediaType} isn't a string`
   }
   // WireMock tries the lowest number first: a path with more fixed segments
-  // (`/pets/mine`) goes before `/pets/{id}`, and both before the error stubs.
+  // (`/pets/mine`) goes before `/pets/{id}`, and both before the error stubs (10).
+  // They stay above 5, WireMock's default, so a stub a scenario adds without a priority wins.
   const priority = isPrimary
-    ? Math.max(1, LOWER_PRIORITY - 1 - literalSegments(op.path))
+    ? LOWER_PRIORITY - 1 - Math.min(3, literalSegments(op.path))
     : LOWER_PRIORITY
   return {
     name: isPrimary ? op.name : `${op.name} ${response.status}`,
@@ -159,6 +154,8 @@ export interface CheckStubsOptions {
    * reported. An entry that no longer matches a problem is reported as stale.
    */
   allowlist?: Iterable<string>
+  /** WireMock runs with global response templating: a body with `{{` isn't checked. */
+  templated?: boolean
 }
 
 /** What {@link checkStubs} found. `key` in each problem is the mapping's file name. */
@@ -287,7 +284,7 @@ export function checkStubs(
           message: `was generated from another version of ${specFile}: regenerate it with ctf stubs`,
         })
       }
-      checkMapping(mapping, operations, resolve, add)
+      checkMapping(mapping, operations, resolve, add, options.templated ?? false)
     }
   }
 
@@ -311,6 +308,7 @@ function checkMapping(
   operations: DetailedOperation[],
   resolve: Parameters<typeof validateSchema>[2],
   add: (message: string) => void,
+  templated: boolean,
 ): void {
   const found = operationOf(asObject(mapping.request), operations)
   if ('problem' in found) return add(found.problem)
@@ -325,8 +323,9 @@ function checkMapping(
   const responses = ops.flatMap((op) => documented(op, status) ?? [])
   if (responses.length === 0) return add(`${describe(ops)} doesn't document a ${status} response`)
   const label = describe(ops.filter((op) => documented(op, status)))
-  // With no schema, a response takes any body.
-  if (responses.some((r) => !r.schema)) return
+  // A response without a schema puts no limit on the body, but it can't excuse a body that is wrong for another.
+  const schemas = responses.flatMap((r) => r.schema ?? [])
+  if (schemas.length === 0) return
 
   let body: unknown
   if (reply.jsonBody !== undefined) body = reply.jsonBody
@@ -339,10 +338,14 @@ function checkMapping(
   } else return
   // A body that goes through response templating isn't the final one.
   if (asArray(reply.transformers).includes('response-template')) return
+  if (templated && JSON.stringify(body).includes('{{')) return
 
-  const attempts = responses.map((r) => validateSchema(body, r.schema as Located, resolve))
-  if (attempts.some((errors) => errors.length === 0)) return
-  for (const error of attempts[0]) {
+  // The body must fit every operation that documents the status.
+  const failed = schemas
+    .map((schema) => validateSchema(body, schema, resolve))
+    .find((errors) => errors.length > 0)
+  if (!failed) return
+  for (const error of failed) {
     add(
       `the ${status} response of ${label} has a body that doesn't fit its schema, at ${error.pointer || '(the body)'}: ${error.message}`,
     )

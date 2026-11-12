@@ -34,6 +34,17 @@ function writeMappings(files: Record<string, object | string>): string {
 
 const json = { 'Content-Type': 'application/json' }
 
+const DEEP_SPEC = `openapi: 3.0.3
+paths:
+  /a/b/c/d/{id}:
+    get:
+      operationId: deep
+      responses:
+        '200':
+          description: ok
+          content: { application/json: { schema: { type: object }, example: { from: spec } } }
+`
+
 describe('generateStubs', () => {
   it('writes the lowest 2xx of each operation, from its example, and lists what it skipped', () => {
     const { mappings, skipped } = generateStubs(pets)
@@ -233,7 +244,17 @@ paths:
       ]),
     )
     expect(priorities['mappings/getMine.json']).toBeLessThan(priorities['mappings/getPet.json'])
-    expect(Math.max(...Object.values(priorities))).toBeLessThan(10)
+    for (const p of Object.values(priorities)) {
+      expect(p).toBeGreaterThanOrEqual(6)
+      expect(p).toBeLessThanOrEqual(9)
+    }
+  })
+
+  it('keeps priorities in 6-9 for a deep path too', () => {
+    const spec = path.join(tmpDir(), 'deep.yaml')
+    fs.writeFileSync(spec, DEEP_SPEC)
+    const { mappings } = generateStubs(spec)
+    expect(mappings.map((m) => (m.mapping as { priority: number }).priority)).toEqual([6])
   })
 
   it('warns, and still writes the stub, when an example does not fit its schema', () => {
@@ -541,6 +562,9 @@ paths:
         '201':
           description: ok
           content: { application/json: { schema: { type: object }, example: {} } }
+    delete:
+      operationId: remove
+      responses: { '200': { description: ok } }
   /pets/{id}:
     get:
       operationId: one
@@ -566,11 +590,22 @@ paths:
     expect(checkStubs(spec, mappings).problems.map((p) => [p.key, p.message])).toEqual([
       [
         'neither-body.json',
-        "the 200 response of GET /pets has a body that doesn't fit its schema, at (the body): expected array, got object",
+        "the 200 response of GET|DELETE /pets has a body that doesn't fit its schema, at (the body): expected array, got object",
       ],
-      ['neither-status.json', "GET|POST /pets doesn't document a 404 response"],
+      ['neither-status.json', "GET|POST|DELETE /pets doesn't document a 404 response"],
       ['split.json', 'unresolved: ANY /pets/mine matches 2 operations at different paths'],
     ])
+  })
+
+  it('skips a body with {{ only when told WireMock templates every response', () => {
+    const dir = writeMappings({
+      't.json': {
+        request: { method: 'GET', url: '/api/pets/1' },
+        response: { status: 200, jsonBody: { id: '{{randomInt}}', name: 'a' } },
+      },
+    })
+    expect(checkStubs(pets, dir).problems).toHaveLength(1)
+    expect(checkStubs(pets, dir, { templated: true }).problems).toEqual([])
   })
 
   it('takes an allowlist by file name, and reports an entry that matches nothing as stale', () => {
@@ -690,6 +725,18 @@ describe('ctf stubs', () => {
     expect(run(['stubs', '--check', pets]).code).toBe(2)
     expect(run(['stubs', pets]).code).toBe(2)
     expect(run(['stubs', pets, '--out', dir, '--allowlist', allow]).code).toBe(2)
+  })
+
+  it('--templated is for --check', () => {
+    const dir = writeMappings({
+      't.json': {
+        request: { method: 'GET', url: '/api/pets/1' },
+        response: { status: 200, jsonBody: { id: '{{randomInt}}', name: 'a' } },
+      },
+    })
+    expect(run(['stubs', '--check', pets, dir]).code).toBe(1)
+    expect(run(['stubs', '--check', pets, dir, '--templated']).code).toBe(0)
+    expect(run(['stubs', pets, '--out', tmpDir(), '--templated']).code).toBe(2)
   })
 
   it('--check --json prints the result, and warns without failing', () => {
