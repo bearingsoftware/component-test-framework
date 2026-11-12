@@ -19,6 +19,8 @@ const BREAKING_FIXTURES = [
   'response-property-type-changed',
   'response-enum-added',
   'media-type-removed',
+  'request-body-removed',
+  'request-property-removed',
 ]
 const NON_BREAKING_FIXTURES = [
   'operation-added',
@@ -271,7 +273,7 @@ describe('diffSpecs direction and type rules', () => {
       "  /pets:\n    post:\n      responses:\n        '201': { description: created }\n",
     )
     expect(ruleNames(diffYaml(body('              type: object\n'), none).breaking)).toEqual([
-      'request-property-type-changed',
+      'request-body-removed',
     ])
   })
 })
@@ -478,5 +480,125 @@ describe('ctf api-diff', () => {
 
   it('needs exactly two specs', () => {
     expect(quiet(() => main(['api-diff', fixture('no-change', 'base')]))).toBe(2)
+  })
+})
+
+describe('review fixes', () => {
+  const bodySpec = (schema: string, media = 'application/json') =>
+    spec(
+      `  /pets:\n    post:\n      requestBody:\n        content:\n          '${media}':\n            schema:\n${schema}      responses:\n        '201': { description: created }\n`,
+    )
+  const responseSpec = (media: string, schema = '{ type: string }') =>
+    spec(
+      `  /pets/{id}:\n    get:\n      responses:\n        '200':\n          description: ok\n          content:\n            '${media}':\n              schema: ${schema}\n`,
+    )
+  const withProps = (names: string[], closed = false) =>
+    bodySpec(
+      `              type: object\n${closed ? '              additionalProperties: false\n' : ''}              properties:\n${names.map((n) => `                ${n}: { type: string }\n`).join('')}`,
+    )
+  const emptySchemaBody = spec(
+    "  /pets:\n    post:\n      requestBody:\n        content:\n          application/json:\n            schema: {}\n      responses:\n        '201': { description: created }\n",
+  )
+
+  it('reports a removed request property as non-breaking when the head is open', () => {
+    const diff = diffYaml(withProps(['name', 'tag']), withProps(['name']))
+    expect(diff.breaking).toEqual([])
+    expect(ruleNames(diff.nonBreaking)).toEqual(['request-property-removed'])
+  })
+
+  it('reports a removed request property as breaking when the head rejects unknown properties', () => {
+    const diff = diffYaml(withProps(['name', 'tag']), withProps(['name'], true))
+    expect(ruleNames(diff.breaking)).toEqual(['request-property-removed'])
+    expect(diff.breaking[0].location).toBe(
+      '/paths/~1pets/post/requestBody/content/application~1json/schema/properties/tag',
+    )
+  })
+
+  it('reports nothing for removed properties when the head schema is {}', () => {
+    expect(diffYaml(withProps(['name', 'tag']), emptySchemaBody)).toEqual({
+      breaking: [],
+      nonBreaking: [],
+    })
+  })
+
+  it('reports a request body that is removed as request-body-removed', () => {
+    const none = spec(
+      "  /pets:\n    post:\n      responses:\n        '201': { description: created }\n",
+    )
+    expect(ruleNames(diffYaml(bodySpec('              type: object\n'), none).breaking)).toEqual([
+      'request-body-removed',
+    ])
+  })
+
+  it('reports a new required entry that no property declares', () => {
+    expect(
+      ruleNames(
+        diffYaml(
+          bodySpec('              type: object\n'),
+          bodySpec('              type: object\n              required: [name]\n'),
+        ).breaking,
+      ),
+    ).toEqual(['request-body-required-added'])
+  })
+
+  it('counts x-nullable as nullable', () => {
+    const plain = responseSpec('application/json', '{ type: string }')
+    const xNullable = responseSpec('application/json', '{ type: string, x-nullable: true }')
+    expect(ruleNames(diffYaml(plain, xNullable).breaking)).toEqual([
+      'response-property-type-changed',
+    ])
+  })
+
+  it('compares media types without their parameters', () => {
+    const none = { breaking: [], nonBreaking: [] }
+    expect(
+      diffYaml(responseSpec('application/json; charset=utf-8'), responseSpec('application/json')),
+    ).toEqual(none)
+    expect(
+      diffYaml(
+        bodySpec('              type: object\n', 'application/json; charset=utf-8'),
+        bodySpec('              type: object\n'),
+      ),
+    ).toEqual(none)
+  })
+
+  it('treats a head wildcard as covering the base media type', () => {
+    const none = { breaking: [], nonBreaking: [] }
+    for (const wildcard of ['*/*', 'application/*']) {
+      expect(diffYaml(responseSpec('application/json'), responseSpec(wildcard))).toEqual(none)
+      expect(
+        diffYaml(
+          bodySpec('              type: object\n'),
+          bodySpec('              type: object\n', wildcard),
+        ),
+      ).toEqual(none)
+    }
+  })
+
+  it('reports a base media type that the head neither matches nor covers', () => {
+    expect(
+      ruleNames(diffYaml(responseSpec('application/json'), responseSpec('text/*')).breaking),
+    ).toEqual(['media-type-removed'])
+  })
+
+  it('compares the schema under the media type it matches with parameters stripped', () => {
+    expect(
+      ruleNames(
+        diffYaml(
+          responseSpec('application/json; charset=utf-8', '{ type: integer }'),
+          responseSpec('application/json', '{ type: string }'),
+        ).breaking,
+      ),
+    ).toEqual(['response-property-type-changed'])
+  })
+
+  it('removes an earlier out-flag file when the run cannot start', () => {
+    const flag = tmpFile('flag', 'true')
+    expect(
+      quiet(() =>
+        main(['api-diff', fixture('no-change', 'base'), '/no/such/head.yaml', '--out-flag', flag]),
+      ),
+    ).toBe(2)
+    expect(fs.existsSync(flag)).toBe(false)
   })
 })

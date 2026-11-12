@@ -13,6 +13,7 @@ const BREAKING_RULES = [
   'request-param-removed',
   'request-body-required-added',
   'request-property-type-changed',
+  'request-body-removed',
   'response-property-removed',
   'response-property-type-changed',
   'response-enum-added',
@@ -26,6 +27,7 @@ export type Rule =
   | 'optional-param-added'
   | 'response-property-added'
   | 'request-enum-added'
+  | 'request-property-removed'
   | 'description-changed'
 
 /** One difference. `location` is a JSON pointer into the spec, through the operation and not through `$ref`s. */
@@ -67,13 +69,18 @@ interface Ctx {
   inProgress: Set<string>
 }
 
-function record(out: DiffResult, finding: Finding) {
-  if ((BREAKING_RULES as readonly string[]).includes(finding.rule)) out.breaking.push(finding)
+function isBreaking(rule: Rule): boolean {
+  return (BREAKING_RULES as readonly string[]).includes(rule)
+}
+
+function record(out: DiffResult, finding: Finding, breaking = isBreaking(finding.rule)) {
+  if (breaking) out.breaking.push(finding)
   else out.nonBreaking.push(finding)
 }
 
-function emit(ctx: Ctx, rule: Rule, location: string, detail: string) {
-  record(ctx.out, { rule, operation: ctx.operation, location, detail })
+// `breaking` overrides the rule's bucket, for a rule that is breaking only in some specs.
+function emit(ctx: Ctx, rule: Rule, location: string, detail: string, breaking?: boolean) {
+  record(ctx.out, { rule, operation: ctx.operation, location, detail }, breaking)
 }
 
 function deref(loc: Located, resolve: RefResolver): Located {
@@ -102,6 +109,8 @@ function intersect(a: Set<string>, b: Set<string>): Set<string> {
 interface Shape {
   types?: Set<string>
   enum?: string[]
+  // additionalProperties: false, so a property not listed is rejected.
+  closed: boolean
   required: Set<string>
   properties: Map<string, Located>
   items?: Located
@@ -111,11 +120,12 @@ function typesOf(schema: Json): Set<string> | undefined {
   let types: Set<string> | undefined
   if (typeof schema.type === 'string') types = new Set([schema.type])
   else if (Array.isArray(schema.type)) types = new Set(schema.type.map(String))
-  if (types && schema.nullable === true) types.add('null')
+  if (types && (schema.nullable === true || schema['x-nullable'] === true)) types.add('null')
   return types
 }
 
 function mergeInto(into: Shape, part: Shape) {
+  if (part.closed) into.closed = true
   if (part.types) into.types = into.types ? intersect(into.types, part.types) : part.types
   const values = part.enum
   if (values) into.enum = into.enum ? into.enum.filter((v) => values.includes(v)) : values
@@ -133,7 +143,7 @@ function shapeOf(
   resolve: RefResolver,
   inProgress = new Set<Json>(),
 ): Shape {
-  const shape: Shape = { required: new Set(), properties: new Map() }
+  const shape: Shape = { closed: false, required: new Set(), properties: new Map() }
   if (!loc) return shape
   const at = deref(loc, resolve)
   const schema = at.value
@@ -141,6 +151,7 @@ function shapeOf(
   inProgress.add(schema)
 
   shape.types = typesOf(schema)
+  shape.closed = schema.additionalProperties === false
   if (Array.isArray(schema.enum)) shape.enum = schema.enum.map((v) => JSON.stringify(v))
   else if ('const' in schema) shape.enum = [JSON.stringify(schema.const)]
   if (isObject(schema.properties)) {
@@ -243,7 +254,7 @@ function compare(
     }
   }
 
-  const names = new Set([...bs.properties.keys(), ...hs.properties.keys()])
+  const names = new Set([...bs.properties.keys(), ...hs.properties.keys(), ...hs.required])
   for (const name of names) {
     const bp = bs.properties.get(name)
     const hp = hs.properties.get(name)
@@ -257,16 +268,26 @@ function compare(
       }
       compare(ctx, dir, bp, hp, child)
     } else if (bp) {
-      if (dir === 'request')
-        emit(ctx, 'request-property-type-changed', child, `${name} was removed`)
-      else emit(ctx, 'response-property-removed', child, `${name} was removed`)
+      if (dir === 'request') {
+        // A head that accepts anything (`{}`) takes the property's absence without complaint.
+        const acceptsAnything = !hs.types && hs.properties.size === 0 && !hs.closed
+        if (!acceptsAnything) {
+          // A client still sending the property only fails where the head rejects unknown ones.
+          emit(ctx, 'request-property-removed', child, `${name} was removed`, hs.closed)
+        }
+      } else {
+        emit(ctx, 'response-property-removed', child, `${name} was removed`)
+      }
     } else if (hp) {
       if (dir === 'request') {
-        if (hs.required.has(name))
+        if (hs.required.has(name)) {
           emit(ctx, 'request-body-required-added', child, `${name} was added as required`)
+        }
       } else {
         emit(ctx, 'response-property-added', child, `${name} was added`)
       }
+    } else if (dir === 'request' && hs.required.has(name) && !bs.required.has(name)) {
+      emit(ctx, 'request-body-required-added', child, `${name} is required but not declared`)
     }
   }
 
@@ -339,6 +360,24 @@ function compareParams(ctx: Ctx, base: Side, head: Side, bAt: string, hAt: strin
   }
 }
 
+// Media types compare on type/subtype, without parameters such as charset. A head wildcard
+// (`*/*` or `type/*`) covers the base type when there is no exact match.
+function mediaKey(mediaType: string): string {
+  return mediaType.split(';')[0].trim().toLowerCase()
+}
+
+function matchMedia(mediaType: string, head: Map<string, Located | undefined>): string | undefined {
+  const want = mediaKey(mediaType)
+  const keys = [...head.keys()]
+  const exact = keys.find((key) => mediaKey(key) === want)
+  if (exact !== undefined) return exact
+  const type = want.split('/')[0]
+  return keys.find((key) => {
+    const wild = mediaKey(key)
+    return wild === '*/*' || wild === `${type}/*`
+  })
+}
+
 interface Body {
   required: boolean
   content: Map<string, Located | undefined>
@@ -385,14 +424,15 @@ function compareBody(ctx: Ctx, base: Side, head: Side, bAt: string, hAt: string)
     return
   }
   if (!h) {
-    emit(ctx, 'request-property-type-changed', `${bAt}/requestBody`, 'request body was removed')
+    emit(ctx, 'request-body-removed', `${bAt}/requestBody`, 'request body was removed')
     return
   }
   if (!b.required && h.required) {
     emit(ctx, 'request-body-required-added', `${hAt}/requestBody`, 'request body is now required')
   }
   for (const [mediaType, schema] of b.content) {
-    if (!h.content.has(mediaType)) {
+    const match = matchMedia(mediaType, h.content)
+    if (match === undefined) {
       emit(
         ctx,
         'media-type-removed',
@@ -405,8 +445,8 @@ function compareBody(ctx: Ctx, base: Side, head: Side, bAt: string, hAt: string)
       ctx,
       'request',
       schema,
-      h.content.get(mediaType),
-      `${hAt}/requestBody/content/${esc(mediaType)}/schema`,
+      h.content.get(match),
+      `${hAt}/requestBody/content/${esc(match)}/schema`,
     )
   }
 }
@@ -443,7 +483,8 @@ function compareResponses(ctx: Ctx, base: Side, head: Side, bAt: string, hAt: st
     }
     const hContent = hResponses.get(matched) ?? new Map<string, Located | undefined>()
     for (const [mediaType, schema] of bContent) {
-      if (!hContent.has(mediaType)) {
+      const match = matchMedia(mediaType, hContent)
+      if (match === undefined) {
         emit(
           ctx,
           'media-type-removed',
@@ -456,8 +497,8 @@ function compareResponses(ctx: Ctx, base: Side, head: Side, bAt: string, hAt: st
         ctx,
         'response',
         schema,
-        hContent.get(mediaType),
-        `${hAt}/responses/${matched}/content/${esc(mediaType)}/schema`,
+        hContent.get(match),
+        `${hAt}/responses/${matched}/content/${esc(match)}/schema`,
       )
     }
   }

@@ -349,6 +349,8 @@ function apiDiff(args: string[]): number {
       'out-flag': { type: 'string' },
     },
   })
+  // A flag left by an earlier run must not be read as this run's answer.
+  if (values['out-flag']) fs.rmSync(values['out-flag'], { force: true })
   if (positionals.length !== 2) throw new UsageError('api-diff takes a base spec and a head spec')
   const [base, head] = positionals
 
