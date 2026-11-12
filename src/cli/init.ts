@@ -175,7 +175,7 @@ const SERVICES: Record<Exclude<Piece, 'spa'>, string> = {
     ports:
       - "\${POSTGRES_PORT:-5432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres"]
       interval: 2s
       timeout: 5s
       retries: 30
@@ -275,6 +275,8 @@ export function templates(pieces: Piece[]): Record<string, string> {
 /** Write the scaffold into `dir`. Throws, naming the files, when any exist and `force` isn't set. */
 export function initProject(dir: string, pieces: Piece[], force: boolean): string[] {
   const files = templates(normalisePieces(pieces))
+  // A project's own tsconfig is never replaced, even with --force.
+  if (fs.existsSync(path.join(dir, 'tsconfig.json'))) delete files['tsconfig.json']
   const names = Object.keys(files)
   if (!force) {
     const existing = names.filter((n) => fs.existsSync(path.join(dir, n)))

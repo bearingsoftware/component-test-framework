@@ -195,6 +195,14 @@ describe('ctf init output details', () => {
     main(['init', dir, '--with', 'wiremock,postgres,redis,mailpit'])
     const compose = read('docker-compose.yml')
     expect(compose.match(/healthcheck:/g)).toHaveLength(4)
+    for (const command of [
+      'curl -sf http://localhost:8080/__admin/health',
+      '"pg_isready -h 127.0.0.1 -U postgres"',
+      '["CMD", "redis-cli", "ping"]',
+      '["CMD", "/mailpit", "readyz"]',
+    ]) {
+      expect(compose).toContain(command)
+    }
     const env = read('.env.example')
     for (const port of [
       'WIREMOCK_PORT',
@@ -236,5 +244,17 @@ describe('ctf init output details', () => {
     const quick = readme.slice(readme.indexOf('## Quick start'))
     const snippet = /```typescript\n([\s\S]*?)```/.exec(quick)?.[1]
     expect(snippet).toBe(read('support/setup.ts'))
+  })
+
+  it('never replaces an existing tsconfig.json, with or without --force', () => {
+    fs.writeFileSync(path.join(dir, 'tsconfig.json'), '{ "mine": true }\n')
+    expect(main(['init', dir])).toBe(0)
+    expect(read('tsconfig.json')).toBe('{ "mine": true }\n')
+    const out = vi.mocked(console.log).mock.calls.flat().join('\n')
+    expect(out).toContain('Kept your tsconfig.json')
+    expect(out).toContain('esModuleInterop')
+    expect(main(['init', dir, '--force'])).toBe(0)
+    expect(read('tsconfig.json')).toBe('{ "mine": true }\n')
+    expect(read('cucumber.js')).toContain('cucumberPreset()')
   })
 })

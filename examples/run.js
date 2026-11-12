@@ -5,7 +5,8 @@
 // ts-node with type-checking on.
 //
 // Needs the built package (npm run build), Docker, and network access to
-// registry.npmjs.org for the temporary project's installs. The example
+// registry.npmjs.org, which the temporary project's installs use whatever
+// ~/.npmrc says. The example
 // suites read WIREMOCK_URL, DATABASE_URL, REDIS_URL and WEB_PORT as the other
 // suites do; the scaffold check picks free ports of its own.
 // EXAMPLES_COMPOSE_PROJECT names the scaffold's compose project.
@@ -99,6 +100,8 @@ async function main() {
       'npm',
       [
         'install',
+        '--registry',
+        'https://registry.npmjs.org/',
         '--no-audit',
         '--no-fund',
         tarball,

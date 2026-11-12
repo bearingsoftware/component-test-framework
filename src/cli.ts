@@ -87,8 +87,14 @@ function init(args: string[]): number {
     )
   }
   const dir = positionals[0] ?? '.'
+  const keptTsconfig = fs.existsSync(path.join(dir, 'tsconfig.json'))
   for (const file of initProject(dir, names as Piece[], values.force ?? false)) {
     console.log(`wrote ${path.join(dir, file)}`)
+  }
+  if (keptTsconfig) {
+    console.log(
+      `\nKept your tsconfig.json. ts-node needs "module": "commonjs", "moduleResolution": "node" and "esModuleInterop": true in it.`,
+    )
   }
   console.log(nextSteps(dir, names as Piece[]))
   return 0
