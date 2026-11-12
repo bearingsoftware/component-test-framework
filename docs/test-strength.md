@@ -30,6 +30,8 @@ A stub's key is its method and the first of `url`, `urlPath`, `urlPathTemplate`,
 
 GraphQL stubs share one URL, so they are selected by operation: `CTF_FAULT='GRAPHQL /v1/graphql/ account=status500'` is the endpoint and the operation name the stub matches by `operationName` (what `graphql.endpoint().query('account')` builds). Other stubs on that URL are untouched.
 
+A valid `CTF_FAULT` left set in a shell silently injects that fault into every run from that shell, so a suite can fail for no visible reason: `unset CTF_FAULT`. `ctf faults` sets and clears it for its own runs.
+
 A `CTF_FAULT` that isn't `<selector>=<fault>` throws when the client is created, naming the valid forms. With `CTF_FAULT` unset, the mappings posted to WireMock are the same as without this feature.
 
 ## What `ctf faults` does
@@ -37,6 +39,12 @@ A `CTF_FAULT` that isn't `<selector>=<fault>` throws when the client is created,
 1. **Baseline.** Runs `--run` once with `--format json:<file>` and `CTF_FAULT_HITS` set. The WireMock adapter records, after each scenario, which stubs WireMock actually served (from its request journal, so a stub registered but never requested isn't a hit). Scenarios that fail here are listed as `baselineFailing` and left out: a failing scenario can't notice anything.
 2. **Selection.** With `--scenarios evidence.json`, only stubs hit by scenarios `ctf evidence` lists as added or changed, or whose steps name a changed operation. Without it, every stub the baseline hit, up to `--max-runs`.
 3. **Per (stub, fault).** Re-runs only the passing scenarios that hit the stub, as `file:line` paths added to the command, with `CTF_FAULT` set. If any of them fails, the fault was noticed; if none does, it survived.
+
+A faulted run counts only if it says something. A failure is re-run once and is _noticed_ only if it repeats; one that doesn't is `flaky` and _inconclusive_, like a run that wrote no JSON report or ran no scenarios. Inconclusive pairs are listed with a reason and are neither noticed nor survived.
+
+The command exits 2, with a message, when the baseline ran 0 scenarios (a port clash, a failed hook), when every baseline scenario failed, or when it recorded no stub hits at all (`CTF_FAULT_HITS` wasn't honoured: the suite needs `wiremockUrl` and the framework's WireMock adapter). Scenarios are told apart by file and line, so Outline rows that share a name stay separate.
+
+`--max-runs` keeps pairs in this order: stubs hit by scenarios that `--scenarios` selected, then the most-hit stubs, then by name. `notRun` counts what it left.
 
 `--run` must be a command that runs Cucumber and accepts its arguments at the end. If they belong elsewhere, put `{args}` there. `--stubs "GET /pricing/prices/*,GRAPHQL /v1/graphql/ account"` injects those selectors instead of every stub found; a prefix covers every stub under it as one pair.
 
@@ -50,6 +58,7 @@ A `CTF_FAULT` that isn't `<selector>=<fault>` throws when the client is created,
   "faultsInjected": 3,
   "noticed": 2,
   "survived": [{ "stub": "GET /pricing/prices/*", "fault": "status500", "scenarios": ["..."] }],
+  "inconclusive": [],
   "tolerated": [],
   "baselineFailing": [],
   "runs": 4,
@@ -58,9 +67,9 @@ A `CTF_FAULT` that isn't `<selector>=<fault>` throws when the client is created,
 }
 ```
 
-`noticed / faultsInjected` is the headline; `survived` is the useful part. `runs` counts suite executions, the baseline included; `notRun` is the pairs `--max-runs` left out. `test-strength.md` is the same for a reader.
+`noticed / faultsInjected` is the headline (`faultsInjected` = noticed + survived + inconclusive); `survived` is the useful part. `runs` counts suite executions, the baseline included; `notRun` is the pairs `--max-runs` left out. `test-strength.md` is the same for a reader.
 
-Pass it to `ctf evidence --test-strength strength/test-strength.json` to embed it as `testStrength` in `evidence.json`, bounded to 200 entries per list and 50 scenarios per survivor, with `truncated: true` when it cut anything. It feeds none of the coverage or api-break files.
+Pass it to `ctf evidence --test-strength strength/test-strength.json` to embed it as `testStrength` in `evidence.json`, bounded to 200 entries per list, 50 scenarios per survivor and 200 characters per string, with `truncated: true` when it cut anything. It feeds none of the coverage or api-break files.
 
 ## The allowlist
 
@@ -70,7 +79,11 @@ A service that retries a 500 and succeeds is correct, but the fault survives. Li
 GET /pricing/prices/* status500   # the client retries
 ```
 
-`--allowlist origin/main:test-strength-tolerated.txt` reads the file from that ref with `git show`, never the working tree, so a pull request can't excuse its own survivors. A file absent at the ref means none. Tolerated pairs aren't run; they're listed under `tolerated`.
+`--allowlist origin/main:test-strength-tolerated.txt` reads the file from that ref with `git show`, never the working tree, so a pull request can't excuse its own survivors. A file absent at the ref means none, with a warning naming it. Tolerated pairs aren't run; they're listed under `tolerated`.
+
+## A weak signal: UI scenarios
+
+A browser scenario often "notices" a fault only by timing out. On `tests/parallel`, the 8 SPA scenarios under `status500` fail on a 10s `locator.waitFor` for the price element, not on an assertion about error handling: the error body leaves the page with no price. That is a failure, so the fault counts as noticed, but it shows the page broke, not that it handles the error. Read UI results with that in mind.
 
 ## Cost
 
