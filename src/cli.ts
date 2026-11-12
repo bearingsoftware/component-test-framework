@@ -92,7 +92,10 @@ Commands:
       --spec <path>                 An OpenAPI spec (repeatable, required)
       --features <dir|file>         Feature files to read (repeatable, required)
       --map <file>                  The suite's operation map
-      --allowlist <file>            api-diff allowlist: accepted breaks
+      --allowlist <file>            api-diff allowlist, read from the base
+      --exclude-tags <list>         Comma-separated tags whose scenarios don't count
+                                    (default @skip,@pending,@wip)
+      --base-path <path>            As for audit-coverage and api-diff
       --pattern <regex>             How features name an operation (as audit-coverage)
       --status-pattern <regex>      How features assert a status (as audit-coverage)
       --out <dir>                   Write coverage-base.txt, coverage-head.txt, api-break.txt
@@ -335,6 +338,7 @@ function evidence(args: string[]): number {
       features: { type: 'string', multiple: true },
       map: { type: 'string' },
       allowlist: { type: 'string' },
+      'exclude-tags': { type: 'string' },
       pattern: { type: 'string', multiple: true },
       'status-pattern': { type: 'string', multiple: true },
       out: { type: 'string' },
@@ -355,6 +359,10 @@ function evidence(args: string[]): number {
     map: values.map,
     basePath: values['base-path'],
     allowlist: values.allowlist,
+    excludeTags: values['exclude-tags']
+      ?.split(',')
+      .map((t) => t.trim())
+      .filter(Boolean),
     patterns: values.pattern?.map((p) => regex(p) as RegExp),
     statusPatterns: values['status-pattern']?.map((p) => regex(p) as RegExp),
     out: values.out,

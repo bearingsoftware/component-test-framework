@@ -25,8 +25,13 @@ export interface EvidenceOptions {
   features: string[]
   map?: string
   basePath?: string
-  /** An api-diff allowlist file, read from the head. */
+  /**
+   * An api-diff allowlist file. It is read from the base, never the head: a change
+   * can't accept its own breaks. One absent at base means no allowlist.
+   */
   allowlist?: string
+  /** Scenarios with any of these tags don't count. Default {@link DEFAULT_EXCLUDE_TAGS}. */
+  excludeTags?: string[]
   patterns?: RegExp[]
   statusPatterns?: RegExp[]
   /** Directory the four files are written to. */
@@ -34,6 +39,9 @@ export interface EvidenceOptions {
   /** Where to run git; default the working directory. */
   cwd?: string
 }
+
+/** Scenarios tagged with these are not counted as asserting anything. */
+export const DEFAULT_EXCLUDE_TAGS = ['@skip', '@pending', '@wip']
 
 /** Thrown when evidence can't be computed, as opposed to there being nothing to report. */
 export class EvidenceError extends Error {}
@@ -56,6 +64,10 @@ interface Scenario {
   steps: string
   /** Operation names its steps use. */
   names: Set<string>
+  tags: string[]
+  excluded: boolean
+  /** Heading lines, one per Scenario (an Outline has one). */
+  headings: number[]
 }
 
 interface Side {
@@ -89,20 +101,116 @@ function resolveRef(cwd: string, ref: string, role: string): string {
   }
 }
 
+const CHUNK = 32 << 20
+
+/**
+ * Write the files of a commit under `dir`, whatever .gitattributes says
+ * (`git archive` honours export-ignore). Contents come through `git cat-file
+ * --batch` in bounded chunks. Symlinks and submodules are skipped.
+ */
 function materialise(cwd: string, sha: string, dir: string) {
-  const archive = spawnSync('git', ['-C', cwd, 'archive', '--format=tar', sha], {
-    maxBuffer: 1 << 30,
+  const listing = spawnSync('git', ['-C', cwd, 'ls-tree', '-r', '-z', '-l', '--full-tree', sha], {
+    encoding: 'utf-8',
+    maxBuffer: 1 << 28,
   })
-  if (archive.status !== 0) {
-    throw new EvidenceError(`git archive ${sha} failed: ${archive.stderr?.toString().trim()}`)
+  if (listing.status !== 0) {
+    throw new EvidenceError(`git ls-tree ${sha} failed: ${listing.stderr?.trim()}`)
   }
-  const tar = spawnSync('tar', ['-x', '-C', dir], { input: archive.stdout })
-  if (tar.status !== 0) {
-    throw new EvidenceError(`could not unpack ${sha}: ${tar.stderr?.toString().trim()}`)
+  const entries: { sha: string; size: number; file: string }[] = []
+  for (const record of listing.stdout.split('\0')) {
+    const m = /^(\d+) blob\s+([0-9a-f]+)\s+(\d+)\t([\s\S]*)$/.exec(record)
+    if (!m || m[1] === '120000') continue
+    entries.push({ sha: m[2], size: Number(m[3]), file: m[4] })
+  }
+  const root = path.resolve(dir)
+  let chunk: typeof entries = []
+  let bytes = 0
+  const flush = () => {
+    if (chunk.length === 0) return
+    const out = spawnSync('git', ['-C', cwd, 'cat-file', '--batch'], {
+      input: `${chunk.map((e) => e.sha).join('\n')}\n`,
+      maxBuffer: bytes + chunk.length * 128 + (1 << 20),
+    })
+    if (out.status !== 0) {
+      throw new EvidenceError(`git cat-file failed: ${out.stderr?.toString().trim()}`)
+    }
+    let pos = 0
+    for (const entry of chunk) {
+      const eol = out.stdout.indexOf(0x0a, pos)
+      const size = Number(out.stdout.subarray(pos, eol).toString().split(' ')[2])
+      const target = path.resolve(root, entry.file)
+      if (target.startsWith(root + path.sep)) {
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        fs.writeFileSync(target, out.stdout.subarray(eol + 1, eol + 1 + size))
+      }
+      pos = eol + 1 + size + 1
+    }
+    chunk = []
+    bytes = 0
+  }
+  for (const entry of entries) {
+    if (bytes + entry.size > CHUNK) flush()
+    chunk.push(entry)
+    bytes += entry.size
+  }
+  flush()
+}
+
+function tagsAbove(lines: string[], index: number): string[] {
+  const tags: string[] = []
+  for (let i = index - 1; i >= 0; i--) {
+    const t = lines[i].trim()
+    if (t === '' || t.startsWith('#')) continue
+    if (!t.startsWith('@')) break
+    tags.unshift(...t.split(/\s+/).filter((x) => x.startsWith('@')))
+  }
+  return tags
+}
+
+function inheritedTags(lines: string[], heading: number): string[] {
+  const tags = tagsAbove(lines, heading)
+  const feature = lines.findIndex((l) => /^\s*Feature:/.test(l))
+  for (let i = heading - 1; i > feature && i >= 0; i--) {
+    if (/^\s*Rule:/.test(lines[i])) {
+      tags.push(...tagsAbove(lines, i))
+      break
+    }
+  }
+  if (feature >= 0 && feature < heading) tags.push(...tagsAbove(lines, feature))
+  return tags
+}
+
+const SECTION = /^(Feature|Rule|Background|Scenario Outline|Scenario Template|Scenario|Example):/
+
+/** The feature files, copied under `mirror` with excluded scenarios blanked, keeping line numbers. */
+function mirrorFeatures(root: string, scenarios: Scenario[], mirror: string) {
+  const byFile = new Map<string, number[]>()
+  for (const s of scenarios) {
+    if (s.excluded) byFile.set(s.file, [...(byFile.get(s.file) ?? []), ...s.headings])
+  }
+  return (file: string) => {
+    const rel = path.relative(root, file)
+    const lines = fs.readFileSync(file, 'utf-8').split('\n')
+    for (const heading of byFile.get(rel.split(path.sep).join('/')) ?? []) {
+      let i = heading - 1
+      lines[i++] = ''
+      while (i < lines.length) {
+        const t = lines[i].trim()
+        if (t.startsWith('@') || SECTION.test(t)) break
+        lines[i++] = ''
+      }
+    }
+    fs.mkdirSync(path.dirname(path.join(mirror, rel)), { recursive: true })
+    fs.writeFileSync(path.join(mirror, rel), lines.join('\n'))
   }
 }
 
-function scenariosOf(files: string[], root: string, patterns: RegExp[]): Scenario[] {
+function scenariosOf(
+  files: string[],
+  root: string,
+  patterns: RegExp[],
+  excludeTags: string[],
+): Scenario[] {
   const byKey = new Map<string, Scenario>()
   for (const file of files) {
     const text = fs.readFileSync(file, 'utf-8')
@@ -124,20 +232,55 @@ function scenariosOf(files: string[], root: string, patterns: RegExp[]): Scenari
     for (const [line, entry] of byLine) {
       const name = (lines[line - 1] ?? '').replace(/^\s*[^:]+:\s*/, '').trim()
       const key = `${rel}\u0000${name}`
+      const tags = inheritedTags(lines, line - 1)
+      const excluded = tags.some((t) => excludeTags.includes(t))
       const existing = byKey.get(key)
       if (existing) {
         existing.steps += `\n${entry.steps.join('\n')}`
         entry.names.forEach((n) => existing.names.add(n))
+        existing.tags = [...new Set([...existing.tags, ...tags])].sort()
+        existing.excluded &&= excluded
+        existing.headings.push(line)
       } else {
-        byKey.set(key, { file: rel, name, steps: entry.steps.join('\n'), names: entry.names })
+        byKey.set(key, {
+          file: rel,
+          name,
+          steps: entry.steps.join('\n'),
+          names: entry.names,
+          tags: [...new Set(tags)].sort(),
+          excluded,
+          headings: [line],
+        })
       }
     }
   }
   return [...byKey.values()]
 }
 
+interface Features {
+  scenarios: Scenario[]
+  /** Where the features are, with excluded scenarios blanked. */
+  mirror: string
+}
+
+function loadFeatures(
+  root: string,
+  mirror: string,
+  options: EvidenceOptions,
+  patterns: RegExp[],
+): Features {
+  const files = findFeatureFiles(
+    options.features.map((f) => path.join(root, f)).filter((f) => fs.existsSync(f)),
+  )
+  const scenarios = scenariosOf(files, root, patterns, options.excludeTags ?? DEFAULT_EXCLUDE_TAGS)
+  const copy = mirrorFeatures(root, scenarios, mirror)
+  for (const file of files) copy(file)
+  return { scenarios, mirror }
+}
+
 function loadSide(
   root: string,
+  features: Features,
   spec: string,
   options: EvidenceOptions,
   patterns: RegExp[],
@@ -150,7 +293,7 @@ function loadSide(
     : []
   const mapFile = options.map ? path.join(root, options.map) : undefined
   const featureRoots = options.features
-    .map((f) => path.join(root, f))
+    .map((f) => path.join(features.mirror, f))
     .filter((f) => fs.existsSync(f))
   const audit = auditCoverage({
     operations,
@@ -162,7 +305,9 @@ function loadSide(
   // Report files relative to the repo, as `file:line`.
   const rel = (where: string) => {
     const i = where.lastIndexOf(':')
-    return path.relative(root, where.slice(0, i)).split(path.sep).join('/') + where.slice(i)
+    return (
+      path.relative(features.mirror, where.slice(0, i)).split(path.sep).join('/') + where.slice(i)
+    )
   }
   for (const op of audit.operations) {
     op.unassertedReferences = op.unassertedReferences.map(rel)
@@ -185,6 +330,10 @@ function pairsOf(side: Side): Pairs {
  * to `options.out`, and returns the JSON.
  */
 export function collectEvidence(options: EvidenceOptions) {
+  // Output left by an earlier run must not be read as this run's answer.
+  for (const f of ['coverage-base.txt', 'coverage-head.txt', 'api-break.txt', 'evidence.json']) {
+    fs.rmSync(path.join(options.out, f), { force: true })
+  }
   if (options.specs.length === 0) throw new EvidenceError('evidence needs at least one --spec')
   if (options.features.length === 0) throw new EvidenceError('evidence needs --features')
   const cwd = options.cwd ?? process.cwd()
@@ -217,7 +366,7 @@ export function collectEvidence(options: EvidenceOptions) {
       fs.mkdirSync(headRoot)
       materialise(toplevel, headSha, headRoot)
     }
-    return compute(resolved, baseRoot, headRoot, baseSha, headSha ?? 'worktree')
+    return compute(resolved, tmp, baseRoot, headRoot, baseSha, headSha ?? 'worktree')
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true })
   }
@@ -225,6 +374,7 @@ export function collectEvidence(options: EvidenceOptions) {
 
 function compute(
   options: EvidenceOptions,
+  tmp: string,
   baseRoot: string,
   headRoot: string,
   baseSha: string,
@@ -232,14 +382,28 @@ function compute(
 ) {
   const patterns = options.patterns ?? DEFAULT_REFERENCE_PATTERNS
   const statusPatterns = options.statusPatterns ?? DEFAULT_STATUS_PATTERNS
-  const allowlist = options.allowlist
-    ? (() => {
-        const file = path.join(headRoot, options.allowlist)
-        if (!fs.existsSync(file))
-          throw new EvidenceError(`allowlist ${options.allowlist} not found`)
-        return readAllowlist(file)
-      })()
-    : []
+  const baseFeatures = loadFeatures(baseRoot, path.join(tmp, 'base-features'), options, patterns)
+  const headFeatures = loadFeatures(headRoot, path.join(tmp, 'head-features'), options, patterns)
+
+  // From the base: a change can't accept its own breaking changes.
+  let allowlist: string[] = []
+  let allowlistInfo:
+    { path: string; source: 'base'; entries: string[]; headDiffers: boolean } | undefined
+  if (options.allowlist) {
+    const baseFile = path.join(baseRoot, options.allowlist)
+    const headFile = path.join(headRoot, options.allowlist)
+    const atBase = fs.existsSync(baseFile)
+    const atHead = fs.existsSync(headFile)
+    if (!atBase && !atHead) throw new EvidenceError(`allowlist ${options.allowlist} not found`)
+    if (atBase) allowlist = readAllowlist(baseFile)
+    const text = (f: string, there: boolean) => (there ? fs.readFileSync(f, 'utf-8') : undefined)
+    allowlistInfo = {
+      path: options.allowlist,
+      source: 'base',
+      entries: allowlist,
+      headDiffers: text(baseFile, atBase) !== text(headFile, atHead),
+    }
+  }
 
   const total = { base: { asserted: 0, total: 0 }, head: { asserted: 0, total: 0 } }
   const breaking: Finding[] = []
@@ -251,14 +415,16 @@ function compute(
   const changedOps = new Map<string, string[]>()
   const unasserted: { operation: string; references: string[] }[] = []
   const specs: unknown[] = []
+  const statusesRemoved: { method: string; path: string; status: string }[] = []
 
   for (const spec of options.specs) {
-    const base = loadSide(baseRoot, spec, options, patterns, statusPatterns)
-    const head = loadSide(headRoot, spec, options, patterns, statusPatterns)
+    const base = loadSide(baseRoot, baseFeatures, spec, options, patterns, statusPatterns)
+    const head = loadSide(headRoot, headFeatures, spec, options, patterns, statusPatterns)
     if (!head.present) throw new EvidenceError(`spec ${spec} not found at head`)
 
-    const bp = pairsOf(base)
     const hp = pairsOf(head)
+    // A spec new at head is neutral: it neither raises nor lowers coverage.
+    const bp = base.present ? pairsOf(base) : hp
     total.base.asserted += bp.asserted
     total.base.total += bp.total
     total.head.asserted += hp.asserted
@@ -274,6 +440,19 @@ function compute(
       suppressed += allowed.allowlisted
       breaking.push(...specBreaking)
       nonBreaking.push(...diff.nonBreaking)
+      const headKeys = new Set(
+        head.operations.flatMap((op) =>
+          op.responses.map((r) => `${opKey(op)} ${r.status.toUpperCase()}`),
+        ),
+      )
+      for (const op of base.operations) {
+        for (const r of op.responses) {
+          if (/^default$/i.test(r.status)) continue
+          if (!headKeys.has(`${opKey(op)} ${r.status.toUpperCase()}`)) {
+            statusesRemoved.push({ method: op.method, path: op.path, status: r.status })
+          }
+        }
+      }
       const aliasesOf = (side: Side, op: string) =>
         side.audit.operations
           .filter((o) => `${o.method} ${o.path}` === op)
@@ -313,12 +492,8 @@ function compute(
     })
   }
 
-  const scenarioRoots = (root: string) =>
-    findFeatureFiles(
-      options.features.map((f) => path.join(root, f)).filter((f) => fs.existsSync(f)),
-    )
-  const baseScenarios = scenariosOf(scenarioRoots(baseRoot), baseRoot, patterns)
-  const headScenarios = scenariosOf(scenarioRoots(headRoot), headRoot, patterns)
+  const baseScenarios = baseFeatures.scenarios
+  const headScenarios = headFeatures.scenarios
   const id = (s: Scenario) => `${s.file}\u0000${s.name}`
   const baseById = new Map(baseScenarios.map((s) => [id(s), s]))
   const headById = new Map(headScenarios.map((s) => [id(s), s]))
@@ -326,15 +501,22 @@ function compute(
   const scenarios = {
     added: headScenarios.filter((s) => !baseById.has(id(s))).map(ref),
     removed: baseScenarios.filter((s) => !headById.has(id(s))).map(ref),
-    changed: headScenarios
-      .filter((s) => baseById.has(id(s)) && baseById.get(id(s))?.steps !== s.steps)
-      .map(ref),
+    changed: headScenarios.flatMap((s) => {
+      const before = baseById.get(id(s))
+      if (!before) return []
+      const tagsChanged = before.tags.join(' ') !== s.tags.join(' ')
+      return before.steps !== s.steps || tagsChanged ? [{ ...ref(s), tagsChanged }] : []
+    }),
+    excluded: {
+      tags: options.excludeTags ?? DEFAULT_EXCLUDE_TAGS,
+      head: headScenarios.filter((s) => s.excluded).map(ref),
+    },
   }
 
   // The spec moved, and no scenario naming the operation was added, removed or changed.
   const touches = (names: string[], list: Scenario[]) =>
     list
-      .filter((s) => names.some((n) => s.names.has(n)))
+      .filter((s) => !s.excluded && names.some((n) => s.names.has(n)))
       .map((s) => `${id(s)}\u0000${s.steps}`)
       .sort()
   const changedWithoutScenario = [...changedOps]
@@ -360,8 +542,9 @@ function compute(
       noDocumentedStatuses: total.base.total === 0 || total.head.total === 0,
       pairs: total,
     },
-    apiDiff: { breaking, nonBreaking, suppressed },
+    apiDiff: { breaking, nonBreaking, suppressed, allowlist: allowlistInfo ?? null },
     scenarios,
+    statusesRemoved,
     statusGaps: { head: headGaps, new: newGaps, closed: closedGaps },
     operations: { changedInSpec: [...changedOps.keys()].sort(), changedWithoutScenario },
     unasserted,
