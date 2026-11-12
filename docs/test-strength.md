@@ -42,7 +42,7 @@ A `CTF_FAULT` that isn't `<selector>=<fault>` throws when the client is created,
 
 A faulted run counts only if it says something. A failure is re-run once and is _noticed_ only if it repeats; one that doesn't is `flaky` and _inconclusive_, like a run that wrote no JSON report or ran no scenarios. Inconclusive pairs are listed with a reason and are neither noticed nor survived.
 
-The command exits 2, with a message, when the baseline ran 0 scenarios (a port clash, a failed hook), when every baseline scenario failed, or when it recorded no stub hits at all (`CTF_FAULT_HITS` wasn't honoured: the suite needs `wiremockUrl` and the framework's WireMock adapter). Scenarios are told apart by file and line, so Outline rows that share a name stay separate.
+The command exits 2, with a message, when the baseline ran 0 scenarios (a port clash, a failed hook), when every baseline scenario failed, or when it recorded no hits file at all (`CTF_FAULT_HITS` wasn't honoured: the suite needs `wiremockUrl` and the framework's WireMock adapter). When the hits file exists but no scenario hit a stub, it warns and reports 0 of 0. Scenarios are told apart by file and line, so Outline rows that share a name stay separate.
 
 `--max-runs` keeps pairs in this order: stubs hit by scenarios that `--scenarios` selected, then the most-hit stubs, then by name. `notRun` counts what it left.
 

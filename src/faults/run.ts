@@ -107,6 +107,11 @@ export function runFaults(options: FaultsOptions): TestStrength {
       )
     }
     const hits = readHits(hitsFile)
+    if (![...hits.values()].some((stubs) => stubs.size > 0)) {
+      console.warn(
+        '[ctf faults] no baseline scenario hit a WireMock stub, so there is nothing to inject a fault into.',
+      )
+    }
     const baselineFailing = baseline.filter((s) => !s.passed)
     const passing = baseline.filter((s) => s.passed)
     const hitsOf = (s: ScenarioResult) => hits.get(scenarioKey(s)) ?? new Set<string>()
