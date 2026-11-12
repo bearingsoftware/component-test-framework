@@ -33,6 +33,7 @@ vi.mock('@cucumber/cucumber', async (importOriginal) => {
 
 import {
   registerServiceUnderTest,
+  groupGone,
   spawnServiceUnderTest,
   startService,
   stopServices,
@@ -309,6 +310,74 @@ describe('service lifecycle (COMPONENT-8)', () => {
 
     it('waits for a spawned process that closed its output', () =>
       waitsForGrandchild({ GRANDCHILD_CLOSE_OUTPUT: '1' }))
+
+    it.each([
+      ['EPERM', 'EPERM'],
+      ['success', undefined],
+    ])(
+      'gives up on a group that never empties (kill(-pgid, 0) gives %s) without throwing',
+      async (_, code) => {
+        const service = await startService(options({ stopGraceMs: 300 }))
+        started.push(service)
+        const kill = process.kill.bind(process)
+        const spy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, sig?: unknown) => {
+          if (sig === 0 && pid < 0) {
+            if (code) throw Object.assign(new Error(code), { code })
+            return true
+          }
+          return kill(pid, sig as NodeJS.Signals)
+        }) as typeof process.kill)
+        try {
+          const begun = Date.now()
+          await service.stop()
+          expect(Date.now() - begun).toBeGreaterThanOrEqual(300 + 2_000 - 100)
+        } finally {
+          spy.mockRestore()
+        }
+      },
+    )
+
+    it('stops waiting for a group that never empties after the given time', async () => {
+      const spy = vi.spyOn(process, 'kill').mockReturnValue(true)
+      try {
+        const begun = Date.now()
+        await groupGone(2 ** 22 - 1, 200)
+        expect(Date.now() - begun).toBeGreaterThanOrEqual(190)
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
+    it.runIf(process.platform === 'linux')(
+      'counts a group of unreaped zombies as gone',
+      async () => {
+        // Job control puts `true` in its own group; its parent, still alive,
+        // never reaps it, so that group is nothing but a zombie.
+        const { spawn } = await import('child_process')
+        const parent = spawn('bash', ['-c', 'set -m; true & echo $!; sleep 30'], {
+          detached: true,
+          stdio: ['ignore', 'pipe', 'ignore'],
+        })
+        try {
+          const pgid = await new Promise<number>((resolve) =>
+            parent.stdout.once('data', (d) => resolve(Number(String(d).trim()))),
+          )
+          await eventually(
+            () => {
+              if (fs.readFileSync(`/proc/${pgid}/stat`, 'utf8').split(' ')[2] !== 'Z')
+                throw new Error('not a zombie yet')
+            },
+            { timeout: 5_000, interval: 20 },
+          )
+          expect(() => process.kill(-pgid, 0)).not.toThrow()
+          const begun = Date.now()
+          await groupGone(pgid, 5_000)
+          expect(Date.now() - begun).toBeLessThan(1_000)
+        } finally {
+          process.kill(-parent.pid!, 'SIGKILL')
+        }
+      },
+    )
 
     it('can be stopped twice, and will not start again once stopped', async () => {
       const service = spawnServiceUnderTest(options())

@@ -1,5 +1,5 @@
 import { spawn, ChildProcess } from 'node:child_process'
-import { createWriteStream, WriteStream, mkdirSync } from 'node:fs'
+import { createWriteStream, WriteStream, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { Before, After, BeforeAll, AfterAll } from '@cucumber/cucumber'
 import { workerFile } from './worker'
@@ -89,22 +89,59 @@ function within(promise: Promise<unknown>, ms: number): Promise<void> {
 }
 
 /**
+ * True when /proc shows members of process group `pgid` and every one is an
+ * unreaped zombie, as left by a PID 1 that doesn't reap orphans. Linux only;
+ * anywhere else it is false.
+ */
+function onlyZombies(pgid: number): boolean {
+  let members = 0
+  try {
+    for (const entry of readdirSync('/proc')) {
+      if (!/^\d+$/.test(entry)) continue
+      let stat: string
+      try {
+        stat = readFileSync(`/proc/${entry}/stat`, 'utf8')
+      } catch {
+        continue
+      }
+      // comm is parenthesised and may hold spaces and ")", so split after the last one.
+      const [state, , pgrp] = stat.slice(stat.lastIndexOf(')') + 2).split(' ')
+      if (Number(pgrp) !== pgid) continue
+      if (state !== 'Z') return false
+      members++
+    }
+  } catch {
+    return false
+  }
+  return members > 0
+}
+
+/**
  * Resolves once no member of process group `pgid` is left, or after `ms`.
  * A closed pipe doesn't mean that: a member can close or redirect its output
  * and keep running, and one that has just closed its pipes is still shutting
- * down. POSIX only; Windows has no groups, so it resolves at once there.
+ * down. Members that are only zombies count as gone, so a PID 1 that never
+ * reaps them doesn't cost the whole wait (on Linux; elsewhere use an init such
+ * as `docker run --init`). POSIX only; Windows has no groups, so it resolves
+ * at once there.
  */
-function groupGone(pgid: number | undefined, ms: number): Promise<void> {
+export function groupGone(pgid: number | undefined, ms: number): Promise<void> {
   if (!pgid || process.platform === 'win32') return Promise.resolve()
   const deadline = Date.now() + ms
+  let lastScan = 0
   return new Promise((resolve) => {
     const check = () => {
       try {
         process.kill(-pgid, 0)
-      } catch {
-        return resolve()
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ESRCH') return resolve()
       }
-      if (Date.now() >= deadline) return resolve()
+      const now = Date.now()
+      if (now >= deadline) return resolve()
+      if (now - lastScan >= 50) {
+        lastScan = now
+        if (onlyZombies(pgid)) return resolve()
+      }
       setTimeout(check, 10).unref()
     }
     check()
@@ -233,12 +270,14 @@ class ManagedService {
     // Done when the process has exited and every member of its group has gone.
     // The direct child exiting isn't enough: a process it spawned can still
     // hold the port, and so can one that closed its output.
+    let graceTimer: NodeJS.Timeout | undefined
     const graceful = await Promise.race([
       running.gone.then(() => true),
-      new Promise<boolean>((resolve) =>
-        setTimeout(() => resolve(false), this.opts.stopGraceMs ?? DEFAULT_STOP_GRACE),
-      ),
+      new Promise<boolean>((resolve) => {
+        graceTimer = setTimeout(() => resolve(false), this.opts.stopGraceMs ?? DEFAULT_STOP_GRACE)
+      }),
     ])
+    clearTimeout(graceTimer)
     if (!graceful) {
       try {
         process.kill(-pid, 'SIGKILL')
