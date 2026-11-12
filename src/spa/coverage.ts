@@ -1,4 +1,5 @@
-import { AfterAll } from '@cucumber/cucumber'
+import { defineAdapter, registerAdapter } from '../support/adapter'
+import type { Adapter } from '../support/adapter'
 import {
   createCoverageCollector,
   type CoverageCollector,
@@ -18,9 +19,15 @@ export type { CoverageCollector, CoverageCollectorOptions, CoverageRun }
  * registerHooks({ ...options, hooks: { beforePageClose: (world) => coverage.collect(world.page!) } })
  */
 export function registerCoverage(options: CoverageCollectorOptions): CoverageCollector {
-  const collector = createCoverageCollector(options)
-  AfterAll({ timeout: 15_000 }, function () {
-    collector.write()
+  return registerAdapter(coverageAdapter(options))
+}
+
+/** {@link registerCoverage} as an adapter. State is the collector. */
+export function coverageAdapter(options: CoverageCollectorOptions): Adapter<CoverageCollector> {
+  return defineAdapter<CoverageCollector>({
+    name: `coverage:${options.outDir}`,
+    setup: () => createCoverageCollector(options),
+    afterAll: (_ctx, collector) => collector.write(),
+    afterAllTimeout: 15_000,
   })
-  return collector
 }

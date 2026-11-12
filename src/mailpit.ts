@@ -7,5 +7,10 @@ export type {
   MailpitMessageSummary,
   WaitForMessageOptions,
 } from './clients/mailpit-client'
-export { registerMailpitSteps, LAST_EMAIL, LAST_EMAIL_LINK } from './steps/mailpit.steps'
+export {
+  registerMailpitSteps,
+  mailpitAdapter,
+  LAST_EMAIL,
+  LAST_EMAIL_LINK,
+} from './steps/mailpit.steps'
 export type { MailpitStepOptions } from './steps/mailpit.steps'

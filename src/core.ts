@@ -24,6 +24,8 @@ export { ComponentTestWorld } from './support/world'
 export { loadConfig, requireApiBaseUrl } from './support/config'
 export { loadFixture, listFixtures } from './support/fixtures'
 export { registerHooks } from './support/hooks'
+export { defineAdapter, registerAdapter } from './support/adapter'
+export type { Adapter, AdapterContext } from './support/adapter'
 
 // Services under test
 export {

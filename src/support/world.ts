@@ -2,10 +2,12 @@ import { World } from '@cucumber/cucumber'
 import type { IWorldOptions } from '@cucumber/cucumber'
 import type { Page, Browser, BrowserContext } from '@playwright/test'
 import type { FrameworkConfig, CallRecord, OperationMap, UIStateSnapshot } from '../types'
-import type { WireMockClient } from '../clients/wiremock-client'
 import type { DbClient } from '../clients/db-client'
 import type { RedisClient, PubSubSubscription } from '../clients/redis-client'
 import type { BasePage } from '../pages/base.page'
+import { WireMockClient } from '../clients/wiremock-client'
+import { adapterState } from './adapter'
+import type { Adapter } from './adapter'
 
 /**
  * Base Cucumber World for component tests. Consumers can extend this
@@ -17,7 +19,14 @@ export class ComponentTestWorld extends World {
   operationMap: OperationMap = {}
 
   // --- Shared clients (initialised by hooks) ---
-  wiremock!: WireMockClient
+  private _wiremock?: WireMockClient
+  /** Not configured (no `wiremockUrl`): a client whose every call explains how to configure it. */
+  get wiremock(): WireMockClient {
+    return (this._wiremock ??= new WireMockClient(''))
+  }
+  set wiremock(client: WireMockClient) {
+    this._wiremock = client
+  }
   db?: DbClient
   redis?: RedisClient
 
@@ -137,6 +146,11 @@ export class ComponentTestWorld extends World {
       this.uniqueIds.set(name, id)
     }
     return id
+  }
+
+  /** The state of an adapter registered with `registerHooks` or `registerAdapter`. */
+  adapter<State>(adapter: Adapter<State>): State {
+    return adapterState(adapter)
   }
 
   /** Reset all per-scenario state. Called by Before hook. */

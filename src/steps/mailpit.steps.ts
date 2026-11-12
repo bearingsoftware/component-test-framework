@@ -1,5 +1,7 @@
 import { Then } from '@cucumber/cucumber'
 import type { ComponentTestWorld } from '../support/world'
+import { defineAdapter, registerAdapter } from '../support/adapter'
+import type { Adapter } from '../support/adapter'
 import { holdsFor, serviceWaitTimeout } from '../support/eventually'
 import {
   MailpitClient,
@@ -52,10 +54,20 @@ export function registerMailpitSteps(options: MailpitStepOptions = {}): void {
   // A second registration would make every one of these steps ambiguous.
   if (registered) return
   registered = true
+  registerAdapter(mailpitAdapter(options))
+}
 
-  const client = new MailpitClient(
-    options.url ?? process.env.MAILPIT_URL ?? 'http://localhost:8025',
-  )
+/** The Mailpit steps as an adapter. State is the {@link MailpitClient}. */
+export function mailpitAdapter(options: MailpitStepOptions = {}): Adapter<MailpitClient> {
+  return defineAdapter<MailpitClient>({
+    name: 'mailpit',
+    setup: () =>
+      new MailpitClient(options.url ?? process.env.MAILPIT_URL ?? 'http://localhost:8025'),
+    registerSteps: (client) => defineMailpitSteps(client, options),
+  })
+}
+
+function defineMailpitSteps(client: MailpitClient, options: MailpitStepOptions): void {
   const address = (world: ComponentTestWorld, name: string) =>
     options.recipient ? options.recipient(world, name) : name
   const budget = serviceWaitTimeout(options)

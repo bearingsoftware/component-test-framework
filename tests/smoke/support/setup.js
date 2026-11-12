@@ -10,8 +10,20 @@ const core = require('../../../dist/core')
 // twice, which Cucumber would report as ambiguous.
 require('../../../dist/index')
 
+// A consumer-defined adapter: its state is made at registration and a
+// per-scenario value is set in beforeScenario.
+const counter = core.defineAdapter({
+  name: 'smoke-counter',
+  setup: () => ({ scenarios: 0, current: null }),
+  beforeScenario: (world, state) => {
+    state.scenarios += 1
+    state.current = `scenario-${state.scenarios}`
+  },
+})
+
 core.registerHooks({
   fixturesDir: path.join(__dirname, '..'),
+  adapters: [counter],
   hooks: {
     afterReset: (world) => world.remember('afterReset', true),
   },
@@ -34,4 +46,10 @@ Given('a response with status {int}', function (status) {
 
 Then('the afterReset hook has run for this scenario', function () {
   assert.equal(this.recall('afterReset'), true)
+})
+
+Then('the consumer adapter state has reached the step', function () {
+  const state = this.adapter(counter)
+  assert.ok(state.scenarios >= 1)
+  assert.equal(state.current, `scenario-${state.scenarios}`)
 })
