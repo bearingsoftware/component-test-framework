@@ -3,6 +3,7 @@ import * as fs from 'fs'
 import * as net from 'net'
 import * as os from 'os'
 import * as path from 'path'
+import { spawn, spawnSync } from 'child_process'
 
 type HookFn = (this: unknown) => unknown
 interface Hook {
@@ -33,12 +34,15 @@ vi.mock('@cucumber/cucumber', async (importOriginal) => {
 
 import {
   registerServiceUnderTest,
+  groupGone,
   spawnServiceUnderTest,
   startService,
   stopServices,
   type ServiceOptions,
 } from './process'
 import { eventually } from './eventually'
+
+const hasPerl = spawnSync('perl', ['-e', '1']).status === 0
 
 const FAKE_SERVICE = path.join(__dirname, '__fixtures__', 'fake-service.cjs')
 
@@ -271,9 +275,11 @@ describe('service lifecycle (COMPONENT-8)', () => {
       expect(Date.now() - begun).toBeLessThan(5_000)
     })
 
-    it('waits for processes the service spawned, not just the service', async () => {
+    const waitsForGrandchild = async (extraEnv: NodeJS.ProcessEnv) => {
       const service = await startService(
-        options({ env: { ...process.env, PORT: String(port), GRANDCHILD_STOP_MS: '700' } }),
+        options({
+          env: { ...process.env, PORT: String(port), GRANDCHILD_STOP_MS: '700', ...extraEnv },
+        }),
       )
       started.push(service)
       const grandchild = await eventually(
@@ -300,7 +306,84 @@ describe('service lifecycle (COMPONENT-8)', () => {
         }
       }
       expect(['gone', 'Z']).toContain(state())
+    }
+
+    it('waits for processes the service spawned, not just the service', () =>
+      waitsForGrandchild({}))
+
+    it('waits for a spawned process that closed its output', () =>
+      waitsForGrandchild({ GRANDCHILD_CLOSE_OUTPUT: '1' }))
+
+    it.each([
+      ['EPERM', 'EPERM'],
+      ['success', undefined],
+    ])(
+      'gives up on a group that never empties (kill(-pgid, 0) gives %s) without throwing',
+      async (_, code) => {
+        const service = await startService(options({ stopGraceMs: 300 }))
+        started.push(service)
+        const kill = process.kill.bind(process)
+        const spy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, sig?: unknown) => {
+          if (sig === 0 && pid < 0) {
+            if (code) throw Object.assign(new Error(code), { code })
+            return true
+          }
+          return kill(pid, sig as NodeJS.Signals)
+        }) as typeof process.kill)
+        try {
+          const begun = Date.now()
+          await service.stop()
+          expect(Date.now() - begun).toBeGreaterThanOrEqual(300 + 2_000 - 100)
+        } finally {
+          spy.mockRestore()
+        }
+      },
+    )
+
+    it('stops waiting for a group that never empties after the given time', async () => {
+      const spy = vi.spyOn(process, 'kill').mockReturnValue(true)
+      try {
+        const begun = Date.now()
+        await groupGone(2 ** 22 - 1, 200)
+        expect(Date.now() - begun).toBeGreaterThanOrEqual(190)
+      } finally {
+        spy.mockRestore()
+      }
     })
+
+    it.runIf(process.platform === 'linux' && hasPerl)(
+      'counts a group of unreaped zombies as gone',
+      async () => {
+        // perl never waits, so its child stays a zombie. The child moves to
+        // its own group first, so that group is nothing but the zombie.
+        const parent = spawn(
+          'perl',
+          [
+            '-e',
+            '$| = 1; my $p = fork; if (!$p) { setpgrp(0, 0); exit 0 } print "$p\\n"; sleep 30',
+          ],
+          { detached: true, stdio: ['ignore', 'pipe', 'ignore'] },
+        )
+        try {
+          const pgid = await new Promise<number>((resolve) =>
+            parent.stdout.once('data', (d) => resolve(Number(String(d).trim()))),
+          )
+          await eventually(
+            () => {
+              const state = fs.readFileSync(`/proc/${pgid}/stat`, 'utf8').split(' ')[2]
+              if (state !== 'Z') throw new Error(`expected a zombie, found state ${state}`)
+            },
+            { timeout: 5_000, interval: 20 },
+          )
+          expect(() => process.kill(-pgid, 0)).not.toThrow()
+          const begun = Date.now()
+          await groupGone(pgid, 5_000)
+          expect(Date.now() - begun).toBeLessThan(1_000)
+        } finally {
+          process.kill(-parent.pid!, 'SIGKILL')
+        }
+      },
+    )
 
     it('can be stopped twice, and will not start again once stopped', async () => {
       const service = spawnServiceUnderTest(options())
