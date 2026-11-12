@@ -3,12 +3,18 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { parseArgs } from 'util'
-import { loadSpec } from './openapi/spec'
+import { loadSpec, loadSpecDetail } from './openapi/spec'
 import { generateOperationMap } from './openapi/generate'
 import { checkOperationMaps, readAllowlist, type CheckPair } from './openapi/check'
-import { auditCoverage, findFeatureFiles, DEFAULT_REFERENCE_PATTERNS } from './openapi/audit'
+import {
+  auditCoverage,
+  findFeatureFiles,
+  DEFAULT_REFERENCE_PATTERNS,
+  DEFAULT_STATUS_PATTERNS,
+} from './openapi/audit'
 import { readOperationMap } from './openapi/map-file'
 import { checkStubs, existingFiles, generateStubs } from './openapi/stubs'
+import { stepCatalogue } from './steps/catalogue'
 import { initProject, nextSteps, PIECES, type Piece } from './cli/init'
 
 const HELP = `Usage: ctf <command> [options]
@@ -42,8 +48,16 @@ Commands:
       --map <file>                  The suite's operation map, naming unnamed operations
       --pattern <regex>             How features name an operation, the name in group 1
                                     (repeatable; default: "to the (\\w+) operation")
+      --statuses                    Also list documented response statuses no scenario asserts
+      --status-pattern <regex>      How features assert a status, the status in group 1
+                                    (repeatable; default: "the response status should be (\\d+)")
       --fail-on-gaps                Exit 1 when any operation is unexercised
-      --json                        Print the result as JSON
+                                    (with --statuses, or any status is unasserted)
+      --json                        Print the result as JSON, including statuses and statusGaps
+
+  steps                           List every step the framework can register, from what its
+                                  register...Steps functions register
+      --json                        Print { version, steps } as JSON
 
   stubs <spec> --out <dir>        Write WireMock mappings from an OpenAPI spec's examples,
                                   to <dir>/mappings, one file per operation
@@ -221,6 +235,8 @@ function audit(args: string[]): number {
       features: { type: 'string', multiple: true },
       map: { type: 'string' },
       pattern: { type: 'string', multiple: true },
+      'status-pattern': { type: 'string', multiple: true },
+      statuses: { type: 'boolean' },
       'fail-on-gaps': { type: 'boolean' },
       json: { type: 'boolean' },
       'base-path': { type: 'string' },
@@ -231,10 +247,21 @@ function audit(args: string[]): number {
   if (!values.features?.length) throw new UsageError('audit-coverage needs --features')
 
   const result = auditCoverage({
-    operations: positionals.flatMap((spec) => loadSpec(spec, { basePath: values['base-path'] })),
+    operations: positionals.flatMap((spec) => {
+      const options = { basePath: values['base-path'] }
+      try {
+        return loadSpecDetail(spec, options).operations
+      } catch (err) {
+        // A response the audit can't read must not break an audit that doesn't need it.
+        if (values.statuses) throw err
+        return loadSpec(spec, options)
+      }
+    }),
     map: values.map ? readOperationMap(values.map, values['export-name']).entries : undefined,
     featureFiles: findFeatureFiles(values.features),
     patterns: values.pattern?.map((p) => regex(p) as RegExp) ?? DEFAULT_REFERENCE_PATTERNS,
+    statusPatterns:
+      values['status-pattern']?.map((p) => regex(p) as RegExp) ?? DEFAULT_STATUS_PATTERNS,
   })
   if (values.json) {
     console.log(JSON.stringify(result, null, 2))
@@ -251,8 +278,42 @@ function audit(args: string[]): number {
     console.error(
       `\n${result.operations.length} operations, ${covered} exercised by a feature, ${result.gaps.length} not.`,
     )
+    if (values.statuses) {
+      for (const gap of result.statusGaps) {
+        console.log(`${gap.operation ?? '(unnamed)'}\t${gap.method} ${gap.path}\t${gap.status}`)
+      }
+      console.error(
+        `${result.statusGaps.length} documented response status(es) no scenario asserts.`,
+      )
+    }
   }
-  return values['fail-on-gaps'] && result.gaps.length > 0 ? 1 : 0
+  const failing = result.gaps.length + (values.statuses ? result.statusGaps.length : 0)
+  return values['fail-on-gaps'] && failing > 0 ? 1 : 0
+}
+
+function steps(args: string[]): number {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: { json: { type: 'boolean' } },
+  })
+  if (positionals.length > 0) throw new UsageError('steps takes no arguments')
+  const catalogue = stepCatalogue()
+  if (values.json) {
+    console.log(JSON.stringify({ version: 1, steps: catalogue }, null, 2))
+    return 0
+  }
+  const rows = catalogue.map((s) => [
+    s.keyword,
+    s.expression,
+    `${s.registeredBy} (${s.entryPoint})${s.optIn ? ' opt-in' : ''}`,
+  ])
+  const widths = [0, 1].map((c) => Math.max(...rows.map((r) => r[c].length)))
+  for (const r of rows) {
+    console.log(`${r[0].padEnd(widths[0])}  ${r[1].padEnd(widths[1])}  ${r[2]}`)
+  }
+  console.error(`\n${catalogue.length} steps.`)
+  return 0
 }
 
 function stubs(args: string[]): number {
@@ -347,6 +408,7 @@ export function main(argv: string[]): number {
     if (command === 'check-operation-map') return check(rest)
     if (command === 'audit-coverage') return audit(rest)
     if (command === 'stubs') return stubs(rest)
+    if (command === 'steps') return steps(rest)
     throw new UsageError(`unknown command: ${command}`)
   } catch (err) {
     const usage =
