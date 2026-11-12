@@ -133,6 +133,52 @@ jobs:
       - name: Run the Playwright Test example suite
         run: npm run test:playwright-test
 
+  # COMPONENT-22: the examples/ suites, then `ctf init` scaffolds installed from
+  # the packed tarball and run under real ts-node. The scaffold check starts
+  # its own compose services, so it needs Docker and registry.npmjs.org.
+  examples:
+    if: "!startsWith(github.head_ref, 'release-please--')"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["55441:5432"]
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports: ["56392:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30
+      wiremock:
+        image: wiremock/wiremock:3.13.2
+        ports: ["58444:8080"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Install Chromium for the SPA example
+        run: npx playwright install --with-deps chromium
+      - name: Wait for WireMock
+        run: timeout 60 sh -c 'until curl -sf http://localhost:58444/__admin/health; do sleep 1; done'
+      # Ports of its own: runners share a host, and the other suites use the
+      # CI defaults (55440, 56390, 58443, 18100 and up, 3100 and up).
+      - name: Run the examples and the ctf init scaffold check
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:55441/postgres
+          REDIS_URL: redis://localhost:56392
+          WIREMOCK_URL: http://localhost:58444
+          EXAMPLE_API_PORT: "18201"
+          EXAMPLE_WORKER_PORT: "18202"
+          WEB_PORT: "3201"
+        run: npm run examples:test
+
   build:
     if: "!startsWith(github.head_ref, 'release-please--')"
     runs-on: ubuntu-latest
