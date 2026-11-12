@@ -34,9 +34,10 @@ export function registerWiremockSteps(): void {
   require('./common/wiremock.steps')
 }
 
-/** `the … table contains … row(s) matching …`. */
+/** `the … table contains … row(s) matching …`, and the seed steps `the … table contains:` and `the database is seeded from …`. */
 export function registerDbSteps(): void {
   require('./common/db-assertion.steps')
+  require('./common/db-seed.steps')
 }
 
 /**
