@@ -37,6 +37,8 @@ Scenario: Handle vendor API failure
   And the sunsynk API at "/api/v1/inverter/readings" was called 1 time
 ```
 
+Stubs for an API that has an OpenAPI spec can be generated from it, and checked against it later: see [`ctf stubs`](openapi-cli.md#stubs-from-the-spec-ctf-stubs).
+
 ## Stub builder
 
 For a common mock, build the stub in code rather than writing WireMock JSON. `stub` is exported from `@bearingsoftware/component-test-framework/wiremock`, and `client.register(...)` sends one stub, or several in one import, with worker namespacing applied:
@@ -132,3 +134,25 @@ A background poll that started before the move can still write a row afterwards,
 From code, `this.wiremock` has `getScenarios()`, `getScenarioState(name)`, `setScenarioState(name, state)` and `resetScenarios()`. Moving a scenario to a state none of its stubs mention fails, and the error lists the states it has. Every scenario is back in `Started` after the per-scenario reset, because the reset removes the stubs.
 
 WireMock 3 reads the name in `/__admin/scenarios/{name}/state` without decoding it, so it can only move a scenario whose name needs no encoding in a URL: letters, digits and `-._~!$&'()*+,;=:@`, with no spaces. Under worker isolation the framework stores each worker's scenario under an encoded name, such as `~2F__worker-2:sunsynk-outage`. That keeps the workers' scenarios apart, and any name works there. Steps and client calls take the name the stubs give.
+
+## Recording stubs from a real API
+
+WireMock's open-source image can record, on 3.13.2: `/__admin/recordings/start`, `/stop`, `/status` and `/snapshot` all answer. Start it with the real API as the target, send the traffic through WireMock, then stop:
+
+```sh
+curl -X POST localhost:8080/__admin/recordings/start \
+  -H 'content-type: application/json' -d '{"targetBaseUrl": "https://api.vendor.example"}'
+# ... call http://localhost:8080/... from the suite, or by hand ...
+curl -X POST localhost:8080/__admin/recordings/stop > recorded.json
+```
+
+`stop` returns the recorded mappings as `{ "mappings": [...] }`, and writes them under `mappings/` in WireMock's root directory too, while WireMock is running with a file root. `snapshot` takes the requests already in the journal and does the same without a recording session. A recorded mapping matches on `url` with the exact path and query, and holds the response status, `body` as a string and its headers, including a `Matched-Stub-Id` or other headers of the real API. Trim them and generalise `url` to a `urlPathTemplate` by hand where you want a path parameter.
+
+Recordings can drift too. Put the recorded files in a directory's `mappings/` folder (a `{ "mappings": [...] }` file is read as it is) and run them through the spec:
+
+```sh
+npx ctf stubs --check vendor/openapi.yaml wiremock/vendor
+```
+
+A recorded stub has no `specHash`, so it is checked as hand-written: its path must be a spec operation, its status documented and its body must fit the schema.
+

@@ -36,7 +36,9 @@ export function operationName(method: string, route: string): string {
 }
 
 /** Every operation with a name: its `operationId`, or one made from its method and path. */
-export function namedOperations(operations: SpecOperation[]): (SpecOperation & { name: string })[] {
+export function namedOperations<T extends SpecOperation>(
+  operations: T[],
+): (T & { name: string })[] {
   const used = new Set(operations.map((op) => op.operationId).filter(Boolean) as string[])
   return operations.map((op) => {
     if (op.operationId) return { ...op, name: op.operationId }

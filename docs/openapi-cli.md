@@ -1,6 +1,6 @@
 # OpenAPI tooling: the `ctf` command
 
-The package installs a `ctf` command for keeping an operation map in step with the API's OpenAPI spec. It reads OpenAPI 3.0 and 3.1, and Swagger 2, as YAML or JSON. Reading a `.ts` map needs `typescript`, which a suite running on ts-node already has.
+The package installs a `ctf` command for keeping an operation map, and WireMock stubs, in step with the API's OpenAPI spec. It reads OpenAPI 3.0 and 3.1, and Swagger 2, as YAML or JSON. Reading a `.ts` map needs `typescript`, which a suite running on ts-node already has.
 
 **Base path.** Spec paths get the path of the spec's first server URL in front, so they match what the suite sends: `servers: [{ url: /api/v1 }]` or `http://localhost:8080/api/v1` gives `/api/v1`, with server variables' defaults filled in. Swagger 2 uses its `basePath`. Servers set on a single path or operation aren't used. When a suite sees a different prefix, such as an SPA suite whose server strips `/api`, pass `--base-path`.
 
@@ -53,6 +53,39 @@ npx ctf check-operation-map \
 ```
 
 **The allowlist.** It lists known gaps, one per line, as an operation name or `METHOD /path`, with `#` comments. An entry that no longer matches a problem fails as stale, so the list only shrinks.
+
+## Stubs from the spec: `ctf stubs`
+
+Mocks drift when the API they stand for changes. `ctf stubs` keeps them in step with the spec, in two halves.
+
+```sh
+npx ctf stubs vendor/openapi.yaml --out wiremock/vendor
+npx ctf stubs --check vendor/openapi.yaml wiremock/vendor --allowlist stubs-allowlist.txt
+```
+
+**Generating.** It writes one [WireMock](wiremock.md) mapping per operation to `<dir>/mappings/<name>.json`, where `<name>` is the operation's name as in the map above. That is WireMock's own layout, so `the {word} API is stubbed from {word}` and `wiremockBaseline` load the directory as it is.
+- **Matching:** the method, and `urlPathTemplate` with the spec's path (`/api/pets/{petId}`), base path included. It matches any value in a path parameter and nothing across a `/`. `--base-path` overrides the base path. A path with more fixed segments gets a lower `priority` number (6 for `/api/pets/mine`, 7 for `/api/pets/{petId}`), so it wins over a parameter path whatever the load order. They run from 9 down to 6 (three fixed segments or more), so a stub you or a scenario add at WireMock's default of 5 wins over a generated one. Error stubs are 10.
+- **Response:** the lowest documented 2xx, with the example the spec gives. The first of these is used: the response's `example`, the first of its `examples` (its `value`), the schema's `example`. A response documented as `2XX` only is stubbed as a 200. A response with no body, such as a 204, gets a stub with no body. A `null` example is written as `body: "null"`, as WireMock serves a `jsonBody` of null as an empty body. `Content-Type` is the media type the example is under: `application/json`, else another JSON type, else the first one.
+- **Examples are checked:** an example that doesn't fit its own schema is written all the same, with a warning on stderr.
+- **No invented data:** an operation whose example is missing is skipped and listed on stderr with the reason. So is one with no 2xx.
+- **`--all-statuses`:** also writes `<name>-<status>.json` for every other documented status, with `priority: 10` so they never shadow the 2xx. Load one with a step or the stub builder when a scenario needs the error. `default` and `4XX`-style statuses have no one code to match, so they are skipped.
+- **`--include` and `--exclude`:** a regular expression to pick operations by name.
+- **File names:** characters other than letters, digits, `.`, `_` and `-` in an operation name become `_`. When that makes two operations share a file, it fails and names both.
+- **Existing files:** it never overwrites a file without `--force`; the error names them.
+- **Metadata:** each mapping carries `metadata: { generatedBy: "ctf stubs", operation, specHash }`, where `specHash` is the SHA-256 of the spec file, so a check can tell generated stubs from hand-written ones.
+
+**Checking.** It reads every `.json` file in `<dir>/mappings`, generated or hand-written, and fails when a mapping:
+- goes to no spec operation, by its method and its `url`, `urlPath` or `urlPathTemplate`;
+- answers with a status the operation doesn't document (`default`, and `2XX`-style ranges, document what they cover);
+- has a JSON body (`jsonBody`, or a `body` that parses) that doesn't fit the response's schema. Each finding names the JSON pointer of the failing value.
+
+A `urlPathPattern` or `urlPattern` is a regular expression, which can't be matched to a path template. It is tried against each operation's path with sample values in the parameters (a `urlPattern`, which WireMock matches against the path and query, also with sample queries), and when that doesn't leave operations at exactly one path, it is reported as unresolved rather than guessed. A mapping with `ANY` or no method is valid when its URL resolves to operations at one path: its status must be documented by one of them, and its body fit the response of every one that documents that status; one with no schema for it limits nothing. Faults, proxied responses, `bodyFileName` bodies and bodies of a stub that names the `response-template` transformer aren't body-checked; a `{{` without the transformer is checked as text. For a WireMock run with `--global-response-templating`, pass `--templated` (`templated: true` in `checkStubs`) to skip every body that has a `{{`. A generated stub whose `specHash` differs from the spec is a warning to regenerate, not a failure, and its content is checked all the same.
+
+The schema check covers the keywords that decide a response's shape: `type` (also as a list, and with `nullable`), `required`, `properties`, `additionalProperties` (false, or a schema), `items`, `enum`, `const`, `allOf`, `oneOf`, `anyOf` and `$ref`, across files, including recursive ones. Formats, patterns and numeric or length limits aren't checked.
+
+`--allowlist` takes the same file as `check-operation-map`, with a mapping's file name (`getPet.json`) per line, and an entry that no longer matches a problem fails as stale. `--json` prints `{ problems, warnings, allowlisted, stale }`. Exit codes are 0, 1 for findings and 2 when it can't run, including when `--out` would overwrite a file.
+
+`generateStubs` and `checkStubs` are exported from `@bearingsoftware/component-test-framework/openapi`.
 
 ## Auditing which operations features exercise
 
