@@ -14,6 +14,7 @@ import { parseFeature } from './gherkin'
 import { readOperationMap } from './map-file'
 import { readAllowlist } from './check'
 import { loadSpecDetail } from './spec'
+import { boundForEvidence, type TestStrength } from '../faults/report'
 
 /** Options for {@link collectEvidence}. Paths are relative to the working directory, inside the repo. */
 export interface EvidenceOptions {
@@ -36,6 +37,11 @@ export interface EvidenceOptions {
   noDefaultExclusions?: boolean
   patterns?: RegExp[]
   statusPatterns?: RegExp[]
+  /**
+   * A `ctf faults` test-strength.json to embed as `testStrength` in evidence.json,
+   * bounded. It never feeds the coverage or api-break files.
+   */
+  testStrength?: string
   /** Directory the four files are written to. */
   out: string
   /** Where to run git; default the working directory. */
@@ -596,6 +602,7 @@ function compute(
     statusGaps: { head: headGaps, new: newGaps, closed: closedGaps },
     operations: { changedInSpec: [...changedOps.keys()].sort(), changedWithoutScenario },
     unasserted,
+    ...(options.testStrength && { testStrength: readTestStrength(options.testStrength) }),
     notComputed: ['retries', 'flakeHistory'],
   }
 
@@ -608,6 +615,23 @@ function compute(
     `${JSON.stringify(evidence, null, 2)}\n`,
   )
   return evidence
+}
+
+function readTestStrength(file: string) {
+  let parsed: TestStrength
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf-8')) as TestStrength
+  } catch (err) {
+    throw new EvidenceError(
+      `--test-strength ${file} can't be read as JSON: ${(err as Error).message}`,
+    )
+  }
+  if (parsed?.version !== 1 || !Array.isArray(parsed.survived)) {
+    throw new EvidenceError(
+      `--test-strength ${file} isn't a ctf faults test-strength.json (version 1)`,
+    )
+  }
+  return boundForEvidence(parsed)
 }
 
 function packageVersion(): string {
