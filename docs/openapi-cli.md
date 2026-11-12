@@ -13,6 +13,7 @@ npx ctf generate-operation-map backend/openapi.yaml --out support/operation-map.
 ```
 
 The map has one entry per operation, named by its `operationId`, or, in a spec without them, by its method and path (`GET /projects/{id}/remediable` is `getProjectsByIdRemediable`). Each entry carries the operation's summary as a comment. It's exported `as const satisfies OperationMap`, with an `OperationName` type, so a mistyped name is a compile error. Options:
+
 - `--include` and `--exclude` take a regular expression to pick operations by name.
 - `--export-name` renames the exported constant.
 - `--import-from` changes where `OperationMap` is imported from.
@@ -25,18 +26,21 @@ npx ctf check-operation-map support/operation-map.ts backend/openapi.yaml
 ```
 
 It fails when:
+
 - **Not in the spec:** a map entry isn't in the spec.
 - **Different path:** the spec has the same `operationId` at a different method or path.
 - **Different name:** the spec gives the entry's route a different `operationId`.
 - **Unreadable entry:** an entry can't be read, such as a spread or a computed path. It's reported rather than skipped.
 
 It finds entries in the map file without running it, so entries a formatter has wrapped over several lines are checked too.
+
 - **The form it reads:** the map must be a top-level `const operationMap = { … }`, exported or not, optionally `as const` or `satisfies OperationMap`. `--export-name` reads another name. `export default { … }` and `module.exports` aren't read.
 - **Syntax and duplicates:** a file that doesn't parse fails. A duplicate key is reported, since only its last entry counts at runtime.
 
 An entry is checked against the operation its request would actually reach, so `getOrg: GET /orgs/me` fails when the spec also has `/orgs/me`.
 
 A spec without `operationId`s is matched by method and path instead.
+
 - **Test values:** a map path may carry a test's concrete values (`/orgs/acme`, `/files/report.json`, `?ecosystem=npm`) where the spec has a parameter.
 - **Parameter names:** these needn't agree.
 - **Trailing slashes:** a trailing slash makes a different path, as it does to most routers.
@@ -64,6 +68,7 @@ npx ctf stubs --check vendor/openapi.yaml wiremock/vendor --allowlist stubs-allo
 ```
 
 **Generating.** It writes one [WireMock](wiremock.md) mapping per operation to `<dir>/mappings/<name>.json`, where `<name>` is the operation's name as in the map above. That is WireMock's own layout, so `the {word} API is stubbed from {word}` and `wiremockBaseline` load the directory as it is.
+
 - **Matching:** the method, and `urlPathTemplate` with the spec's path (`/api/pets/{petId}`), base path included. It matches any value in a path parameter and nothing across a `/`. `--base-path` overrides the base path. A path with more fixed segments gets a lower `priority` number (6 for `/api/pets/mine`, 7 for `/api/pets/{petId}`), so it wins over a parameter path whatever the load order. They run from 9 down to 6 (three fixed segments or more), so a stub you or a scenario add at WireMock's default of 5 wins over a generated one. Error stubs are 10.
 - **Response:** the lowest documented 2xx, with the example the spec gives. The first of these is used: the response's `example`, the first of its `examples` (its `value`), the schema's `example`. A response documented as `2XX` only is stubbed as a 200. A response with no body, such as a 204, gets a stub with no body. A `null` example is written as `body: "null"`, as WireMock serves a `jsonBody` of null as an empty body. `Content-Type` is the media type the example is under: `application/json`, else another JSON type, else the first one.
 - **Examples are checked:** an example that doesn't fit its own schema is written all the same, with a warning on stderr.
@@ -75,6 +80,7 @@ npx ctf stubs --check vendor/openapi.yaml wiremock/vendor --allowlist stubs-allo
 - **Metadata:** each mapping carries `metadata: { generatedBy: "ctf stubs", operation, specHash }`, where `specHash` is the SHA-256 of the spec file, so a check can tell generated stubs from hand-written ones.
 
 **Checking.** It reads every `.json` file in `<dir>/mappings`, generated or hand-written, and fails when a mapping:
+
 - goes to no spec operation, by its method and its `url`, `urlPath` or `urlPathTemplate`;
 - answers with a status the operation doesn't document (`default`, and `2XX`-style ranges, document what they cover);
 - has a JSON body (`jsonBody`, or a `body` that parses) that doesn't fit the response's schema. Each finding names the JSON pointer of the failing value.
@@ -94,6 +100,7 @@ npx ctf audit-coverage backend/openapi.yaml --features features --map support/op
 ```
 
 It prints each spec operation no feature file references, and on stderr, any name a feature uses that is neither a spec operation nor in the map: a typo, or a removed operation.
+
 - **How references are found:** by default, the framework's step wording, "to the `<name>` operation". `--pattern` takes other wordings, each a regular expression with the name in its first group.
 - **The map:** `--map` names the operations of a spec without `operationId`s, and adds the map's other names for an operation.
 - **Several specs:** pass more than one spec to audit their operations together.
@@ -115,6 +122,32 @@ npx ctf audit-coverage backend/openapi.yaml --features features --statuses --fai
 - **Later work:** auth roles and omitted required fields are not audited.
 
 The same functions are exported from `@bearingsoftware/component-test-framework/openapi` for scripts of your own.
+
+## Detecting breaking changes: `ctf api-diff`
+
+```sh
+npx ctf api-diff base/openapi.yaml head/openapi.yaml --allowlist api-diff-allowlist.txt --out-flag api-break.txt
+```
+
+It compares the spec on the base branch with the one on the PR head, from a client's point of view: a change is breaking when an existing client could fail. Operations are matched by method and path, and path parameter names don't count (`/pets/{id}` is `/pets/{petId}`).
+
+**Breaking:** `operation-removed`; `response-status-removed` (a documented 2xx that the head no longer has, with no `default` or `2XX` to cover it); `request-param-added-required` (a new required parameter, or an optional one made required); `request-param-removed`; `request-body-required-added` (the body becomes required, or a property becomes required, or `required` names an undeclared property); `request-property-type-changed` (a request type narrows, or enum values are removed); `request-body-removed` (a request body is removed); `request-property-removed` (only when the head sets `additionalProperties: false` at that level; otherwise non-breaking, see below); `response-property-removed` (including a required property made optional); `response-property-type-changed` (a response type widens); `response-enum-added`; `media-type-removed` (request or 2xx response, matched without parameters such as `charset`, with a head `*/*` or `type/*` covering the base type).
+
+**Non-breaking, listed but never failing:** `operation-added`, `response-status-added`, `optional-param-added`, `response-property-added`, `request-enum-added`, `request-property-removed` (where the head is open), and `description-changed` (summary and description, shown only with `--json`).
+
+Types: a request type may widen (`integer` to `number`, or adding `null`) and a response type may narrow; the reverse of each is breaking. `allOf` parts are merged, `$ref`s are followed (recursive ones too), and `oneOf`/`anyOf` are compared by their branch types, so a branch removed from a response is fine and one removed from a request is breaking. Formats, patterns, and numeric or length limits are not compared. `nullable` and Swagger 2's `x-nullable` both count as nullable.
+
+**Known limit:** `oneOf` and `anyOf` are compared by the set of branch types only. Properties inside a branch are not compared, so a property removed from one branch is not reported.
+
+A removed request property is breaking only when the head schema at that level sets `additionalProperties: false`, since a client that still sends it fails only against a server that rejects unknown fields. A head schema of `{}` accepts anything, so the removal of its properties is not reported. A removed request body is always breaking.
+
+**Exit status:** 0 with no breaking change, 1 with one (or a stale allowlist entry), 2 when it can't run. `--out-flag <file>` writes `true` or `false` for "a breaking change was found" (not counting allowlisted ones) on exits 0 and 1. On exit 2 it deletes the file if one exists, so an earlier run's answer is never read. `--json` prints `{ version: 1, breaking, nonBreaking }`, each finding with its `rule`, `operation`, `location` (a JSON pointer into the spec) and `detail`.
+
+**`--allowlist`:** one entry per line, `METHOD /path` or `METHOD /path <rule>`. It suppresses the matching breaking findings, and an entry that matches none fails as stale, as in `check-operation-map`.
+
+`diffSpecs` is exported from `@bearingsoftware/component-test-framework/openapi`.
+
+To get the break flag, status coverage and scenario changes together for a pull request, use [`ctf evidence`](evidence.md).
 
 ## Scaffolding a suite: `ctf init`
 

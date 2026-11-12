@@ -26,3 +26,7 @@ export type {
 } from './openapi/stubs'
 export { validateSchema } from './openapi/schema'
 export type { SchemaError } from './openapi/schema'
+export { diffSpecs } from './openapi/diff'
+export type { Finding, DiffResult, Rule } from './openapi/diff'
+export { collectEvidence, EvidenceError, DEFAULT_EXCLUDE_TAGS } from './openapi/evidence'
+export type { EvidenceOptions } from './openapi/evidence'

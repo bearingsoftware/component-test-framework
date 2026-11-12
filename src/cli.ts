@@ -14,6 +14,8 @@ import {
 } from './openapi/audit'
 import { readOperationMap } from './openapi/map-file'
 import { checkStubs, existingFiles, generateStubs } from './openapi/stubs'
+import { applyAllowlist, diffSpecs } from './openapi/diff'
+import { collectEvidence } from './openapi/evidence'
 import { stepCatalogue } from './steps/catalogue'
 import { initProject, nextSteps, PIECES, type Piece } from './cli/init'
 
@@ -76,6 +78,30 @@ Commands:
                                     an entry that matches nothing fails as stale
       --templated                   WireMock templates every response: skip bodies with {{
       --json                        Print the result as JSON
+
+  api-diff <base> <head>          List what changed between two OpenAPI specs, and which are breaking
+      --allowlist <file>            Accepted breaks, "METHOD /path" or "METHOD /path <rule>" per line;
+                                    an entry that matches no breaking change fails as stale
+      --out-flag <file>             Write true or false: whether a breaking change was found
+      --json                        Print the result as JSON
+
+  evidence                        Write test evidence for risk-gate, computed from files at a
+                                  git base and the head, without running anything
+      --base <git-ref>              The ref to compare against (required; needs its history)
+      --head <git-ref>              The ref to evidence (default: the working tree)
+      --spec <path>                 An OpenAPI spec (repeatable, required)
+      --features <dir|file>         Feature files to read (repeatable, required)
+      --map <file>                  The suite's operation map
+      --allowlist <file>            api-diff allowlist, read from the base
+      --exclude-tags <list>         Comma-separated tags whose scenarios don't count, in
+                                    addition to @skip, @pending and @wip
+      --no-default-exclusions       Exclude only the --exclude-tags
+      --base-path <path>            As for audit-coverage and api-diff
+      --pattern <regex>             How features name an operation (as audit-coverage)
+      --status-pattern <regex>      How features assert a status (as audit-coverage)
+      --out <dir>                   Write coverage-base.txt, coverage-head.txt, api-break.txt
+                                    and evidence.json here (required)
+                                    Exits 0 once written, never 1.
 
 Exit status: 0 when all is well, 1 when a check finds problems (or the audit
 finds gaps with --fail-on-gaps), 2 when the command can't run.
@@ -302,6 +328,55 @@ function audit(args: string[]): number {
   return values['fail-on-gaps'] && failing > 0 ? 1 : 0
 }
 
+function evidence(args: string[]): number {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      base: { type: 'string' },
+      head: { type: 'string' },
+      spec: { type: 'string', multiple: true },
+      features: { type: 'string', multiple: true },
+      map: { type: 'string' },
+      allowlist: { type: 'string' },
+      'exclude-tags': { type: 'string' },
+      'no-default-exclusions': { type: 'boolean' },
+      pattern: { type: 'string', multiple: true },
+      'status-pattern': { type: 'string', multiple: true },
+      out: { type: 'string' },
+      'base-path': { type: 'string' },
+    },
+  })
+  if (positionals.length > 0) throw new UsageError('evidence takes options only')
+  if (!values.base) throw new UsageError('evidence needs --base')
+  if (!values.spec?.length) throw new UsageError('evidence needs --spec')
+  if (!values.features?.length) throw new UsageError('evidence needs --features')
+  if (!values.out) throw new UsageError('evidence needs --out')
+
+  const result = collectEvidence({
+    base: values.base,
+    head: values.head,
+    specs: values.spec,
+    features: values.features,
+    map: values.map,
+    basePath: values['base-path'],
+    allowlist: values.allowlist,
+    excludeTags: values['exclude-tags']
+      ?.split(',')
+      .map((t) => t.trim())
+      .filter(Boolean),
+    noDefaultExclusions: values['no-default-exclusions'],
+    patterns: values.pattern?.map((p) => regex(p) as RegExp),
+    statusPatterns: values['status-pattern']?.map((p) => regex(p) as RegExp),
+    out: values.out,
+  })
+  console.log(
+    `wrote ${values.out}: coverage ${result.coverage.base.toFixed(2)} -> ${result.coverage.head.toFixed(2)}, ` +
+      `api break ${result.apiDiff.breaking.length > 0}`,
+  )
+  return 0
+}
+
 function steps(args: string[]): number {
   const { values, positionals } = parseArgs({
     args,
@@ -403,6 +478,47 @@ function stubs(args: string[]): number {
   return 0
 }
 
+function apiDiff(args: string[]): number {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      'base-path': { type: 'string' },
+      json: { type: 'boolean' },
+      allowlist: { type: 'string' },
+      'out-flag': { type: 'string' },
+    },
+  })
+  // A flag left by an earlier run must not be read as this run's answer.
+  if (values['out-flag']) fs.rmSync(values['out-flag'], { force: true })
+  if (positionals.length !== 2) throw new UsageError('api-diff takes a base spec and a head spec')
+  const [base, head] = positionals
+
+  const diff = diffSpecs(base, head, { basePath: values['base-path'] })
+  const allowed = applyAllowlist(
+    diff.breaking,
+    values.allowlist ? readAllowlist(values.allowlist) : [],
+  )
+  const breaking = allowed.breaking
+  const shown = diff.nonBreaking.filter((f) => f.rule !== 'description-changed')
+
+  if (values.json) {
+    console.log(JSON.stringify({ version: 1, breaking, nonBreaking: diff.nonBreaking }, null, 2))
+  } else {
+    for (const f of breaking)
+      console.log(`breaking  ${f.rule}  ${f.operation}  ${f.location}  ${f.detail}`)
+    for (const f of shown)
+      console.log(`non-breaking  ${f.rule}  ${f.operation}  ${f.location}  ${f.detail}`)
+    const allowedNote = allowed.allowlisted ? `, ${allowed.allowlisted} allowlisted` : ''
+    console.log(`${breaking.length} breaking, ${shown.length} non-breaking${allowedNote}`)
+  }
+  for (const line of allowed.stale) {
+    console.error(`${values.allowlist}: '${line}' no longer matches any breaking change; remove it`)
+  }
+  if (values['out-flag']) fs.writeFileSync(values['out-flag'], String(breaking.length > 0))
+  return breaking.length > 0 || allowed.stale.length > 0 ? 1 : 0
+}
+
 export function main(argv: string[]): number {
   const [command, ...rest] = argv
   try {
@@ -419,7 +535,9 @@ export function main(argv: string[]): number {
     if (command === 'check-operation-map') return check(rest)
     if (command === 'audit-coverage') return audit(rest)
     if (command === 'stubs') return stubs(rest)
+    if (command === 'api-diff') return apiDiff(rest)
     if (command === 'steps') return steps(rest)
+    if (command === 'evidence') return evidence(rest)
     throw new UsageError(`unknown command: ${command}`)
   } catch (err) {
     const usage =
