@@ -15,3 +15,12 @@ export {
 export { registerWiremockSteps } from './steps/register'
 export { wiremockAdapter } from './adapters/wiremock'
 export type { WireMockAdapterOptions } from './adapters/wiremock'
+export { stub, StubBuilder, valueMatcher } from './mocking/rest'
+export type { Buildable, Mapping, ValueMatcher } from './mocking/rest'
+export { graphql, OperationStub, operationBodyPatterns } from './mocking/graphql'
+export type {
+  GraphQLEndpoint,
+  GraphQLError,
+  GraphQLResponse,
+  OperationKind,
+} from './mocking/graphql'

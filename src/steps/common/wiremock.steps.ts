@@ -3,6 +3,8 @@ import { strict as assert } from 'assert'
 import * as path from 'path'
 import type { ComponentTestWorld } from '../../support/world'
 import { eventually, StopRetrying, waitTimeout } from '../../support/eventually'
+import { graphql } from '../../mocking/graphql'
+import type { OperationKind, OperationStub } from '../../mocking/graphql'
 
 /**
  * Wait until WireMock has received exactly `count` requests matching the
@@ -131,6 +133,97 @@ Then(
         const actual = await this.wiremock.getScenarioState(name)
         if (actual === undefined) throw new StopRetrying(`WireMock has no scenario "${name}"`)
         assert.equal(actual, state, `WireMock scenario "${name}" is in state "${actual}"`)
+      },
+      { timeout: waitTimeout(this.config) },
+    )
+  },
+)
+
+// COMPONENT-23: GraphQL operations, matched by operationName or by the name in
+// the query text. A service's endpoint comes from config.graphql.endpoints.
+function graphqlEndpoint(world: ComponentTestWorld, service: string): string {
+  return world.config.graphql?.endpoints?.[service] ?? '/graphql'
+}
+
+function operationKind(kind: string): OperationKind {
+  if (kind === 'query' || kind === 'mutation' || kind === 'operation') return kind
+  throw new Error(`Expected "query", "mutation" or "operation" in the step, got "${kind}"`)
+}
+
+function graphqlStub(
+  world: ComponentTestWorld,
+  service: string,
+  kind: string,
+  name: string,
+): OperationStub {
+  return graphql.endpoint(graphqlEndpoint(world, service))[operationKind(kind)](name)
+}
+
+Given(
+  'the {word} GraphQL {word} {word} returns:',
+  async function (
+    this: ComponentTestWorld,
+    service: string,
+    kind: string,
+    name: string,
+    doc: string,
+  ) {
+    await this.wiremock.register(
+      graphqlStub(this, service, kind, name).willReturnData(JSON.parse(doc)),
+    )
+  },
+)
+
+Given(
+  'the {word} GraphQL {word} {word} returns the errors:',
+  async function (
+    this: ComponentTestWorld,
+    service: string,
+    kind: string,
+    name: string,
+    doc: string,
+  ) {
+    await this.wiremock.register(
+      graphqlStub(this, service, kind, name).willReturnErrors(JSON.parse(doc)),
+    )
+  },
+)
+
+Given(
+  'the {word} GraphQL {word} {word} with variables {string} returns:',
+  async function (
+    this: ComponentTestWorld,
+    service: string,
+    kind: string,
+    name: string,
+    variables: string,
+    doc: string,
+  ) {
+    await this.wiremock.register(
+      graphqlStub(this, service, kind, name)
+        .withVariables(JSON.parse(variables))
+        .willReturnData(JSON.parse(doc)),
+    )
+  },
+)
+
+Then(
+  'the {word} GraphQL {word} {word} was called {int} time(s)',
+  async function (
+    this: ComponentTestWorld,
+    service: string,
+    kind: string,
+    name: string,
+    count: number,
+  ) {
+    const endpoint = graphqlEndpoint(this, service)
+    const k = operationKind(kind)
+    await eventually(
+      async () => {
+        const actual = await this.wiremock.graphqlRequestCount(endpoint, name, { kind: k })
+        const message = `Expected ${count} calls to ${service} GraphQL ${kind} ${name} at ${endpoint}, got ${actual}`
+        if (actual > count) throw new StopRetrying(message)
+        assert.equal(actual, count, message)
       },
       { timeout: waitTimeout(this.config) },
     )
