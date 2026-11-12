@@ -23,9 +23,10 @@ export interface GraphQLResponse {
  * text (`mutation obtainKrakenToken($input: ...) {`), as joule-genie's Go
  * client does. So the name matches when either holds:
  *   - `$.query` declares `<keyword> <Name>` followed by a word boundary, so
- *     `obtainKrakenToken` never matches `obtainKrakenTokenV2`;
- *   - `$.operationName` equals the name and the query text does not declare
- *     that name under a different keyword.
+ *     `obtainKrakenToken` never matches `obtainKrakenTokenV2`, and
+ *     `$.operationName` is absent or equals the name;
+ *   - `$.operationName` equals the name and the query text, if any, does not
+ *     declare that name under a different keyword.
  * It is one `or` body pattern of `matchesJsonPath` matchers, which WireMock
  * 3.13.2 evaluates correctly (checked live in graphql.integration.test.ts).
  * `matches` must cover the whole value in WireMock, hence the `(?s).*`.
@@ -40,16 +41,29 @@ export function operationBodyPatterns(
   const keywords = kind === 'operation' ? KEYWORDS : [kind]
   const others = KEYWORDS.filter((k) => !keywords.includes(k))
   const declares = (words: string[]) => `(?s).*\\b(?:${words.join('|')})\\s+${name}\\b.*`
+  const opName = (matcher: Mapping) => ({
+    matchesJsonPath: { expression: '$.operationName', ...matcher },
+  })
   const byQueryText = {
-    matchesJsonPath: { expression: '$.query', matches: declares(keywords) },
+    and: [
+      { matchesJsonPath: { expression: '$.query', matches: declares(keywords) } },
+      // operationName picks one operation of the document, so it must pick this one.
+      { or: [opName({ absent: true }), opName({ equalTo: name })] },
+    ],
   }
-  const named = { matchesJsonPath: { expression: '$.operationName', equalTo: name } }
+  const named = opName({ equalTo: name })
   const byOperationName =
     others.length > 0
       ? {
           and: [
             named,
-            { matchesJsonPath: { expression: '$.query', doesNotMatch: declares(others) } },
+            {
+              // A persisted query sends operationName with no query text.
+              or: [
+                { matchesJsonPath: { expression: '$.query', absent: true } },
+                { matchesJsonPath: { expression: '$.query', doesNotMatch: declares(others) } },
+              ],
+            },
           ],
         }
       : named

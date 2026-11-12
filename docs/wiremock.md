@@ -61,6 +61,8 @@ Matching rules:
 - `withJsonBody` is a partial match: extra properties in the request are ignored, array order is not.
 - `withQuery` and `withHeader` take an exact string or a `RegExp`. A `RegExp` matches where `test` would, anywhere in the value, so `/^Bearer /` matches `Bearer abc`. Only the `i` flag is supported.
 - Other query parameters and headers are ignored.
+- `withJsonBody` (and GraphQL `withVariables`) also ignore extra trailing items in an array, as WireMock's `ignoreExtraElements` does.
+- A `RegExp` becomes a Java regular expression. Syntax Java cannot compile, such as `[^]`, fails when the stub is registered, not when it is built.
 - `willReturn(status, json?, headers?)` sets `Content-Type: application/json` when there is a body. `willReturnStatus` sends no body. `willReturnBody(status, text, contentType)` sends text.
 - A lower `priority` wins. At equal priority the stub registered last wins.
 
@@ -88,7 +90,9 @@ Matching rules:
 - The operation matches by `operationName` or by the name the query text declares, `(query|mutation|subscription) <Name>`. A client that sends no `operationName`, only `mutation obtainKrakenToken($input: ...) {` in `query`, matches. This is how joule-genie's Go client calls Octopus Kraken.
 - The name must match whole: `obtainKrakenToken` does not match `obtainKrakenTokenV2`.
 - `query` and `mutation` stubs check the keyword where the query text declares one, so a `query` stub does not answer a `mutation` of the same name. `operation` accepts any keyword. A request that gives `operationName` and a shorthand query (`{ x }`) declares none, and matches.
+- When a request gives `operationName`, it picks the operation of the document: a stub for another operation of the same document does not match. A persisted query that sends `operationName` with no `query` matches by the name alone.
 - `withVariables` is a partial match on `variables`: extra variables are ignored.
+- The name is looked for in the query text as text, so a name inside a comment or a string argument can match. Matching by `contains` did the same.
 - Responses are HTTP 200 with JSON `{data}`, `{errors}` or both. `withHttpStatus` replaces the status, for a transport failure.
 - The last stub registered wins when several match, so register the general stub before the one with variables.
 - `graphqlRequestCount(endpoint, name, { kind?, variables? })` counts with the same name rule.

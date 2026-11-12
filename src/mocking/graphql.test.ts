@@ -40,24 +40,35 @@ describe('GraphQL stub mapping (COMPONENT-23)', () => {
     expect(gql.operation('x').withHttpStatus(500).build().response).toEqual({ status: 500 })
   })
 
-  it('matches by operationName or the name in the query text, and any variables', () => {
+  it('matches by the query text with a compatible operationName, or by operationName', () => {
     const [name] = operationBodyPatterns('mutation', 'obtainKrakenToken')
+    const opName = (m: object) => ({ matchesJsonPath: { expression: '$.operationName', ...m } })
     expect(name).toEqual({
       or: [
         {
-          matchesJsonPath: {
-            expression: '$.query',
-            matches: '(?s).*\\b(?:mutation)\\s+obtainKrakenToken\\b.*',
-          },
-        },
-        {
           and: [
-            { matchesJsonPath: { expression: '$.operationName', equalTo: 'obtainKrakenToken' } },
             {
               matchesJsonPath: {
                 expression: '$.query',
-                doesNotMatch: '(?s).*\\b(?:query|subscription)\\s+obtainKrakenToken\\b.*',
+                matches: '(?s).*\\b(?:mutation)\\s+obtainKrakenToken\\b.*',
               },
+            },
+            { or: [opName({ absent: true }), opName({ equalTo: 'obtainKrakenToken' })] },
+          ],
+        },
+        {
+          and: [
+            opName({ equalTo: 'obtainKrakenToken' }),
+            {
+              or: [
+                { matchesJsonPath: { expression: '$.query', absent: true } },
+                {
+                  matchesJsonPath: {
+                    expression: '$.query',
+                    doesNotMatch: '(?s).*\\b(?:query|subscription)\\s+obtainKrakenToken\\b.*',
+                  },
+                },
+              ],
             },
           ],
         },
@@ -68,15 +79,10 @@ describe('GraphQL stub mapping (COMPONENT-23)', () => {
 
   it('an operation stub accepts every keyword, with no query check on operationName', () => {
     const [name] = operationBodyPatterns('operation', 'a') as { or: unknown[] }[]
-    expect(name.or).toEqual([
-      {
-        matchesJsonPath: {
-          expression: '$.query',
-          matches: '(?s).*\\b(?:query|mutation|subscription)\\s+a\\b.*',
-        },
-      },
-      { matchesJsonPath: { expression: '$.operationName', equalTo: 'a' } },
-    ])
+    expect(JSON.stringify(name.or[0])).toContain('(?:query|mutation|subscription)')
+    expect(name.or[1]).toEqual({
+      matchesJsonPath: { expression: '$.operationName', equalTo: 'a' },
+    })
   })
 
   it('adds partial variables on $.variables', () => {

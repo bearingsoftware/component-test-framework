@@ -98,6 +98,39 @@ describe.skipIf(!url)('GraphQL mocking against WireMock (COMPONENT-23)', () => {
     expect((await send({ query: 'query other { a }' })).status).toBe(404)
   })
 
+  it('lets operationName pick the operation of a multi-operation document', async () => {
+    await client.register(
+      octopus.query('A').willReturnData({ hit: 'A' }),
+      octopus.mutation('account').willReturnData({ hit: 'account' }),
+    )
+    const doc = 'query A { a } query B { b }'
+    expect((await send({ query: doc, operationName: 'B' })).status).toBe(404)
+    expect((await send({ query: doc, operationName: 'A' })).body.data).toEqual({ hit: 'A' })
+    expect((await send({ query: doc })).body.data).toEqual({ hit: 'A' })
+    expect((await send({ query: doc, operationName: null })).body.data).toEqual({ hit: 'A' })
+    const mixed = 'query A { a } mutation account { b }'
+    expect((await send({ query: mixed, operationName: 'A' })).body.data).toEqual({ hit: 'A' })
+    expect((await send({ query: mixed, operationName: 'account' })).body.data).toEqual({
+      hit: 'account',
+    })
+  })
+
+  it('does not let a mutation stub answer another operation of the document', async () => {
+    await client.register(octopus.mutation('account').willReturnData({ hit: 'account' }))
+    const mixed = 'query A { a } mutation account { b }'
+    expect((await send({ query: mixed, operationName: 'A' })).status).toBe(404)
+  })
+
+  it('matches a persisted query that sends operationName with no query text', async () => {
+    await client.register(
+      octopus.query('account').willReturnData({ hit: 'q' }),
+      octopus.operation('other').willReturnData({ hit: 'o' }),
+    )
+    expect((await send({ operationName: 'account' })).body.data).toEqual({ hit: 'q' })
+    expect((await send({ operationName: 'other' })).body.data).toEqual({ hit: 'o' })
+    expect((await send({ operationName: 'accountV2' })).status).toBe(404)
+  })
+
   it('matches variables partially', async () => {
     await client.register(
       octopus.query('account').willReturnData({ account: 'other' }),
