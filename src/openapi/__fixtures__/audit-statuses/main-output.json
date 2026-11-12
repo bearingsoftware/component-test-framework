@@ -1,0 +1,85 @@
+{
+  "text": {
+    "args": [
+      "audit-coverage",
+      "src/openapi/__fixtures__/shop.yaml",
+      "--features",
+      "src/openapi/__fixtures__/features"
+    ],
+    "status": 0,
+    "stdout": "listOrders\tGET /api/v1/orders\ncancelOrder\tDELETE /api/v1/orders/{orderId}\nlistMyOrders\tGET /api/v1/orders/mine\nhealth\tGET /api/v1/health\nlistThings\tGET /api/v1/things\n",
+    "stderr": "src/openapi/__fixtures__/features/orders.feature:6: 'listOrdres' is not an operation in the spec or the map\n\n7 operations, 2 exercised by a feature, 5 not.\n"
+  },
+  "fail-on-gaps": {
+    "args": [
+      "audit-coverage",
+      "src/openapi/__fixtures__/shop.yaml",
+      "--features",
+      "src/openapi/__fixtures__/features",
+      "--fail-on-gaps"
+    ],
+    "status": 1,
+    "stdout": "listOrders\tGET /api/v1/orders\ncancelOrder\tDELETE /api/v1/orders/{orderId}\nlistMyOrders\tGET /api/v1/orders/mine\nhealth\tGET /api/v1/health\nlistThings\tGET /api/v1/things\n",
+    "stderr": "src/openapi/__fixtures__/features/orders.feature:6: 'listOrdres' is not an operation in the spec or the map\n\n7 operations, 2 exercised by a feature, 5 not.\n"
+  },
+  "map-and-pattern": {
+    "args": [
+      "audit-coverage",
+      "src/openapi/__fixtures__/shop.yaml",
+      "--features",
+      "src/openapi/__fixtures__/features",
+      "--map",
+      "src/openapi/__fixtures__/map.ts",
+      "--pattern",
+      "send the request (\\w+) to"
+    ],
+    "status": 0,
+    "stdout": "listOrders\tGET /api/v1/orders\ncreateOrder\tPOST /api/v1/orders\ngetOrder\tGET /api/v1/orders/{orderId}\ncancelOrder\tDELETE /api/v1/orders/{orderId}\nlistMyOrders\tGET /api/v1/orders/mine\nhealth\tGET /api/v1/health\nlistThings\tGET /api/v1/things\n",
+    "stderr": "src/openapi/__fixtures__/features/orders.feature:3: 'newOrder' is not an operation in the spec or the map\nsrc/openapi/__fixtures__/features/orders.feature:4: 'empty' is not an operation in the spec or the map\nsrc/openapi/__fixtures__/features/orders.feature:6: 'empty' is not an operation in the spec or the map\n\n7 operations, 0 exercised by a feature, 7 not.\n"
+  },
+  "shared-paths": {
+    "args": [
+      "audit-coverage",
+      "src/openapi/__fixtures__/shared-paths.yaml",
+      "--features",
+      "src/openapi/__fixtures__/features",
+      "--fail-on-gaps"
+    ],
+    "status": 2,
+    "stdout": "",
+    "stderr": "ctf: src/openapi/__fixtures__/shared-paths.yaml has no paths: is it an OpenAPI or Swagger document?\n"
+  },
+  "two-specs": {
+    "args": [
+      "audit-coverage",
+      "src/openapi/__fixtures__/shop.yaml",
+      "src/openapi/__fixtures__/unnamed.json",
+      "--features",
+      "src/openapi/__fixtures__/features"
+    ],
+    "status": 0,
+    "stdout": "listOrders\tGET /api/v1/orders\ncancelOrder\tDELETE /api/v1/orders/{orderId}\nlistMyOrders\tGET /api/v1/orders/mine\nhealth\tGET /api/v1/health\nlistThings\tGET /api/v1/things\n(unnamed)\tGET /v2/projects/{id}/remediable\n(unnamed)\tPOST /v2/projects/{id}/remediable\n(unnamed)\tGET /v2/projects\n(unnamed)\tPOST /v2/2fa/codes\n",
+    "stderr": "src/openapi/__fixtures__/features/orders.feature:6: 'listOrdres' is not an operation in the spec or the map\n\n11 operations, 2 exercised by a feature, 9 not.\n"
+  },
+  "json": {
+    "args": [
+      "audit-coverage",
+      "src/openapi/__fixtures__/shop.yaml",
+      "--features",
+      "src/openapi/__fixtures__/features",
+      "--json"
+    ],
+    "status": 0,
+    "stdout": "{\n  \"operations\": [\n    {\n      \"name\": \"listOrders\",\n      \"aliases\": [\n        \"listOrders\"\n      ],\n      \"method\": \"GET\",\n      \"path\": \"/api/v1/orders\",\n      \"references\": []\n    },\n    {\n      \"name\": \"createOrder\",\n      \"aliases\": [\n        \"createOrder\"\n      ],\n      \"method\": \"POST\",\n      \"path\": \"/api/v1/orders\",\n      \"references\": [\n        \"src/openapi/__fixtures__/features/orders.feature:3\"\n      ]\n    },\n    {\n      \"name\": \"getOrder\",\n      \"aliases\": [\n        \"getOrder\"\n      ],\n      \"method\": \"GET\",\n      \"path\": \"/api/v1/orders/{orderId}\",\n      \"references\": [\n        \"src/openapi/__fixtures__/features/orders.feature:4\"\n      ]\n    },\n    {\n      \"name\": \"cancelOrder\",\n      \"aliases\": [\n        \"cancelOrder\"\n      ],\n      \"method\": \"DELETE\",\n      \"path\": \"/api/v1/orders/{orderId}\",\n      \"references\": []\n    },\n    {\n      \"name\": \"listMyOrders\",\n      \"aliases\": [\n        \"listMyOrders\"\n      ],\n      \"method\": \"GET\",\n      \"path\": \"/api/v1/orders/mine\",\n      \"references\": []\n    },\n    {\n      \"name\": \"health\",\n      \"aliases\": [\n        \"health\"\n      ],\n      \"method\": \"GET\",\n      \"path\": \"/api/v1/health\",\n      \"references\": []\n    },\n    {\n      \"name\": \"listThings\",\n      \"aliases\": [\n        \"listThings\"\n      ],\n      \"method\": \"GET\",\n      \"path\": \"/api/v1/things\",\n      \"references\": []\n    }\n  ],\n  \"gaps\": [\n    {\n      \"name\": \"listOrders\",\n      \"aliases\": [\n        \"listOrders\"\n      ],\n      \"method\": \"GET\",\n      \"path\": \"/api/v1/orders\",\n      \"references\": []\n    },\n    {\n      \"name\": \"cancelOrder\",\n      \"aliases\": [\n        \"cancelOrder\"\n      ],\n      \"method\": \"DELETE\",\n      \"path\": \"/api/v1/orders/{orderId}\",\n      \"references\": []\n    },\n    {\n      \"name\": \"listMyOrders\",\n      \"aliases\": [\n        \"listMyOrders\"\n      ],\n      \"method\": \"GET\",\n      \"path\": \"/api/v1/orders/mine\",\n      \"references\": []\n    },\n    {\n      \"name\": \"health\",\n      \"aliases\": [\n        \"health\"\n      ],\n      \"method\": \"GET\",\n      \"path\": \"/api/v1/health\",\n      \"references\": []\n    },\n    {\n      \"name\": \"listThings\",\n      \"aliases\": [\n        \"listThings\"\n      ],\n      \"method\": \"GET\",\n      \"path\": \"/api/v1/things\",\n      \"references\": []\n    }\n  ],\n  \"unknown\": [\n    {\n      \"name\": \"listOrdres\",\n      \"where\": \"src/openapi/__fixtures__/features/orders.feature:6\"\n    }\n  ]\n}\n",
+    "stderr": ""
+  },
+  "no-features": {
+    "args": [
+      "audit-coverage",
+      "src/openapi/__fixtures__/shop.yaml"
+    ],
+    "status": 2,
+    "stdout": "",
+    "stderr": "ctf: audit-coverage needs --features\nRun ctf --help for usage.\n"
+  }
+}

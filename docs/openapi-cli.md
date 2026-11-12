@@ -106,6 +106,21 @@ It prints each spec operation no feature file references, and on stderr, any nam
 - **Several specs:** pass more than one spec to audit their operations together.
 - **Exit code:** it exits 0, as an audit, unless given `--fail-on-gaps`. `--json` prints everything, with each operation's references.
 
+### Response statuses
+
+`--statuses` also lists the documented response statuses no scenario asserts, as `name`, `METHOD /path` and status, one per line.
+
+```sh
+npx ctf audit-coverage backend/openapi.yaml --features features --statuses --fail-on-gaps
+```
+
+- **Pairing:** feature files are read as scenarios. Within a scenario, Background steps first, each operation reference is paired with the first `the response status should be <n>` after it and before the next reference. A reference with no such step is "exercised, status unasserted". An Outline's Examples rows are expanded first, so a `<status>` placeholder is read per row; a Rule's Background follows the Feature's; doc strings, data tables, comments and tags are never steps.
+- **What counts as a gap:** every status in the operation's `responses`, except `default`. A range such as `2XX` or `4XX` is met by any asserted status in it.
+- **`--status-pattern <regex>`:** how your suite asserts a status, the status in group 1 (repeatable; default "the response status should be (\d+)"). `--pattern` still says how operations are named.
+- **`--fail-on-gaps`:** with `--statuses`, also exits 1 on a status gap. Without `--statuses`, output and exit codes are what they were.
+- **`--json`:** always includes, for each operation, `statuses` (each status with its `reference -> assertion` pairs as `file:line`) and `unassertedReferences`, and `statusGaps` for the result.
+- **Later work:** auth roles and omitted required fields are not audited.
+
 The same functions are exported from `@bearingsoftware/component-test-framework/openapi` for scripts of your own.
 
 ## Detecting breaking changes: `ctf api-diff`
@@ -146,3 +161,12 @@ npx cucumber-js
 ```
 
 The images are the ones this repository's CI uses: `wiremock/wiremock:3.13.2`, `postgres:17-alpine`, `redis:7-alpine` and `axllent/mailpit:v1.33`. The generated suite needs `@cucumber/cucumber`, `typescript` 5 (ts-node does not run on TypeScript 7), `ts-node` and `@types/node` installed. The exit status is 0, or 2 for a usage mistake or a file it won't overwrite.
+
+## Listing the framework's steps: `ctf steps`
+
+```sh
+npx ctf steps          # a table
+npx ctf steps --json   # { "version": 1, "steps": [...] }
+```
+
+Each step has its `keyword` (`Given`, `When`, `Then` or `Step`), its `expression`, the `registeredBy` function and the `entryPoint` that exports it (`core`, `mailpit` or `spa`), and whether it is `optIn`: registered only when your suite calls the function. The list is captured from what the register functions really register, so it can't drift from the steps. Needs `@cucumber/cucumber`, a peer dependency; without it the command exits 2 with a message. `stepCatalogue()` is exported from `@bearingsoftware/component-test-framework/openapi`, with the other tooling, rather than from `core`, which a suite imports and which stays free of tooling.
