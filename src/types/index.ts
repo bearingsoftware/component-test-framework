@@ -156,7 +156,7 @@ export interface FrameworkConfig {
    * cleanup when both are set.
    */
   cleanup?: (world: ComponentTestWorld) => unknown | Promise<unknown>
-  /** Tables to truncate between scenarios (with CASCADE). */
+  /** Tables to clear between scenarios: DELETE, falling back to TRUNCATE … CASCADE. */
   cleanupTables?: string[]
   /**
    * Keep Cucumber `--parallel` workers apart: WireMock by path prefix,
