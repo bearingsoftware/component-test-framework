@@ -8,14 +8,14 @@ export interface RedisAdapterOptions {
 }
 
 /** Flushes the database before each scenario, closes subscriptions after. State is the client. */
-export function redisAdapter(options: RedisAdapterOptions): Adapter<RedisClient> {
-  return defineAdapter<RedisClient>({
+export function redisAdapter(options: RedisAdapterOptions): Adapter<RedisClient | undefined> {
+  return defineAdapter<RedisClient | undefined>({
     name: 'redis',
-    setup: () => (options.url ? new RedisClient(options.url) : (undefined as never)),
+    setup: () => (options.url ? new RedisClient(options.url) : undefined),
     ...(options.url && {
-      async beforeScenario(world, redis: RedisClient) {
+      async beforeScenario(world, redis) {
         world.redis = redis
-        await redis.flushDb()
+        await redis?.flushDb()
       },
     }),
     async afterScenario(world) {

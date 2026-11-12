@@ -36,6 +36,8 @@ import { registerHooks } from './hooks'
 import { defineAdapter, registerAdapter } from './adapter'
 import type { Adapter } from './adapter'
 import { ComponentTestWorld } from './world'
+import { redisAdapter } from '../adapters/redis'
+import type { RedisClient } from '../clients/redis-client'
 
 const baseOptions = { fixturesDir: './fixtures' }
 const passed = { pickle: { name: 'x', uri: 'x' }, result: { status: 'PASSED' } }
@@ -294,6 +296,10 @@ describe('adapters', () => {
       expectTypeOf(w.adapter(none)).toEqualTypeOf<undefined>()
     })
 
+    it('types the Redis adapter state as possibly undefined', () => {
+      expectTypeOf(redisAdapter({ url: '' })).toEqualTypeOf<Adapter<RedisClient | undefined>>()
+    })
+
     it('throws, naming the adapter, when it is not registered', () => {
       expect(() => newWorld().adapter(defineAdapter({ name: 'ghost' }))).toThrow(
         /Adapter "ghost" isn't registered/,
@@ -326,11 +332,16 @@ describe('adapters', () => {
       expect(calls).toEqual(['beforeAll', 'beforeScenario', 'afterScenario', 'afterAll'])
     })
 
-    it('throws on a second adapter with the same name', () => {
-      registerAdapter(defineAdapter({ name: 'twice' }))
-      expect(() => registerAdapter(defineAdapter({ name: 'twice' }))).toThrow(
-        'Adapter "twice" is registered twice.',
-      )
+    it('tolerates registerSpaServer and registerCoverage being called twice, as before', async () => {
+      const { registerSpaServer } = await import('../spa/server')
+      const { registerCoverage } = await import('../spa/coverage')
+      const spa = { distDir: '.', apiUrl: 'http://wm.test', defaultPort: 4200 }
+      expect(() => {
+        registerSpaServer(spa)
+        registerSpaServer(spa)
+        registerCoverage({ outDir: 'out' })
+        registerCoverage({ outDir: 'out' })
+      }).not.toThrow()
     })
   })
 })

@@ -57,7 +57,6 @@ export const FAILED_STATUSES = new Set<string>([
 
 // Per worker: Cucumber gives each parallel worker its own module instances.
 const states = new Map<AnyAdapter, unknown>()
-const standaloneNames = new Set<string>()
 
 /** The state of a registered adapter. Throws if it isn't registered. */
 export function adapterState<State>(adapter: Adapter<State>): State {
@@ -170,10 +169,6 @@ export function registerAdapter<State>(
   adapter: Adapter<State>,
   config: FrameworkConfig = {} as FrameworkConfig,
 ): State {
-  if (standaloneNames.has(adapter.name)) {
-    throw new Error(`Adapter "${adapter.name}" is registered twice.`)
-  }
-  standaloneNames.add(adapter.name)
   const ctx: AdapterContext = { config, worker: currentWorker() }
   initAdapters([adapter], ctx)
   const state = states.get(adapter) as State
