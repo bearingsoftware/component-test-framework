@@ -12,6 +12,18 @@ npm install --save-dev @bearingsoftware/component-test-framework @cucumber/cucum
 
 Playwright (`@playwright/test`) is optional -- only needed if you use the `@ui` tagged features. It is loaded when the first `@ui` scenario starts, so suites without UI scenarios don't need it installed to run. The published type declarations still reference Playwright's types, so type-checking with `skipLibCheck: false` needs it installed.
 
+## Optional packages
+
+These packages are not declared as peer dependencies on purpose: GitHub Packages drops `peerDependenciesMeta`, so a peer declared here would be installed for every consumer. Install the ones your suite uses, and each feature's error names the package it's missing.
+
+| Feature | Install |
+|---|---|
+| SPA and `@ui` scenarios | `@playwright/test` (then `npx playwright install chromium`) |
+| Accessibility checks | `@axe-core/playwright` |
+| SPA coverage | `istanbul-lib-coverage`, `istanbul-lib-report`, `istanbul-reports` |
+| `ctf` operation maps written in `.ts` | `typescript` |
+| `startContainers()` / `ctf init --containers` | `testcontainers`, plus `@testcontainers/postgresql` and `@testcontainers/redis` for Postgres and Redis |
+
 ## Quick start
 
 With Docker running, in a project with a `package.json` and the packages above installed:
