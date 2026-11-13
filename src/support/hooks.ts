@@ -64,15 +64,37 @@ export async function reuseBrowser(
   return launch()
 }
 
-// Playwright is an optional peer dependency, so it's loaded on the first @ui
-// scenario rather than when this module is imported. A suite without @ui
-// scenarios never needs it installed.
+// Playwright is loaded on the first @ui scenario rather than when this module
+// is imported, so a suite without @ui scenarios never needs it installed.
 async function browserForWorker(): Promise<Browser> {
   sharedBrowser = await reuseBrowser(sharedBrowser, async () => {
-    const { chromium } = await import('@playwright/test')
+    const { chromium } = await loadPlaywright()
     return chromium.launch()
   })
   return sharedBrowser
+}
+
+export async function loadPlaywright(
+  importer: () => Promise<typeof import('@playwright/test')> = () => import('@playwright/test'),
+): Promise<typeof import('@playwright/test')> {
+  try {
+    return await importer()
+  } catch (err) {
+    const { cause } = err as { cause?: unknown }
+    // Only the package being loaded missing means "not installed"; a missing dependency of it is a real error.
+    const notInstalled = [err, cause].some((e) => {
+      const { code, message } = (e ?? {}) as NodeJS.ErrnoException
+      return (
+        (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') &&
+        typeof message === 'string' &&
+        message.includes("'@playwright/test'")
+      )
+    })
+    if (!notInstalled) throw err
+    throw new Error(
+      "@ui scenarios need @playwright/test. Add it to the suite's dependencies: npm install --save-dev @playwright/test (then npx playwright install chromium)",
+    )
+  }
 }
 
 /**

@@ -1,6 +1,6 @@
 // `@bearingsoftware/component-test-framework/testcontainers`: start Postgres,
 // Redis/Valkey and WireMock in Docker from an ESM cucumber.mjs. The packages
-// it needs are optional peers, loaded only when a service has to start.
+// it needs are loaded only when a service has to start.
 import { spawnSync } from 'child_process'
 import { isMainThread } from 'worker_threads'
 
