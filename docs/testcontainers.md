@@ -2,7 +2,7 @@
 
 `startContainers` starts Postgres, Redis (or Valkey) and WireMock in Docker for a run, so a suite needs no `docker-compose.yml`. It is opt-in: a suite that doesn't call it is unchanged.
 
-Install the packages it needs (they are optional peers, loaded only when something has to start):
+Install the packages it needs (they are not installed with this package, and are loaded only when something has to start):
 
 ```bash
 npm install -D testcontainers @testcontainers/postgresql @testcontainers/redis

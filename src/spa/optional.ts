@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 
 /**
- * Load an optional peer dependency, or say which package to install and what
+ * Load an optional dependency, or say which package to install and what
  * needs it, rather than Node's bare "Cannot find module".
  */
 export function requireOptional<T>(name: string, usedBy: string): T {

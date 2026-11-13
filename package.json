@@ -124,45 +124,7 @@
     "containers:test": "tsc && node -e \"for (const d of ['coverage', '.nyc_output', 'reports']) require('fs').rmSync('tests/parallel/' + d, { recursive: true, force: true })\" && cucumber-js --config tests/parallel/cucumber.containers.mjs && node tests/parallel/check-coverage.js"
   },
   "peerDependencies": {
-    "@axe-core/playwright": ">=4.0.0",
-    "@cucumber/cucumber": ">=11.0.0",
-    "@playwright/test": ">=1.0.0",
-    "@testcontainers/postgresql": ">=12.0.0",
-    "@testcontainers/redis": ">=12.0.0",
-    "istanbul-lib-coverage": ">=3.0.0",
-    "istanbul-lib-report": ">=3.0.0",
-    "istanbul-reports": ">=3.0.0",
-    "testcontainers": ">=12.0.0",
-    "typescript": ">=4.9.0"
-  },
-  "peerDependenciesMeta": {
-    "@playwright/test": {
-      "optional": true
-    },
-    "istanbul-lib-coverage": {
-      "optional": true
-    },
-    "istanbul-lib-report": {
-      "optional": true
-    },
-    "istanbul-reports": {
-      "optional": true
-    },
-    "@axe-core/playwright": {
-      "optional": true
-    },
-    "typescript": {
-      "optional": true
-    },
-    "testcontainers": {
-      "optional": true
-    },
-    "@testcontainers/postgresql": {
-      "optional": true
-    },
-    "@testcontainers/redis": {
-      "optional": true
-    }
+    "@cucumber/cucumber": ">=11.0.0"
   },
   "dependencies": {
     "ioredis": "^5.6.1",
