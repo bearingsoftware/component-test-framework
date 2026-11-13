@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.19](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.18...v0.3.19) (2026-11-13)
+
+
+### Bug Fixes
+
+* **package:** stop declaring opt-in packages as peer dependencies ([c35e011](https://github.com/bearingsoftware/component-test-framework/commit/c35e011d4fda0614a89d48064c17c21252644943))
+* **package:** stop declaring opt-in packages as peer dependencies (COMPONENT-31) ([86e9e83](https://github.com/bearingsoftware/component-test-framework/commit/86e9e838b6b39decff126e6f15a0bcb6fc5b87d8))
+
 ## [0.3.18](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.17...v0.3.18) (2026-11-12)
 
 
