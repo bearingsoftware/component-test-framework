@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.20](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.19...v0.3.20) (2026-11-20)
+
+
+### Bug Fixes
+
+* **package:** declare the MIT licence ([16ada58](https://github.com/bearingsoftware/component-test-framework/commit/16ada58ceb4499498d2af26610a75820080a1f1b))
+* **package:** declare the MIT licence ([ee489d4](https://github.com/bearingsoftware/component-test-framework/commit/ee489d4b09bce57c8dd25c8cd83bd2b7facc6a65))
+
 ## [0.3.19](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.18...v0.3.19) (2026-11-13)
 
 
