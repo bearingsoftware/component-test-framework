@@ -14,6 +14,7 @@ import {
   afterAllSteps,
   failed,
 } from './adapter'
+import { markHooksRegistered } from './hooks-state'
 import type { AdapterContext } from './adapter'
 import { builtinAdapters } from '../adapters/builtin'
 
@@ -122,6 +123,7 @@ function resolveConfig(options: FrameworkOptions): FrameworkConfig {
 }
 
 export function registerHooks(options: FrameworkOptions): void {
+  markHooksRegistered()
   const config = resolveConfig(options)
   setWorldConstructor(ComponentTestWorld)
 
