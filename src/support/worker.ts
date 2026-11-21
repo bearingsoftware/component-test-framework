@@ -29,13 +29,58 @@ export function currentWorker(): WorkerInfo {
   }
 }
 
+let portStride = 1
+const claimedPorts = new Map<string, string>()
+
 /**
- * A port for this worker: `base` when not running in parallel, `base + id`
- * in worker `id`. Space the bases of a suite's services further apart than
- * the worker count, so one service's range can't run into the next.
+ * Set the gap between workers' ports, which `workerPort` uses. Default 1.
+ * `registerHooks` sets it from `workerIsolation.portStride`; call this
+ * yourself first if `workerPort` runs before `registerHooks` does.
  */
-export function workerPort(base: number): number {
-  return base + currentWorker().id
+export function setWorkerPortStride(stride: number): void {
+  if (!Number.isInteger(stride) || stride < 1) {
+    throw new Error(`Worker port stride must be a positive integer, not ${stride}`)
+  }
+  portStride = stride
+  claimedPorts.clear()
+}
+
+/**
+ * A port for this worker: `base + offset` when not running in parallel,
+ * `base + id * stride + offset` in worker `id`. With the default stride of 1,
+ * space the bases of a suite's services further apart than the worker count;
+ * with a larger stride (`workerIsolation.portStride`), give each service an
+ * `offset` inside it, so one worker's services sit side by side.
+ *
+ * Throws if the port is above 65535, or is the port another `workerPort`
+ * call (a different base or offset) already returned for this worker.
+ */
+export function workerPort(base: number, offset = 0): number {
+  const id = currentWorker().id
+  const port = base + id * portStride + offset
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(
+      `workerPort(${base}, ${offset}) is ${port} in worker ${id} (stride ${portStride}); ports run from 1 to 65535`,
+    )
+  }
+  const key = `${id}:${port}`
+  const source = `workerPort(${base}, ${offset})`
+  const earlier = claimedPorts.get(key)
+  if (earlier !== undefined && earlier !== source) {
+    throw new Error(`${source} and ${earlier} are both port ${port} in worker ${id}`)
+  }
+  claimedPorts.set(key, source)
+  return port
+}
+
+/**
+ * Replace `${WORKER_PORT:<base>[:<offset>]}` in a string with `workerPort`'s
+ * result, for service arguments and environment values.
+ */
+export function expandWorkerPorts(value: string): string {
+  return value.replace(/\$\{WORKER_PORT:(\d+)(?::(\d+))?\}/g, (_, base, offset) =>
+    String(workerPort(Number(base), offset === undefined ? 0 : Number(offset))),
+  )
 }
 
 /**

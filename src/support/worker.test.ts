@@ -2,6 +2,8 @@ import { describe, it, expect, afterEach } from 'vitest'
 import {
   currentWorker,
   workerPort,
+  setWorkerPortStride,
+  expandWorkerPorts,
   workerFile,
   workerWiremockUrl,
   workerDatabaseUrl,
@@ -15,6 +17,7 @@ function asWorker(id: number, total = 4): void {
 }
 
 afterEach(() => {
+  setWorkerPortStride(1)
   delete process.env.CUCUMBER_PARALLEL
   delete process.env.CUCUMBER_WORKER_ID
   delete process.env.CUCUMBER_TOTAL_WORKERS
@@ -70,5 +73,58 @@ describe('in worker 2 of a parallel run', () => {
     asWorker(2)
     expect(workerRedisUrl('redis://cache:6379')).toBe('redis://cache:6379/2')
     expect(workerRedisUrl('redis://:secret@cache:6379/4')).toBe('redis://:secret@cache:6379/6')
+  })
+})
+
+describe('workerPort stride and offset', () => {
+  it.each([
+    [0, 18080, 18085],
+    [1, 18180, 18185],
+    [3, 18380, 18385],
+  ])('worker %i with stride 100 gets %i and, at offset 5, %i', (id, plain, offset) => {
+    asWorker(id)
+    setWorkerPortStride(100)
+    expect(workerPort(18080)).toBe(plain)
+    expect(workerPort(18080, 5)).toBe(offset)
+  })
+
+  it('adds the offset outside a parallel run', () => {
+    setWorkerPortStride(100)
+    expect(workerPort(18080, 7)).toBe(18087)
+  })
+
+  it('defaults to a stride of 1', () => {
+    asWorker(3)
+    expect(workerPort(18080, 10)).toBe(18093)
+  })
+
+  it('throws above 65535', () => {
+    asWorker(3)
+    setWorkerPortStride(1000)
+    expect(() => workerPort(65000)).toThrow(/65535/)
+  })
+
+  it('throws when two services land on the same port', () => {
+    asWorker(1)
+    setWorkerPortStride(100)
+    workerPort(18080)
+    expect(() => workerPort(18180, -100)).toThrow(/both port 18180/)
+    expect(workerPort(18080)).toBe(18180)
+  })
+
+  it('rejects a bad stride', () => {
+    expect(() => setWorkerPortStride(0)).toThrow(/stride/)
+  })
+})
+
+describe('expandWorkerPorts', () => {
+  it('replaces WORKER_PORT placeholders with and without an offset', () => {
+    asWorker(2)
+    setWorkerPortStride(100)
+    expect(expandWorkerPorts(':${WORKER_PORT:18080}')).toBe(':18280')
+    expect(expandWorkerPorts('http://h:${WORKER_PORT:18080:3}/x ${WORKER_PORT:19000}')).toBe(
+      'http://h:18283/x 19200',
+    )
+    expect(expandWorkerPorts('no placeholders')).toBe('no placeholders')
   })
 })

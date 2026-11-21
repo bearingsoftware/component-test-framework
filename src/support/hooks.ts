@@ -3,7 +3,7 @@ import type { ITestCaseHookParameter } from '@cucumber/cucumber'
 import type { Browser } from '@playwright/test'
 import { ComponentTestWorld } from './world'
 import type { FrameworkConfig, FrameworkOptions } from '../types'
-import { currentWorker, workerDatabaseUrl, workerRedisUrl } from './worker'
+import { currentWorker, setWorkerPortStride, workerDatabaseUrl, workerRedisUrl } from './worker'
 import {
   initAdapters,
   beforeAllHooks,
@@ -111,6 +111,7 @@ function resolveConfig(options: FrameworkOptions): FrameworkConfig {
   // This worker's own database and Redis index, so steps, cleanup and the
   // suite's own code (through world.config) all use the worker's.
   const isolation = options.workerIsolation
+  if (isolation?.portStride !== undefined) setWorkerPortStride(isolation.portStride)
   if (currentWorker().parallel && isolation) {
     if (isolation.database && config.databaseUrl) {
       config.databaseUrl = workerDatabaseUrl(config.databaseUrl)
