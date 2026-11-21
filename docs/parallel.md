@@ -55,7 +55,7 @@ Each worker gets:
 | WireMock | One WireMock, shared. The worker's stubs are registered under `/__worker-<n>`, with their ids and scenario names namespaced too, and the per-scenario reset removes only the worker's stubs and requests. Request counts and searches look only under the prefix, and report URLs without it. | Call WireMock at `workerWiremockUrl(url)`. For an SPA, pass it as `registerSpaServer`'s `apiUrl`. |
 | Postgres | A database per worker, `<name>_w<n>`, copied from the configured one before the first scenario (`CREATE DATABASE … TEMPLATE`). A copy left by an earlier run is dropped first. Cleanup and the database steps use the worker's. | Use `workerDatabaseUrl(url)`, and await `prepareWorkerDatabase(url)` before starting; it runs once per worker however often it's called. |
 | Redis | A database index per worker: the URL's index plus n. The per-scenario flush empties only the worker's. | Use `workerRedisUrl(url)`. |
-| Ports and logs | `workerPort(base)` is `base + n`; `registerSpaServer` adds n itself. Service logs go to `<name>.w<n>.<ext>`. | Listen on the worker's port. |
+| Ports and logs | `workerPort(base, offset = 0)` is `base + n * stride + offset`, with a stride of 1 unless `workerIsolation.portStride` says otherwise; `registerSpaServer` adds n itself. Service logs go to `<name>.w<n>.<ext>`. | Listen on the worker's port. |
 
 `currentWorker()` returns `{ id, total, parallel }`, from Cucumber's `CUCUMBER_WORKER_ID` and `CUCUMBER_TOTAL_WORKERS`. Outside a parallel run every helper returns what it was given.
 
@@ -72,6 +72,38 @@ Things to know:
 - **Stubs that echo the request path** (response templates using `request.path` or `request.url`, or `proxyBaseUrl`) see the worker's prefix.
 
 The reference suite, `tests/parallel`, runs a service with WireMock, Postgres and Redis behind it, and an SPA, in four workers: `npm run test:parallel`, with the containers from `.github/workflows/ci.yml` running. `CTF_NO_ISOLATION=1` (or `wiremock`, `database` or `redis`) turns isolation off, to watch the scenarios fail.
+
+## Ports for several services per worker
+
+With the default stride of 1, worker n's ports are `base + n`, so each service needs a base further from the next than the worker count. For a suite with several services, set `workerIsolation.portStride` (100, say) and give each service an `offset`: worker n owns `base + n * 100` to `base + n * 100 + 99`, and offsets place its services inside it. `workerPort` throws if the result is above 65535, or equals the port another `workerPort` call gave the same worker.
+
+```typescript
+import { registerHooks, registerServiceUnderTest, setWorkerPortStride, workerPort } from '@bearingsoftware/component-test-framework/core'
+
+setWorkerPortStride(100) // the same as workerIsolation.portStride; needed because workerPort runs before registerHooks
+const apiPort = workerPort(18000) // worker 2: 18200
+const billingPort = workerPort(18000, 1) // 18201
+const mailStub = workerPort(18000, 10) // 18210
+const smsStub = workerPort(18000, 11) // 18211
+const idpStub = workerPort(18000, 12) // 18212
+
+registerServiceUnderTest({
+  name: 'api',
+  cmd: './api',
+  env: { ...process.env, LISTEN_ADDR: `:${apiPort}`, BILLING_URL: `http://localhost:${billingPort}` },
+  readyCheck: { url: `http://localhost:${apiPort}/health` },
+})
+registerServiceUnderTest({
+  name: 'billing',
+  cmd: './billing',
+  args: ['--listen', ':${WORKER_PORT:18000:1}'], // placeholders work in args and env values
+  env: { ...process.env, MAIL_URL: 'http://localhost:${WORKER_PORT:18000:10}' },
+  readyCheck: { url: `http://localhost:${billingPort}/health` },
+})
+registerHooks({ apiBaseUrl: `http://localhost:${apiPort}`, workerIsolation: { portStride: 100 } })
+```
+
+`${WORKER_PORT:<base>[:<offset>]}` in a service's `args` (and `binaryArgs`) or `env` values is replaced with `workerPort(base, offset)` when the service starts. Start the three stubs on `mailStub`, `smsStub` and `idpStub`.
 
 ## Making component suites fast in CI
 

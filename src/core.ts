@@ -47,6 +47,7 @@ export type {
 export {
   currentWorker,
   workerPort,
+  setWorkerPortStride,
   workerFile,
   wiremockNamespace,
   workerWiremockUrl,
