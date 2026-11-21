@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.3.21](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.20...v0.3.21) (2026-11-21)
+
+
+### Features
+
+* **containers:** restart, stop and start Docker containers from a suite ([eb052be](https://github.com/bearingsoftware/component-test-framework/commit/eb052bee22c3131a432621c3111d56cb2e6a157e))
+* **containers:** restart, stop and start Docker containers from a suite ([df06267](https://github.com/bearingsoftware/component-test-framework/commit/df06267c173ca223454df9ad074fb74e3ca2fd94))
+* **gate:** add ctf gate for Cucumber summary floors ([84f44ab](https://github.com/bearingsoftware/component-test-framework/commit/84f44abddc78ef89c7e73465a1fcdc324747c1e2))
+* **gate:** add ctf gate for Cucumber summary floors ([6ed8778](https://github.com/bearingsoftware/component-test-framework/commit/6ed8778d14c61a38799bd66cfabee50c68e91a1c))
+* **oidc:** stub OIDC issuer with code, PKCE and refresh flows ([b8cfbdc](https://github.com/bearingsoftware/component-test-framework/commit/b8cfbdc6cd58af511cf28f700e11d01748cf84d8))
+* **oidc:** stub OIDC issuer with code, PKCE and refresh flows ([67ec71e](https://github.com/bearingsoftware/component-test-framework/commit/67ec71e83c1dd5a0e7ba0cbfa1324f0cdd710f2f))
+* **parallel:** workerPort stride, offset and WORKER_PORT interpolation ([ed169ea](https://github.com/bearingsoftware/component-test-framework/commit/ed169ea75416466813c3241b2fc38e92929d6c43))
+* **parallel:** workerPort stride, offset and WORKER_PORT placeholders ([e5d69e4](https://github.com/bearingsoftware/component-test-framework/commit/e5d69e43e1fa71dc4fbb1bf1b9531514b05fa8af))
+* **postgres:** discover cleanupTables from the schema ([231ed3b](https://github.com/bearingsoftware/component-test-framework/commit/231ed3bb03bfc451c5f6b06fb80397cc99caaa4e))
+* **postgres:** discover tables for cleanup and guard that they start empty ([481d876](https://github.com/bearingsoftware/component-test-framework/commit/481d8766bd8ea0faa0cf8175886bcd06c7cd2bc7))
+* **process:** restartForTag can restore before the next scenario ([375496b](https://github.com/bearingsoftware/component-test-framework/commit/375496b770d5e3ab1d285f1ae2a0383c54839990))
+* **process:** restartForTag restore: 'before-next' ([b690b02](https://github.com/bearingsoftware/component-test-framework/commit/b690b02dd8c20d7d7e07cdf8a94f2376be0c3ef6))
+* **stubs:** capture servers for http, https, tcp and udp ([7a091e8](https://github.com/bearingsoftware/component-test-framework/commit/7a091e8e4715109cb3970555dc51255e36c06a42))
+* **stubs:** capture servers for http, https, tcp and udp ([96c4c4d](https://github.com/bearingsoftware/component-test-framework/commit/96c4c4d1f277b268615a101bc8d8aff57e88723a))
+
+
+### Bug Fixes
+
+* **containers:** time out docker calls and probes, 2xx-only HTTP readiness ([e3463ca](https://github.com/bearingsoftware/component-test-framework/commit/e3463ca84546739ce2b040c35727323363fbe011))
+* **gate:** reject blank --min, refuse 0-scenario runs ([ecfce79](https://github.com/bearingsoftware/component-test-framework/commit/ecfce7949749ef83fbbf755f0e1f55733d5fca80))
+* **oidc:** reject colon-less Basic auth, add azp and nbf ([6cea2d4](https://github.com/bearingsoftware/component-test-framework/commit/6cea2d4220b4d2dfc780244d69af0be584c7b26a))
+* **parallel:** stricter worker port stride and placeholders ([af964bf](https://github.com/bearingsoftware/component-test-framework/commit/af964bf037e58459150d6a2e20239a9db0a25dd1))
+* **postgres:** never touch tables outside the discovered schema ([e8c5b89](https://github.com/bearingsoftware/component-test-framework/commit/e8c5b8949b519fb12c23d807e068a7b7b716d390))
+* **postgres:** refuse discovered tables with descendants in another schema ([18dbe56](https://github.com/bearingsoftware/component-test-framework/commit/18dbe56f1ce4481e3a57476f2bb45371e9502fa1))
+* **postgres:** refuse kept tables that reference discovered ones ([881fdf5](https://github.com/bearingsoftware/component-test-framework/commit/881fdf51fdd4882d142b58be0bff672f0006197b))
+* **process:** afterRestart hook, ordering and state guards for before-next ([d068e24](https://github.com/bearingsoftware/component-test-framework/commit/d068e24af4bd7883b0f409b34694b95eac1c2761))
+* **stubs:** review fixes for capture servers ([55923e0](https://github.com/bearingsoftware/component-test-framework/commit/55923e053af398845374c236bee57face48d763c))
+
 ## [0.3.20](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.19...v0.3.20) (2026-11-20)
 
 
