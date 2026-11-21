@@ -75,6 +75,7 @@ describe('step catalogue (COMPONENT-27)', () => {
         'registerWaitingSteps',
         'registerRequestSteps',
         'registerMailpitSteps',
+        'registerOidcSteps',
         'registerAccessibilitySteps',
       ]),
     )

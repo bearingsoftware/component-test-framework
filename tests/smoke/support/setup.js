@@ -40,6 +40,11 @@ mailpit.registerMailpitSteps()
 mailpit.registerMailpitSteps()
 assert.equal(typeof mailpit.MailpitClient, 'function')
 
+const oidc = require('../../../dist/oidc')
+oidc.registerOidcSteps()
+oidc.registerOidcSteps()
+assert.equal(typeof oidc.startOidcIssuer, 'function')
+
 Given('a response with status {int}', function (status) {
   this.lastResponse = { status, body: null, headers: {} }
 })
