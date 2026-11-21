@@ -44,6 +44,10 @@ const oidc = require('../../../dist/oidc')
 oidc.registerOidcSteps()
 oidc.registerOidcSteps()
 assert.equal(typeof oidc.startOidcIssuer, 'function')
+const stubs = require('../../../dist/stubs')
+stubs.registerStubSteps({})
+stubs.registerStubSteps({})
+assert.equal(typeof stubs.startCaptureServer, 'function')
 
 Given('a response with status {int}', function (status) {
   this.lastResponse = { status, body: null, headers: {} }

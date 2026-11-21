@@ -11,6 +11,7 @@
 - [Playwright Test fixtures](playwright-test.md): the same pieces as Playwright Test fixtures
 - [Email: Mailpit](mailpit.md): email steps
 - [OIDC issuer stub](oidc.md): sign users in without a real identity provider
+- [Capture stubs](stubs.md): HTTP, HTTPS, TCP and UDP servers that record and answer as scripted
 - [Testcontainers](testcontainers.md): start Postgres, Valkey / Redis and WireMock in Docker from `cucumber.mjs`
 - [Running in parallel](parallel.md): worker isolation, and making suites fast in CI
 - [OpenAPI tooling and `ctf init`](openapi-cli.md): the `ctf` command

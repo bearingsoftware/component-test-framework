@@ -74,7 +74,7 @@ async function main() {
   const failures = []
   const cucumber = path.join(REPO, 'node_modules', '@cucumber', 'cucumber', 'bin', 'cucumber.js')
 
-  for (const name of ['api', 'worker', 'spa']) {
+  for (const name of ['api', 'worker', 'spa', 'stubs']) {
     console.log(`\n== examples/${name}`)
     if (!run(process.execPath, [cucumber, '--config', `examples/${name}/cucumber.js`], REPO)) {
       failures.push(`examples/${name}`)

@@ -15,6 +15,7 @@ The package root works as it always has: it exports everything and registers eve
 | `…/testcontainers` | `startContainers`, `stopContainers` |
 | `…/mailpit` | `MailpitClient`, `registerMailpitSteps`, `emailContains`, `emailLinks` |
 | `…/oidc` | `startOidcIssuer`, `registerOidcSteps`: a stub OpenID Connect issuer |
+| `…/stubs` | `startCaptureServer`, `registerStubSteps`, `parseMatch` |
 | `…/playwright-test` | `defineFixtures`: the SPA server, WireMock, stubs, logins and coverage as Playwright Test fixtures. Loads no Cucumber |
 
 The step groups are `registerApiSteps`, `registerRawApiSteps`, `registerSseSteps`, `registerResponseSteps`, `registerWiremockSteps`, `registerDbSteps`, `registerRedisSteps`, `registerServiceSteps` and `registerUiSteps`, plus the opt-in `registerWaitingSteps` and `registerRequestSteps`. Calling one twice, or after importing the root, registers nothing more.
