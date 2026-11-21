@@ -86,6 +86,7 @@ Point `API_BASE_URL` at your own service, add its operations to the map, and rep
 - [Email: Mailpit](docs/mailpit.md): email steps
 - [OIDC issuer stub](docs/oidc.md): sign users in without a real identity provider
 - [Capture stubs](docs/stubs.md): HTTP, HTTPS, TCP and UDP servers that record and answer as scripted
+- [Container control](docs/containers.md): restart, stop and start a Docker container, waiting for readiness
 - [Testcontainers](docs/testcontainers.md): start Postgres, Valkey / Redis and WireMock in Docker from `cucumber.mjs`
 - [Running in parallel](docs/parallel.md): worker isolation, and making suites fast in CI
 - [OpenAPI tooling and `ctf init`](docs/openapi-cli.md): the `ctf` command

@@ -98,6 +98,12 @@ const GROUPS: Group[] = [
       (require('./request.steps') as typeof import('./request.steps')).registerRequestSteps(),
   },
   {
+    registeredBy: 'registerContainerSteps',
+    entryPoint: 'core',
+    optIn: true,
+    run: () => reg().registerContainerSteps(),
+  },
+  {
     registeredBy: 'registerMailpitSteps',
     entryPoint: 'mailpit',
     optIn: true,
