@@ -14,6 +14,11 @@ export const DEFAULT_KEEP_TABLES = [
   'alembic_version',
   'django_migrations',
   'atlas_schema_revisions',
+  '_sqlx_migrations',
+  '__diesel_schema_migrations',
+  'SequelizeMeta',
+  '__EFMigrationsHistory',
+  'refinery_schema_history',
 ]
 
 export type CleanupPlan =

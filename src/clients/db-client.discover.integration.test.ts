@@ -89,6 +89,41 @@ describe.skipIf(!url)('DbClient table discovery (COMPONENT-37)', () => {
     }
   })
 
+  it('throws when a kept table references a discovered one', async () => {
+    await admin.query(
+      `CREATE TABLE ${q('kept_child')} (id serial PRIMARY KEY, p int REFERENCES ${q('parents')} (id))`,
+    )
+    try {
+      await expect(db.cleanDiscovered({ schema, keep: [...keep, 'kept_child'] })).rejects.toThrow(
+        /kept_child -> parents[\s\S]*Remove the kept table from keep[\s\S]*drop the foreign key/,
+      )
+      await expect(db.cleanDiscovered({ schema, keep })).resolves.toBeUndefined()
+    } finally {
+      await admin.query(`DROP TABLE ${q('kept_child')}`)
+    }
+  })
+
+  it('truncates discovered tables with a self-reference and a reference from another schema (CASCADE)', async () => {
+    const other = `${schema}_other`
+    await admin.query(`
+      CREATE TABLE ${q('tree')} (id serial PRIMARY KEY, up int REFERENCES ${q('tree')} (id));
+      CREATE SCHEMA "${other}";
+      CREATE TABLE ${q('foreign_child', other)} (p int REFERENCES ${q('parents')} (id));
+      INSERT INTO ${q('parents')} (name) VALUES ('x');
+      INSERT INTO ${q('tree')} (up) VALUES (NULL);
+      INSERT INTO ${q('foreign_child', other)} VALUES (1);
+    `)
+    const fresh = new DbClient(url)
+    try {
+      await fresh.cleanDiscovered({ schema, keep })
+      expect(await count('tree')).toBe(0)
+      expect(await count('foreign_child', other)).toBe(0)
+    } finally {
+      await fresh.close()
+      await admin.query(`DROP SCHEMA "${other}" CASCADE; DROP TABLE ${q('tree')}`)
+    }
+  })
+
   it('names the non-empty tables', async () => {
     await admin.query(
       `INSERT INTO ${q('parents')} (name) VALUES ('x'); INSERT INTO ${q('children')} (parent_id) VALUES (1)`,

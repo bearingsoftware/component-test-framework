@@ -39,3 +39,15 @@ describe('parseCleanupTables', () => {
     expect(() => parseCleanupTables(value as never)).toThrow(message)
   })
 })
+
+describe('default keep list', () => {
+  it.each([
+    '_sqlx_migrations',
+    '__diesel_schema_migrations',
+    'SequelizeMeta',
+    '__EFMigrationsHistory',
+    'refinery_schema_history',
+  ])('includes %s', (name) => {
+    expect(DEFAULT_KEEP_TABLES).toContain(name)
+  })
+})

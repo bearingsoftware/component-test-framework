@@ -23,10 +23,10 @@ registerHooks({
 |---|---|---|
 | `discover` | | Must be `true` |
 | `schema` | `public` | The schema to read |
-| `keep` | _(none)_ | Tables to leave alone, added to the migration tables that are always kept: `schema_migrations`, `goose_db_version`, `flyway_schema_history`, `knex_migrations`, `_prisma_migrations`, `alembic_version`, `django_migrations` and a few more |
-| `assertEmptyAtStart` | `false` | Before a worker's first scenario, fail naming every discovered table that already has rows |
+| `keep` | _(none)_ | Tables to leave alone, added to the migration tables that are always kept: `schema_migrations`, `goose_db_version`, `flyway_schema_history`, `knex_migrations`, `_prisma_migrations`, `alembic_version`, `django_migrations`, `_sqlx_migrations`, `__diesel_schema_migrations`, `SequelizeMeta`, `__EFMigrationsHistory`, `refinery_schema_history` and a few more. Names match exactly, case included |
+| `assertEmptyAtStart` | `false` | Fail a worker's first scenario, and only that one, naming every discovered table that already has rows. When workers share a database, give each its own (`workerIsolation.database`), or another worker's seeds trip it |
 
-Discovery takes the schema's base tables (views and partitions are left out) and empties them after each scenario with one `TRUNCATE ... RESTART IDENTITY CASCADE`, so foreign keys need no ordering. CASCADE also empties any table, kept or not, that references a discovered one. Unlike the DELETE used for a list, TRUNCATE costs more per scenario on a large schema.
+Discovery takes the schema's base tables (views and partitions are left out) and empties them after each scenario with one `TRUNCATE ... RESTART IDENTITY CASCADE`, so foreign keys need no ordering. A kept table in the same schema that has a foreign key to a discovered table is an error naming both, since emptying the parent would empty it: remove it from `keep` or drop the foreign key. CASCADE remains only as a safety net, for example for tables in other schemas that reference a discovered one. Unlike the DELETE used for a list, TRUNCATE costs more per scenario on a large schema.
 
 The list is read once per run and then reused. An empty result is not remembered, so a service that applies its schema after the first hook is picked up once its tables exist, and a table dropped since the last read triggers one re-read. A table created later than the first non-empty read is not noticed until then.
 

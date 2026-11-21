@@ -113,7 +113,6 @@ export interface WorkerIsolationOptions {
   redis?: boolean
 }
 
-/** Framework configuration — consumers provide their project-specific values. */
 /** `cleanupTables` by discovery: every base table in `schema`, minus `keep`. */
 export interface DiscoverTablesOptions {
   discover: true
@@ -121,10 +120,11 @@ export interface DiscoverTablesOptions {
   schema?: string
   /** Tables to leave alone, added to the migration tables that are always kept (`schema_migrations`, `goose_db_version`, …). */
   keep?: string[]
-  /** Before the first scenario, fail naming every discovered table that already has rows. Default false. */
+  /** Fail the first scenario of each worker naming every discovered table that already has rows. Needs a database per worker when workers share one. Default false. */
   assertEmptyAtStart?: boolean
 }
 
+/** Framework configuration — consumers provide their project-specific values. */
 export interface FrameworkConfig {
   /** Base URL of the API service under test. */
   apiBaseUrl: string

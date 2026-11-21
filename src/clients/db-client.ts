@@ -117,7 +117,27 @@ export class DbClient {
       [schema],
     )
     const skip = new Set(keep)
-    return rows.map((r) => r.relname).filter((t) => !skip.has(t))
+    const tables = rows.map((r) => r.relname).filter((t) => !skip.has(t))
+    const fks = await this.pool.query<{ child: string; parent: string }>(
+      `SELECT child.relname AS child, parent.relname AS parent
+         FROM pg_constraint k
+         JOIN pg_class child ON child.oid = k.conrelid
+         JOIN pg_class parent ON parent.oid = k.confrelid
+         JOIN pg_namespace n ON n.oid = child.relnamespace
+        WHERE k.contype = 'f' AND n.nspname = $1 AND parent.relnamespace = child.relnamespace
+        ORDER BY child.relname, parent.relname`,
+      [schema],
+    )
+    const found = new Set(tables)
+    const conflicts = fks.rows.filter((r) => skip.has(r.child) && found.has(r.parent))
+    if (conflicts.length > 0) {
+      const pairs = conflicts.map((r) => `${r.child} -> ${r.parent}`).join(', ')
+      throw new Error(
+        `cleanupTables: kept table(s) reference discovered tables (${pairs}). Emptying the referenced ` +
+          `table would also empty the kept one. Remove the kept table from keep so it is cleaned, or drop the foreign key.`,
+      )
+    }
+    return tables
   }
 
   /**
@@ -125,8 +145,8 @@ export class DbClient {
    * which needs no foreign-key order. The list is cached for the run, but an
    * empty result is not (the service under test may apply its schema after the
    * first hook), and a table that has gone missing (SQLSTATE 42P01) triggers one
-   * re-discovery. CASCADE also empties any table, kept or not, that references a
-   * discovered one. Retries on deadlock like {@link cleanTables}.
+   * re-discovery. Discovery throws when a kept table in the schema references a discovered one; CASCADE is
+   * only a safety net for references from other schemas. Retries on deadlock like {@link cleanTables}.
    */
   async cleanDiscovered(
     { schema, keep = [] }: { schema: string; keep?: string[] },
