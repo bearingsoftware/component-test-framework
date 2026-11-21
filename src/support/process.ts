@@ -428,8 +428,25 @@ export interface RegisteredService {
    * itself is skipped, since it can't be restarted. Overrides for different
    * tags aren't combined: a scenario with two such tags is restarted for
    * each, and runs with the last one's settings.
+   *
+   * `restore: 'before-next'` skips the restart in `After` and restores the
+   * original environment in the next scenario's `Before` that has none of
+   * these tags (and in `AfterAll`), so consumer `After` hooks run against
+   * the tagged service and rows written on boot are seen by the next
+   * scenario's cleanup. Register the service before `registerHooks` so the
+   * restore runs ahead of the framework's own `Before` hooks.
    */
-  restartForTag: (tag: string, envOverrides: NodeJS.ProcessEnv) => void
+  restartForTag: (
+    tag: string,
+    envOverrides: NodeJS.ProcessEnv,
+    options?: RestartForTagOptions,
+  ) => void
+}
+
+/** Options for {@link RegisteredService.restartForTag}. */
+export interface RestartForTagOptions {
+  /** `'after'` (default) restores in `After`; `'before-next'` in the next scenario's `Before`. */
+  restore?: 'after' | 'before-next'
 }
 
 /**
@@ -477,11 +494,46 @@ export function registerServiceUnderTest(opts: ServiceOptions): RegisteredServic
     return handle
   }
 
+  // before-next state: the overrides the service is running with, if any.
+  let active: NodeJS.ProcessEnv | null = null
+  const deferredTags = new Set<string>()
+  let deferredRegistered = false
+  const registerDeferredRestore = () => {
+    if (deferredRegistered) return
+    deferredRegistered = true
+    Before({ timeout: restartTimeout }, async function (scenario) {
+      if (!active) return
+      const names = scenario.pickle.tags.map((t) => t.name)
+      if (names.some((n) => deferredTags.has(n))) return
+      const service = started()
+      active = null
+      if (!service.skipped) await service.restart()
+    })
+    AfterAll({ timeout: restartTimeout }, async function () {
+      if (!active || !handle) return
+      active = null
+      if (!handle.skipped) await handle.restart()
+    })
+  }
+
   return {
     get handle() {
       return started()
     },
-    restartForTag(tag, envOverrides) {
+    restartForTag(tag, envOverrides, options) {
+      if (options?.restore === 'before-next') {
+        registerDeferredRestore()
+        deferredTags.add(tag)
+        Before({ tags: tag, timeout: restartTimeout }, async function () {
+          const service = started()
+          if (service.skipped) return 'skipped'
+          if (active === envOverrides) return undefined
+          await service.restart(envOverrides)
+          active = envOverrides
+          return undefined
+        })
+        return
+      }
       Before({ tags: tag, timeout: restartTimeout }, async function () {
         const service = started()
         if (service.skipped) return 'skipped'

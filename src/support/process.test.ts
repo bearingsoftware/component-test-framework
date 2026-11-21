@@ -5,7 +5,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { spawn, spawnSync } from 'child_process'
 
-type HookFn = (this: unknown) => unknown
+type HookFn = (this: unknown, ...args: unknown[]) => unknown
 interface Hook {
   options: { tags?: string; timeout?: number }
   fn: HookFn
@@ -465,6 +465,40 @@ describe('service lifecycle (COMPONENT-8)', () => {
       await expect(fetch(`http://127.0.0.1:${port}/health`)).rejects.toThrow()
       await expect(fetch(`http://127.0.0.1:${portB}/health`)).rejects.toThrow()
       await hooks.afterAll[0].fn.call({})
+    })
+
+    it('restores before the next untagged scenario, not after, and not between same-tag scenarios', async () => {
+      const api = registerServiceUnderTest(options({ stopGraceMs: 2_000 }))
+      api.restartForTag('@locked', { MARKER: 'locked' }, { restore: 'before-next' })
+      await hooks.beforeAll[0].fn.call({})
+      started.push(api.handle)
+      const scenario = (...tags: string[]) => ({ pickle: { tags: tags.map((name) => ({ name })) } })
+      const trace: string[] = []
+      const cleanup = async () => trace.push(`cleanup:${await marker(port)}`)
+      // Definition order, like Cucumber; the consumer's cleanup is defined after the service.
+      hooks.before.push({ options: {}, fn: async () => void (await cleanup()) })
+      const before = async (s: ReturnType<typeof scenario>) => {
+        for (const h of hooks.before) {
+          const wanted = h.options.tags as string | undefined
+          if (!wanted || s.pickle.tags.some((t) => t.name === wanted)) await h.fn.call({}, s)
+        }
+      }
+
+      expect(hooks.after).toHaveLength(0)
+      await before(scenario('@locked'))
+      expect(await marker(port)).toBe('locked')
+      const pidAfterFirst = api.handle.process?.pid
+      await before(scenario('@locked'))
+      expect(api.handle.process?.pid).toBe(pidAfterFirst)
+      await before(scenario())
+      expect(trace).toEqual(['cleanup:locked', 'cleanup:locked', 'cleanup:first'])
+
+      await before(scenario('@locked'))
+      expect(await marker(port)).toBe('locked')
+      await hooks.afterAll.at(-1)!.fn.call({})
+      expect(await marker(port)).toBe('first')
+      await hooks.afterAll[0].fn.call({})
+      expect(exited(api.handle.process)).toBe(true)
     })
 
     it('skips tagged scenarios when the service is skipped', async () => {
