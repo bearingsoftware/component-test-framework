@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.22](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.21...v0.3.22) (2026-11-21)
+
+
+### Bug Fixes
+
+* **ui:** bound the `@ui` Before hook's browser launch, context and page, inside its own hook timeout ([d6426d0](https://github.com/bearingsoftware/component-test-framework/commit/d6426d002bd881c9c8514606b3f6244fb79eb95a))
+
 ## [0.3.21](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.20...v0.3.21) (2026-11-21)
 
 
