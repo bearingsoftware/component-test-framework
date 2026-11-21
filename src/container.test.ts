@@ -6,13 +6,15 @@ import { containerControl, type DockerRunner } from './container'
 function fakeRunner(
   statuses: number[] = [],
   stderr = '',
-): { run: DockerRunner; calls: string[][] } {
+): { run: DockerRunner; calls: string[][]; timeouts: number[] } {
   const calls: string[][] = []
-  const run = vi.fn<DockerRunner>(async (args) => {
+  const timeouts: number[] = []
+  const run = vi.fn<DockerRunner>(async (args, timeoutMs) => {
     calls.push(args)
+    timeouts.push(timeoutMs)
     return { status: statuses.length > 0 ? statuses.shift()! : 0, stderr }
   })
-  return { run, calls }
+  return { run, calls, timeouts }
 }
 
 async function freePort(): Promise<number> {
@@ -114,7 +116,8 @@ describe('container control (COMPONENT-39)', () => {
 
   it.each([
     ['answers 200', 200, true],
-    ['answers 399', 399, true],
+    ['answers 204', 204, true],
+    ['answers 302, a redirect', 302, false],
     ['answers 503', 503, false],
   ])('HTTP readiness %s', async (_, code, ready) => {
     const server = http.createServer((_req, res) => {
@@ -138,5 +141,71 @@ describe('container control (COMPONENT-39)', () => {
     } finally {
       server.close()
     }
+  })
+  it('gives up on a docker call that never returns, after its timeout', async () => {
+    const control = containerControl(() => new Promise<never>(() => {}))
+    await expect(control.restartContainer('ctf39-hung', { timeoutMs: 200 })).rejects.toThrow(
+      'restarting container ctf39-hung timed out after 200 ms',
+    )
+    await expect(control.startContainer('ctf39-hung', { timeoutMs: 200 })).rejects.toThrow(
+      'starting container ctf39-hung timed out after 200 ms',
+    )
+  })
+
+  it('stop gives up after the default 30 s', async () => {
+    vi.useFakeTimers()
+    try {
+      const promise = containerControl(() => new Promise<never>(() => {})).stopContainer(
+        'ctf39-hung',
+      )
+      const assertion = expect(promise).rejects.toThrow(
+        'stopping container ctf39-hung timed out after 30000 ms',
+      )
+      await vi.advanceTimersByTimeAsync(30_000)
+      await assertion
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('caps each exec probe at 1 s and at the time left before the deadline', async () => {
+    const { run, timeouts } = fakeRunner([0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
+    await expect(
+      containerControl(run).restartContainer('ctf39-db', {
+        readiness: { exec: ['true'] },
+        timeoutMs: 1_500,
+      }),
+    ).rejects.toThrow('not ready within 1500 ms')
+    const probes = timeouts.slice(1)
+    expect(probes[0]).toBe(1_000)
+    expect(Math.max(...probes)).toBeLessThanOrEqual(1_000)
+    expect(probes.at(-1)!).toBeLessThanOrEqual(1_000)
+  })
+
+  it('treats a hung exec probe as not ready and times out at the deadline', async () => {
+    let calls = 0
+    const run: DockerRunner = (args) => {
+      calls++
+      if (args[0] === 'restart') return Promise.resolve({ status: 0, stderr: '' })
+      return new Promise<never>(() => {})
+    }
+    await expect(
+      containerControl(run).restartContainer('ctf39-db', {
+        readiness: { exec: ['pg_isready'] },
+        timeoutMs: 400,
+      }),
+    ).rejects.toThrow('container ctf39-db was not ready within 400 ms (exec pg_isready)')
+    expect(calls).toBeGreaterThan(1)
+  })
+
+  it.each([
+    ['no kind set', {}],
+    ['an empty exec argv', { exec: [] }],
+  ])('rejects readiness with %s before calling docker', async (_, readiness) => {
+    const { run } = fakeRunner()
+    const control = containerControl(run)
+    await expect(control.restartContainer('ctf39-db', { readiness })).rejects.toThrow('readiness')
+    await expect(control.startContainer('ctf39-db', { readiness })).rejects.toThrow('readiness')
+    expect(run).not.toHaveBeenCalled()
   })
 })
