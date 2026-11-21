@@ -1,3 +1,4 @@
+import { areHooksRegistered } from './hooks-state'
 import { spawn, ChildProcess } from 'node:child_process'
 import { createWriteStream, WriteStream, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
@@ -337,6 +338,8 @@ export function spawnServiceUnderTest(opts: SpawnServiceOptions): SpawnServiceHa
 
 /** Options for {@link startService} and {@link registerServiceUnderTest}. */
 export interface ServiceOptions extends SpawnServiceOptions {
+  /** Runs after every restart `restartForTag` performs, in the same hook, before later hooks. */
+  afterRestart?: () => unknown | Promise<unknown>
   /**
    * Name of an environment variable that, set to `1`, means the service is
    * already running (started by hand, or by docker compose), so it isn't
@@ -431,10 +434,11 @@ export interface RegisteredService {
    *
    * `restore: 'before-next'` skips the restart in `After` and restores the
    * original environment in the next scenario's `Before` that has none of
-   * these tags (and in `AfterAll`), so consumer `After` hooks run against
-   * the tagged service and rows written on boot are seen by the next
-   * scenario's cleanup. Register the service before `registerHooks` so the
-   * restore runs ahead of the framework's own `Before` hooks.
+   * these tags (and in `AfterAll`), ahead of the framework's own `Before`
+   * hooks, so a `Before` guard doesn't see rows the service wrote on boot
+   * (clear them with the `afterRestart` option). Consumer `After` hooks of a
+   * tagged scenario still run with the service in tagged mode. Call it
+   * before `registerHooks`, and don't mix it with `'after'` on one service.
    */
   restartForTag: (
     tag: string,
@@ -495,24 +499,33 @@ export function registerServiceUnderTest(opts: ServiceOptions): RegisteredServic
   }
 
   // before-next state: the overrides the service is running with, if any.
-  let active: NodeJS.ProcessEnv | null = null
+  // `undefined` means unknown (a restart failed), so the next Before retries.
+  let active: NodeJS.ProcessEnv | null | undefined = null
+  let mode: 'after' | 'before-next' | null = null
+  const restart = async (service: ServiceHandle, env?: NodeJS.ProcessEnv) => {
+    await service.restart(env)
+    await opts.afterRestart?.()
+  }
   const deferredTags = new Set<string>()
   let deferredRegistered = false
   const registerDeferredRestore = () => {
     if (deferredRegistered) return
     deferredRegistered = true
     Before({ timeout: restartTimeout }, async function (scenario) {
-      if (!active) return
+      if (active === null) return
       const names = scenario.pickle.tags.map((t) => t.name)
       if (names.some((n) => deferredTags.has(n))) return
       const service = started()
+      if (service.skipped) return
+      active = undefined
+      await restart(service)
       active = null
-      if (!service.skipped) await service.restart()
     })
     AfterAll({ timeout: restartTimeout }, async function () {
-      if (!active || !handle) return
+      if (active === null || !handle || handle.skipped) return
+      active = undefined
+      await restart(handle)
       active = null
-      if (!handle.skipped) await handle.restart()
     })
   }
 
@@ -521,14 +534,25 @@ export function registerServiceUnderTest(opts: ServiceOptions): RegisteredServic
       return started()
     },
     restartForTag(tag, envOverrides, options) {
-      if (options?.restore === 'before-next') {
+      const next = options?.restore ?? 'after'
+      if (mode && mode !== next) {
+        throw new Error(`[${opts.name}] restartForTag can't mix restore 'after' and 'before-next'`)
+      }
+      mode = next
+      if (next === 'before-next') {
+        if (areHooksRegistered()) {
+          throw new Error(
+            `[${opts.name}] restartForTag with restore 'before-next': call it before registerHooks`,
+          )
+        }
         registerDeferredRestore()
         deferredTags.add(tag)
         Before({ tags: tag, timeout: restartTimeout }, async function () {
           const service = started()
           if (service.skipped) return 'skipped'
           if (active === envOverrides) return undefined
-          await service.restart(envOverrides)
+          active = undefined
+          await restart(service, envOverrides)
           active = envOverrides
           return undefined
         })
@@ -537,12 +561,12 @@ export function registerServiceUnderTest(opts: ServiceOptions): RegisteredServic
       Before({ tags: tag, timeout: restartTimeout }, async function () {
         const service = started()
         if (service.skipped) return 'skipped'
-        await service.restart(envOverrides)
+        await restart(service, envOverrides)
         return undefined
       })
       After({ tags: tag, timeout: restartTimeout }, async function () {
         const service = started()
-        if (!service.skipped) await service.restart()
+        if (!service.skipped) await restart(service)
       })
     },
   }

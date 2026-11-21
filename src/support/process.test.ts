@@ -1,3 +1,4 @@
+import { markHooksRegistered } from './hooks-state'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import * as fs from 'fs'
 import * as net from 'net'
@@ -499,6 +500,59 @@ describe('service lifecycle (COMPONENT-8)', () => {
       expect(await marker(port)).toBe('first')
       await hooks.afterAll[0].fn.call({})
       expect(exited(api.handle.process)).toBe(true)
+    })
+
+    it('runs afterRestart after every restart, in the same hook', async () => {
+      const runs: string[] = []
+      const api = registerServiceUnderTest(
+        options({
+          stopGraceMs: 2_000,
+          afterRestart: async () => void runs.push(await marker(port)),
+        }),
+      )
+      api.restartForTag('@locked', { MARKER: 'locked' }, { restore: 'before-next' })
+      await hooks.beforeAll[0].fn.call({})
+      started.push(api.handle)
+      const none = { pickle: { tags: [] } }
+      await hooks.before[1].fn.call({}, { pickle: { tags: [{ name: '@locked' }] } })
+      await hooks.before[0].fn.call({}, none)
+      await hooks.before[1].fn.call({}, { pickle: { tags: [{ name: '@locked' }] } })
+      await hooks.afterAll.at(-1)!.fn.call({})
+      expect(runs).toEqual(['locked', 'first', 'locked', 'first'])
+      await hooks.afterAll[0].fn.call({})
+    })
+
+    it('retries the restore after a failed restart', async () => {
+      let fail = true
+      const api = registerServiceUnderTest(
+        options({
+          stopGraceMs: 2_000,
+          afterRestart: () => {
+            if (fail) throw new Error('boom')
+          },
+        }),
+      )
+      api.restartForTag('@locked', { MARKER: 'locked' }, { restore: 'before-next' })
+      await hooks.beforeAll[0].fn.call({})
+      started.push(api.handle)
+      const tagged = { pickle: { tags: [{ name: '@locked' }] } }
+      await expect(hooks.before[1].fn.call({}, tagged)).rejects.toThrow('boom')
+      fail = false
+      await hooks.before[1].fn.call({}, tagged)
+      expect(await marker(port)).toBe('locked')
+      await hooks.afterAll.at(-1)!.fn.call({})
+      await hooks.afterAll[0].fn.call({})
+    })
+
+    it('refuses before-next after registerHooks and mixed modes', () => {
+      const api = registerServiceUnderTest(options())
+      api.restartForTag('@a', {}, { restore: 'before-next' })
+      expect(() => api.restartForTag('@b', {})).toThrow("can't mix")
+      markHooksRegistered()
+      const other = registerServiceUnderTest(options())
+      expect(() => other.restartForTag('@a', {}, { restore: 'before-next' })).toThrow(
+        'before registerHooks',
+      )
     })
 
     it('skips tagged scenarios when the service is skipped', async () => {
