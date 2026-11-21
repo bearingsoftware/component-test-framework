@@ -49,6 +49,10 @@
       "types": "./dist/mailpit.d.ts",
       "default": "./dist/mailpit.js"
     },
+    "./oidc": {
+      "types": "./dist/oidc.d.ts",
+      "default": "./dist/oidc.js"
+    },
     "./playwright-test": {
       "types": "./dist/playwright-test.d.ts",
       "default": "./dist/playwright-test.js"
@@ -91,6 +95,9 @@
       ],
       "mailpit": [
         "dist/mailpit.d.ts"
+      ],
+      "oidc": [
+        "dist/oidc.d.ts"
       ],
       "playwright-test": [
         "dist/playwright-test.d.ts"

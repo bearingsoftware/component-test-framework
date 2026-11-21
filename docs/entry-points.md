@@ -14,6 +14,7 @@ The package root works as it always has: it exports everything and registers eve
 | `…/openapi` | `loadSpec`, `readOperationMap`, `generateOperationMap`, `checkOperationMaps`, `auditCoverage`: the code behind the `ctf` command |
 | `…/testcontainers` | `startContainers`, `stopContainers` |
 | `…/mailpit` | `MailpitClient`, `registerMailpitSteps`, `emailContains`, `emailLinks` |
+| `…/oidc` | `startOidcIssuer`, `registerOidcSteps`: a stub OpenID Connect issuer |
 | `…/stubs` | `startCaptureServer`, `registerStubSteps`, `parseMatch` |
 | `…/playwright-test` | `defineFixtures`: the SPA server, WireMock, stubs, logins and coverage as Playwright Test fixtures. Loads no Cucumber |
 
