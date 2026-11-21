@@ -93,34 +93,56 @@ describe.skipIf(!url)('DbClient table discovery (COMPONENT-37)', () => {
     await admin.query(
       `CREATE TABLE ${q('kept_child')} (id serial PRIMARY KEY, p int REFERENCES ${q('parents')} (id))`,
     )
+    const fresh = new DbClient(url)
     try {
-      await expect(db.cleanDiscovered({ schema, keep: [...keep, 'kept_child'] })).rejects.toThrow(
-        /kept_child -> parents[\s\S]*Remove the kept table from keep[\s\S]*drop the foreign key/,
+      await expect(
+        fresh.cleanDiscovered({ schema, keep: [...keep, 'kept_child'] }),
+      ).rejects.toThrow(
+        new RegExp(`${schema}\\.kept_child -> ${schema}\\.parents[\\s\\S]*drop the foreign key`),
       )
-      await expect(db.cleanDiscovered({ schema, keep })).resolves.toBeUndefined()
+      await expect(fresh.cleanDiscovered({ schema, keep })).resolves.toBeUndefined()
     } finally {
+      await fresh.close()
       await admin.query(`DROP TABLE ${q('kept_child')}`)
     }
   })
 
-  it('truncates discovered tables with a self-reference and a reference from another schema (CASCADE)', async () => {
-    const other = `${schema}_other`
+  it('truncates a discovered table with a self-reference', async () => {
     await admin.query(`
       CREATE TABLE ${q('tree')} (id serial PRIMARY KEY, up int REFERENCES ${q('tree')} (id));
-      CREATE SCHEMA "${other}";
-      CREATE TABLE ${q('foreign_child', other)} (p int REFERENCES ${q('parents')} (id));
-      INSERT INTO ${q('parents')} (name) VALUES ('x');
       INSERT INTO ${q('tree')} (up) VALUES (NULL);
-      INSERT INTO ${q('foreign_child', other)} VALUES (1);
+      INSERT INTO ${q('tree')} (up) VALUES (1);
     `)
     const fresh = new DbClient(url)
     try {
       await fresh.cleanDiscovered({ schema, keep })
       expect(await count('tree')).toBe(0)
-      expect(await count('foreign_child', other)).toBe(0)
     } finally {
       await fresh.close()
-      await admin.query(`DROP SCHEMA "${other}" CASCADE; DROP TABLE ${q('tree')}`)
+      await admin.query(`DROP TABLE ${q('tree')}`)
+    }
+  })
+
+  it('throws, and touches nothing, when a table in another schema references a discovered one', async () => {
+    const other = `${schema}_other`
+    await admin.query(`
+      CREATE SCHEMA "${other}";
+      CREATE TABLE ${q('foreign_child', other)} (p int REFERENCES ${q('parents')} (id));
+      INSERT INTO ${q('parents')} (name) VALUES ('x');
+      INSERT INTO ${q('foreign_child', other)} VALUES (1);
+    `)
+    const fresh = new DbClient(url)
+    try {
+      await expect(fresh.cleanDiscovered({ schema, keep })).rejects.toThrow(
+        new RegExp(`${other}\\.foreign_child -> ${schema}\\.parents[\\s\\S]*drop the foreign key`),
+      )
+      expect(await count('foreign_child', other)).toBe(1)
+      expect(await count('parents')).toBe(1)
+    } finally {
+      await fresh.close()
+      await admin.query(
+        `DROP SCHEMA "${other}" CASCADE; TRUNCATE ${q('parents')} RESTART IDENTITY CASCADE`,
+      )
     }
   })
 

@@ -118,35 +118,41 @@ export class DbClient {
     )
     const skip = new Set(keep)
     const tables = rows.map((r) => r.relname).filter((t) => !skip.has(t))
-    const fks = await this.pool.query<{ child: string; parent: string }>(
-      `SELECT child.relname AS child, parent.relname AS parent
+    const fks = await this.pool.query<{ child_schema: string; child: string; parent: string }>(
+      `SELECT cn.nspname AS child_schema, child.relname AS child, parent.relname AS parent
          FROM pg_constraint k
          JOIN pg_class child ON child.oid = k.conrelid
+         JOIN pg_namespace cn ON cn.oid = child.relnamespace
          JOIN pg_class parent ON parent.oid = k.confrelid
-         JOIN pg_namespace n ON n.oid = child.relnamespace
-        WHERE k.contype = 'f' AND n.nspname = $1 AND parent.relnamespace = child.relnamespace
-        ORDER BY child.relname, parent.relname`,
+         JOIN pg_namespace pn ON pn.oid = parent.relnamespace
+        WHERE k.contype = 'f' AND k.conparentid = 0 AND pn.nspname = $1
+        ORDER BY cn.nspname, child.relname, parent.relname`,
       [schema],
     )
     const found = new Set(tables)
-    const conflicts = fks.rows.filter((r) => skip.has(r.child) && found.has(r.parent))
+    const conflicts = fks.rows.filter(
+      (r) => found.has(r.parent) && !(r.child_schema === schema && found.has(r.child)),
+    )
     if (conflicts.length > 0) {
-      const pairs = conflicts.map((r) => `${r.child} -> ${r.parent}`).join(', ')
+      const pairs = conflicts
+        .map((r) => `${r.child_schema}.${r.child} -> ${schema}.${r.parent}`)
+        .join(', ')
       throw new Error(
-        `cleanupTables: kept table(s) reference discovered tables (${pairs}). Emptying the referenced ` +
-          `table would also empty the kept one. Remove the kept table from keep so it is cleaned, or drop the foreign key.`,
+        `cleanupTables: tables outside discovery reference discovered tables (${pairs}). Emptying the ` +
+          `referenced table would fail or empty them. Add the child to discovery (remove it from keep, or ` +
+          `include its schema), drop the foreign key, or stop using discover.`,
       )
     }
     return tables
   }
 
   /**
-   * Empty every discovered table in one `TRUNCATE ... RESTART IDENTITY CASCADE`,
-   * which needs no foreign-key order. The list is cached for the run, but an
+   * Empty every discovered table in one `TRUNCATE ... RESTART IDENTITY`, which
+   * needs no foreign-key order and never touches a table outside `schema`. The list is cached for the run, but an
    * empty result is not (the service under test may apply its schema after the
    * first hook), and a table that has gone missing (SQLSTATE 42P01) triggers one
-   * re-discovery. Discovery throws when a kept table in the schema references a discovered one; CASCADE is
-   * only a safety net for references from other schemas. Retries on deadlock like {@link cleanTables}.
+   * re-discovery. Discovery throws when any table outside the discovered set (kept, or in another
+   * schema) has a foreign key to a discovered table. Retries on deadlock like {@link cleanTables}.
    */
   async cleanDiscovered(
     { schema, keep = [] }: { schema: string; keep?: string[] },
@@ -165,7 +171,7 @@ export class DbClient {
       }
       try {
         await this.pool.query(
-          `TRUNCATE ${tables.map(qualified(schema)).join(', ')} RESTART IDENTITY CASCADE`,
+          `TRUNCATE ${tables.map(qualified(schema)).join(', ')} RESTART IDENTITY`,
         )
         return
       } catch (err) {
