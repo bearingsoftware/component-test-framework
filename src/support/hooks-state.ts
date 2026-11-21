@@ -5,3 +5,7 @@ export const markHooksRegistered = (): void => {
 }
 
 export const areHooksRegistered = (): boolean => hooksRegistered
+
+export const resetHooksState = (): void => {
+  hooksRegistered = false
+}

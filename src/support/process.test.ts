@@ -1,4 +1,4 @@
-import { markHooksRegistered } from './hooks-state'
+import { markHooksRegistered, resetHooksState } from './hooks-state'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import * as fs from 'fs'
 import * as net from 'net'
@@ -425,6 +425,7 @@ describe('service lifecycle (COMPONENT-8)', () => {
 
   describe('registerServiceUnderTest', () => {
     beforeEach(() => {
+      resetHooksState()
       for (const list of Object.values(hooks)) list.length = 0
     })
 
@@ -553,6 +554,11 @@ describe('service lifecycle (COMPONENT-8)', () => {
       expect(() => other.restartForTag('@a', {}, { restore: 'before-next' })).toThrow(
         'before registerHooks',
       )
+    })
+
+    it('accepts before-next again once the hooks state is reset', () => {
+      const api = registerServiceUnderTest(options())
+      expect(() => api.restartForTag('@a', {}, { restore: 'before-next' })).not.toThrow()
     })
 
     it('skips tagged scenarios when the service is skipped', async () => {
