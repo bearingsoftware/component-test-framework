@@ -21,6 +21,7 @@ import { runFaults } from './faults/run'
 import { readAllowlistAtBase } from './faults/allowlist'
 import { FAULTS, isFault, type Fault } from './faults/inject'
 import { initProject, nextSteps, PIECES, type Piece } from './cli/init'
+import { checkGate, parseCucumberSummary } from './cli/gate'
 
 const HELP = `Usage: ctf <command> [options]
 
@@ -62,6 +63,11 @@ Commands:
       --fail-on-gaps                Exit 1 when any operation is unexercised
                                     (with --statuses, or any status is unasserted)
       --json                        Print the result as JSON, including statuses and statusGaps
+
+  gate --min <N> --log <path>     Fail unless the last Cucumber summary line shows at least N
+                                  passed and nothing failed, ambiguous, undefined or pending
+      --log <path|->                Cucumber output to read; - reads stdin
+      --suite <name>                Name shown in the result (default: cucumber)
 
   steps                           List every step the framework can register, from what its
                                   register...Steps functions register
@@ -590,6 +596,37 @@ function apiDiff(args: string[]): number {
   return breaking.length > 0 || allowed.stale.length > 0 ? 1 : 0
 }
 
+export function gate(
+  args: string[],
+  readStdin: () => string = () => fs.readFileSync(0, 'utf8'),
+): number {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      min: { type: 'string' },
+      log: { type: 'string' },
+      suite: { type: 'string' },
+    },
+  })
+  if (positionals.length > 0) throw new UsageError('gate takes options only')
+  if (values.min === undefined) throw new UsageError('gate needs --min')
+  if (!values.log) throw new UsageError('gate needs --log')
+  if (!/^\d+$/.test(values.min)) throw new UsageError(`--min is not a count: '${values.min}'`)
+  const min = Number(values.min)
+
+  const output = values.log === '-' ? readStdin() : fs.readFileSync(values.log, 'utf8')
+  const summary = parseCucumberSummary(output)
+  if (!summary) throw new Error(`no cucumber scenario summary in ${values.log}`)
+  if (summary.total === 0) throw new Error(`cucumber ran 0 scenarios in ${values.log}`)
+  const suite = values.suite ?? 'cucumber'
+  const result = checkGate(summary.counts, min)
+  const skipped = result.skipped > 0 ? `, ${result.skipped} skipped` : ''
+  console.log(`gate ${suite}: ${result.passed}/${min} passed${skipped}`)
+  for (const problem of result.problems) console.error(`gate ${suite}: ${problem}`)
+  return result.problems.length > 0 ? 1 : 0
+}
+
 export function main(argv: string[]): number {
   const [command, ...rest] = argv
   try {
@@ -610,6 +647,7 @@ export function main(argv: string[]): number {
     if (command === 'steps') return steps(rest)
     if (command === 'evidence') return evidence(rest)
     if (command === 'faults') return faults(rest)
+    if (command === 'gate') return gate(rest)
     throw new UsageError(`unknown command: ${command}`)
   } catch (err) {
     const usage =
