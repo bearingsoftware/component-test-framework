@@ -74,10 +74,7 @@
     "stderr": ""
   },
   "no-features": {
-    "args": [
-      "audit-coverage",
-      "src/openapi/__fixtures__/shop.yaml"
-    ],
+    "args": ["audit-coverage", "src/openapi/__fixtures__/shop.yaml"],
     "status": 2,
     "stdout": "",
     "stderr": "ctf: audit-coverage needs --features\nRun ctf --help for usage.\n"

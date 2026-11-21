@@ -2,32 +2,33 @@
 
 All configuration is loaded from environment variables via `loadConfig()`. Override any value by passing a partial config object.
 
-| Environment Variable | Default | Description |
-|---|---|---|
-| `API_BASE_URL` | `http://localhost:8080` | Base URL of the API under test |
-| `WEB_BASE_URL` | `http://localhost:3000` | Base URL of the web UI under test |
-| `WIREMOCK_URL` | `http://localhost:8443` | WireMock admin API base URL |
-| `DATABASE_URL` | _(none)_ | PostgreSQL connection string |
-| `REDIS_URL` | _(none)_ | Redis connection string |
-| `FIXTURES_DIR` | `./fixtures` | Path to your fixtures directory |
+| Environment Variable | Default                   | Description                                                                                              |
+| -------------------- | ------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `API_BASE_URL`       | `http://localhost:8080`   | Base URL of the API under test                                                                           |
+| `WEB_BASE_URL`       | `http://localhost:3000`   | Base URL of the web UI under test                                                                        |
+| `WIREMOCK_URL`       | `http://localhost:8443`   | WireMock admin API base URL                                                                              |
+| `DATABASE_URL`       | _(none)_                  | PostgreSQL connection string                                                                             |
+| `REDIS_URL`          | _(none)_                  | Redis connection string                                                                                  |
+| `FIXTURES_DIR`       | `./fixtures`              | Path to your fixtures directory                                                                          |
 | `WIREMOCK_STUBS_DIR` | `{FIXTURES_DIR}/wiremock` | Root for `the WireMock stub {string} is registered`. A warning is logged at start-up if it doesn't exist |
 
 ## Options only available in code
 
-| Option | Default | Description |
-|---|---|---|
-| `operationMap` | `{}` | Your API's operationId-to-path map |
-| `cleanupTables` | _(none)_ | Tables to clear after each scenario, children first, or `{ discover: true, … }` to read them from the schema. See [Postgres](postgres.md#discovering-tables) |
-| `defaultStepTimeout` | _(Cucumber's 5s)_ | Timeout in ms for every step and hook. Leave unset to keep a `setDefaultTimeout` call of your own |
-| `launchTimeoutMs` | 40% of `defaultStepTimeout` (30s if unset), min 5s | Budget in ms for each of the three `@ui` launch calls (browser, context, page). A hang throws an error naming the call; a dead browser or hung `newContext` is relaunched once. Set `NODE_DEBUG=ctf` for launch timings |
-| `waitTimeout` | _(see [Waiting](steps.md#waiting))_ | How long UI and assertion waits poll before failing, in ms |
-| `auth` | _(none)_ | How the API issues tokens: `loginPath`, `tokenPath` (default `access_token`), `refreshTokenPath`, `loginMethod`, `loginBody`. See [Requests, values and login](steps.md#requests-values-and-login) |
-| `hooks` | _(none)_ | Suite code at fixed points: `afterReset`, `onScenarioFailed`, `beforePageClose`. See [Lifecycle hooks](lifecycle.md#lifecycle-hooks) |
-| `pages` | _(none)_ | Page object classes by name, created for every `@ui` scenario. Needs `webBaseUrl` |
-| `wiremockBaseline` | _(none)_ | WireMock stub directories, relative to `fixturesDir`, loaded after every reset |
-| `migrations` | _(none)_ | A shell `command` that migrates the database before the suite, with optional `cwd`, `env` and `timeoutMs` (default 120000). Must be idempotent. See [Migrations](postgres.md#migrations) |
-| `cleanup` | _(none)_ | Cleanup after each scenario for what `cleanupTables` doesn't cover |
-| `serviceWaitTimeout` | `30000` | How long waits for background work (DB record waits, opt-in WireMock and DB steps) poll, in ms |
+| Option               | Default                             | Description                                                                                                                                                                                                                                                                                                 |
+| -------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operationMap`       | `{}`                                | Your API's operationId-to-path map                                                                                                                                                                                                                                                                          |
+| `cleanupTables`      | _(none)_                            | Tables to clear after each scenario, children first, or `{ discover: true, … }` to read them from the schema. See [Postgres](postgres.md#discovering-tables)                                                                                                                                                |
+| `defaultStepTimeout` | _(Cucumber's 5s)_                   | Timeout in ms for every step and hook. Leave unset to keep a `setDefaultTimeout` call of your own                                                                                                                                                                                                           |
+| `launchTimeoutMs`    | `15000`                             | Cap in ms for each of the three `@ui` launch calls (browser, context, page), also limited by the time left in `uiSetupTimeoutMs`. Positive integer. A hang throws an error naming the call; a dead browser or hung `newContext` is relaunched once, if time allows. Set `NODE_DEBUG=ctf` for launch timings |
+| `uiSetupTimeoutMs`   | `45000`                             | Total budget in ms for the `@ui` Before hook's launch work. The `@ui` Before has its own Cucumber timeout of this plus 5s, independent of `setDefaultTimeout` and `defaultStepTimeout`. Positive integer                                                                                                    |
+| `waitTimeout`        | _(see [Waiting](steps.md#waiting))_ | How long UI and assertion waits poll before failing, in ms                                                                                                                                                                                                                                                  |
+| `auth`               | _(none)_                            | How the API issues tokens: `loginPath`, `tokenPath` (default `access_token`), `refreshTokenPath`, `loginMethod`, `loginBody`. See [Requests, values and login](steps.md#requests-values-and-login)                                                                                                          |
+| `hooks`              | _(none)_                            | Suite code at fixed points: `afterReset`, `onScenarioFailed`, `beforePageClose`. See [Lifecycle hooks](lifecycle.md#lifecycle-hooks)                                                                                                                                                                        |
+| `pages`              | _(none)_                            | Page object classes by name, created for every `@ui` scenario. Needs `webBaseUrl`                                                                                                                                                                                                                           |
+| `wiremockBaseline`   | _(none)_                            | WireMock stub directories, relative to `fixturesDir`, loaded after every reset                                                                                                                                                                                                                              |
+| `migrations`         | _(none)_                            | A shell `command` that migrates the database before the suite, with optional `cwd`, `env` and `timeoutMs` (default 120000). Must be idempotent. See [Migrations](postgres.md#migrations)                                                                                                                    |
+| `cleanup`            | _(none)_                            | Cleanup after each scenario for what `cleanupTables` doesn't cover                                                                                                                                                                                                                                          |
+| `serviceWaitTimeout` | `30000`                             | How long waits for background work (DB record waits, opt-in WireMock and DB steps) poll, in ms                                                                                                                                                                                                              |
 
 ## Suites that don't use WireMock or an API
 

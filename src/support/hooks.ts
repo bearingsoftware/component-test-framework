@@ -48,7 +48,6 @@ import { builtinAdapters } from '../adapters/builtin'
 // process up to v12, a worker thread from v13), so this is per worker rather
 // than global — the isolation that matters between scenarios is the browser
 // context, which is still fresh every time.
-let sharedBrowser: Browser | null = null
 
 /**
  * Return `current` if it is still usable, otherwise launch a replacement.
@@ -68,10 +67,36 @@ export async function reuseBrowser(
 
 // Playwright is loaded on the first @ui scenario rather than when this module
 // is imported, so a suite without @ui scenarios never needs it installed.
-async function browserForWorker(): Promise<Browser> {
-  sharedBrowser = await reuseBrowser(sharedBrowser, launchBrowser)
-  return sharedBrowser
+/**
+ * The worker's shared browser. `abandon()` marks launches in flight as timed
+ * out: one that resolves afterwards is closed instead of assigned, so a late
+ * launch can neither leak nor replace a newer browser.
+ */
+export function createBrowserSource(launch: () => Promise<Browser>) {
+  let current: Browser | null = null
+  let generation = 0
+  return {
+    peek: () => current,
+    drop: () => {
+      current = null
+    },
+    abandon: () => {
+      generation++
+    },
+    async get(): Promise<Browser> {
+      const mine = generation
+      const browser = await reuseBrowser(current, launch)
+      if (mine !== generation) {
+        if (browser !== current) await discard(browser)
+        throw new Error('@ui hook: browser launch finished after its timeout and was closed')
+      }
+      current = browser
+      return browser
+    },
+  }
 }
+
+const source = createBrowserSource(launchBrowser)
 
 async function launchBrowser(): Promise<Browser> {
   const { chromium } = await loadPlaywright()
@@ -82,15 +107,26 @@ const defaultLog = debuglog('ctf')
 type Log = (msg: string) => void
 const CLOSE_TIMEOUT_MS = 2_000
 
-/** Per-call budget for the @ui hook: `launchTimeoutMs`, else 40% of the step timeout (30s default), at least 5s. */
-export function launchBudget(config: {
+export const DEFAULT_LAUNCH_TIMEOUT_MS = 15_000
+export const DEFAULT_UI_SETUP_TIMEOUT_MS = 45_000
+const MIN_ATTEMPT_MS = 5_000
+const HOOK_MARGIN_MS = 5_000
+
+export function validateUiTimeouts(config: {
   launchTimeoutMs?: number
-  defaultStepTimeout?: number
-}): number {
-  return (
-    config.launchTimeoutMs ??
-    Math.max(5_000, Math.round((config.defaultStepTimeout ?? 30_000) * 0.4))
-  )
+  uiSetupTimeoutMs?: number
+}): void {
+  for (const key of ['launchTimeoutMs', 'uiSetupTimeoutMs'] as const) {
+    const v = config[key]
+    if (v !== undefined && !(Number.isInteger(v) && v > 0)) {
+      throw new Error(`${key} must be a positive integer (milliseconds), got ${String(v)}`)
+    }
+  }
+}
+
+/** Timeout for the @ui Before hook: the setup deadline plus headroom to report its error. */
+export function uiHookTimeout(config: { uiSetupTimeoutMs?: number }): number {
+  return (config.uiSetupTimeoutMs ?? DEFAULT_UI_SETUP_TIMEOUT_MS) + HOOK_MARGIN_MS
 }
 
 class LaunchTimeout extends Error {
@@ -152,40 +188,52 @@ export interface UiLaunchDeps {
   getBrowser: () => Promise<Browser>
   peekBrowser: () => Browser | null
   dropBrowser: () => void
+  abandonLaunch?: () => void
   log?: Log
 }
 
+export interface UiLaunchOptions {
+  launchTimeoutMs?: number
+  uiSetupTimeoutMs?: number
+}
+
 /**
- * Browser, context and page for a @ui scenario, each call bounded by
- * `budgetMs`. A disconnected browser or a hung newContext is discarded and
- * relaunched once; a second failure is reported.
+ * Browser, context and page for a @ui scenario. One deadline of
+ * `uiSetupTimeoutMs` covers everything; each call gets the smaller of
+ * `launchTimeoutMs` and the time left less 1s. A disconnected browser or a
+ * hung newContext is relaunched once, and only if two minimum attempts of
+ * time remain.
  */
 export async function launchUi(
-  budgetMs: number,
+  options: UiLaunchOptions,
   deps: UiLaunchDeps,
 ): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
   const log = deps.log ?? defaultLog
+  const deadline = Date.now() + (options.uiSetupTimeoutMs ?? DEFAULT_UI_SETUP_TIMEOUT_MS)
+  const remaining = () => deadline - Date.now()
+  const budget = () =>
+    Math.max(1, Math.min(options.launchTimeoutMs ?? DEFAULT_LAUNCH_TIMEOUT_MS, remaining() - 1_000))
   const attempt = async () => {
-    const browser = await bounded(
-      'browserForWorker',
-      budgetMs,
-      deps.peekBrowser,
-      deps.getBrowser,
-      log,
-    )
+    let browser: Browser
+    try {
+      browser = await bounded('browserForWorker', budget(), deps.peekBrowser, deps.getBrowser, log)
+    } catch (err) {
+      if (err instanceof LaunchTimeout) deps.abandonLaunch?.()
+      throw err
+    }
     let context: BrowserContext | undefined
     const pendingContext = browser.newContext()
     try {
       context = await bounded(
         'newContext',
-        budgetMs,
+        budget(),
         () => browser,
         () => pendingContext,
         log,
       )
       const page = await bounded(
         'newPage',
-        budgetMs,
+        budget(),
         () => browser,
         () => context!.newPage(),
         log,
@@ -207,6 +255,11 @@ export async function launchUi(
     const stale = deps.peekBrowser()
     const retry = err instanceof LaunchTimeout && err.call === 'newContext'
     if (!retry && stale?.isConnected() !== false) throw err
+    if (remaining() < 2 * MIN_ATTEMPT_MS) {
+      throw new Error(
+        `${(err as Error).message}; relaunch retry skipped, only ${Math.max(0, remaining())}ms of the ${options.uiSetupTimeoutMs ?? DEFAULT_UI_SETUP_TIMEOUT_MS}ms setup budget left`,
+      )
+    }
     log(`relaunching shared browser after: ${(err as Error).message}`)
     deps.dropBrowser()
     await discard(stale)
@@ -263,6 +316,7 @@ function resolveConfig(options: FrameworkOptions): FrameworkConfig {
 
 export function registerHooks(options: FrameworkOptions): void {
   markHooksRegistered()
+  validateUiTimeouts(options)
   const config = resolveConfig(options)
   setWorldConstructor(ComponentTestWorld)
 
@@ -292,23 +346,25 @@ export function registerHooks(options: FrameworkOptions): void {
   })
 
   // --- Before @ui scenarios: launch Playwright ---
-  Before({ tags: '@ui' }, async function (this: ComponentTestWorld) {
-    const ui = await launchUi(launchBudget(config), {
-      getBrowser: browserForWorker,
-      peekBrowser: () => sharedBrowser,
-      dropBrowser: () => {
-        sharedBrowser = null
-      },
-    })
-    this.browser = ui.browser
-    this.browserContext = ui.context
-    this.page = ui.page
+  Before(
+    { tags: '@ui', timeout: uiHookTimeout(config) },
+    async function (this: ComponentTestWorld) {
+      const ui = await launchUi(config, {
+        getBrowser: source.get,
+        peekBrowser: source.peek,
+        dropBrowser: source.drop,
+        abandonLaunch: source.abandon,
+      })
+      this.browser = ui.browser
+      this.browserContext = ui.context
+      this.page = ui.page
 
-    // Page objects from the pages option, so the suite needn't register them.
-    for (const [name, PageObject] of Object.entries(config.pages ?? {})) {
-      this.pageRegistry.set(name, new PageObject(this.page, config.webBaseUrl as string))
-    }
-  })
+      // Page objects from the pages option, so the suite needn't register them.
+      for (const [name, PageObject] of Object.entries(config.pages ?? {})) {
+        this.pageRegistry.set(name, new PageObject(this.page, config.webBaseUrl as string))
+      }
+    },
+  )
 
   // --- After @ui scenarios: close Playwright ---
   After({ tags: '@ui' }, async function (this: ComponentTestWorld) {
@@ -331,8 +387,8 @@ export function registerHooks(options: FrameworkOptions): void {
   AfterAll({ timeout: Math.max(0, ...afterAllTimeouts) || undefined }, async function () {
     await runAll([
       async () => {
-        await sharedBrowser?.close()
-        sharedBrowser = null
+        await source.peek()?.close()
+        source.drop()
       },
       ...afterAllSteps(adapters, ctx),
     ])

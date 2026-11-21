@@ -193,10 +193,17 @@ export interface FrameworkConfig {
    */
   defaultStepTimeout?: number
   /**
-   * Budget in ms for each of the three @ui launch calls (browser, context,
-   * page). Defaults to 40% of `defaultStepTimeout` (30s if unset), at least 5s.
+   * Cap in ms for each of the three @ui launch calls (browser, context, page);
+   * also limited by the time left in `uiSetupTimeoutMs`. Positive integer.
+   * Default 15000.
    */
   launchTimeoutMs?: number
+  /**
+   * Total budget in ms for the @ui Before hook's launch work. The hook's own
+   * Cucumber timeout is this plus 5s, independent of `setDefaultTimeout`.
+   * Positive integer. Default 45000.
+   */
+  uiSetupTimeoutMs?: number
   /**
    * How long waiting steps poll before failing, in ms. Defaults to 1s less
    * than `defaultStepTimeout`, so a failed wait reports what it was waiting
