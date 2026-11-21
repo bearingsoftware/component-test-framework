@@ -164,11 +164,12 @@ describe('cleanDiscovered SQL', () => {
       .fn()
       .mockResolvedValueOnce({ rows: [{ relname: 'a' }, { relname: 'b' }] })
       .mockResolvedValueOnce({ rows: [] })
+      .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rowCount: 0 })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(c as any).pool = { query }
 
     await c.cleanDiscovered({ schema: 'app' })
-    expect(query.mock.calls[2][0]).toBe('TRUNCATE "app"."a", "app"."b" RESTART IDENTITY')
+    expect(query.mock.calls[3][0]).toBe('TRUNCATE "app"."a", "app"."b" RESTART IDENTITY')
   })
 })
