@@ -19,6 +19,7 @@ All configuration is loaded from environment variables via `loadConfig()`. Overr
 | `operationMap` | `{}` | Your API's operationId-to-path map |
 | `cleanupTables` | _(none)_ | Tables to clear after each scenario, children first, or `{ discover: true, … }` to read them from the schema. See [Postgres](postgres.md#discovering-tables) |
 | `defaultStepTimeout` | _(Cucumber's 5s)_ | Timeout in ms for every step and hook. Leave unset to keep a `setDefaultTimeout` call of your own |
+| `launchTimeoutMs` | 40% of `defaultStepTimeout` (30s if unset), min 5s | Budget in ms for each of the three `@ui` launch calls (browser, context, page). A hang throws an error naming the call; a dead browser or hung `newContext` is relaunched once. Set `NODE_DEBUG=ctf` for launch timings |
 | `waitTimeout` | _(see [Waiting](steps.md#waiting))_ | How long UI and assertion waits poll before failing, in ms |
 | `auth` | _(none)_ | How the API issues tokens: `loginPath`, `tokenPath` (default `access_token`), `refreshTokenPath`, `loginMethod`, `loginBody`. See [Requests, values and login](steps.md#requests-values-and-login) |
 | `hooks` | _(none)_ | Suite code at fixed points: `afterReset`, `onScenarioFailed`, `beforePageClose`. See [Lifecycle hooks](lifecycle.md#lifecycle-hooks) |

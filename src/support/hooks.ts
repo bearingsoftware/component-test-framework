@@ -1,6 +1,7 @@
 import { Before, After, AfterAll, setDefaultTimeout, setWorldConstructor } from '@cucumber/cucumber'
 import type { ITestCaseHookParameter } from '@cucumber/cucumber'
-import type { Browser } from '@playwright/test'
+import { debuglog } from 'node:util'
+import type { Browser, BrowserContext, Page } from '@playwright/test'
 import { ComponentTestWorld } from './world'
 import type { FrameworkConfig, FrameworkOptions } from '../types'
 import { currentWorker, setWorkerPortStride, workerDatabaseUrl, workerRedisUrl } from './worker'
@@ -68,11 +69,149 @@ export async function reuseBrowser(
 // Playwright is loaded on the first @ui scenario rather than when this module
 // is imported, so a suite without @ui scenarios never needs it installed.
 async function browserForWorker(): Promise<Browser> {
-  sharedBrowser = await reuseBrowser(sharedBrowser, async () => {
-    const { chromium } = await loadPlaywright()
-    return chromium.launch()
-  })
+  sharedBrowser = await reuseBrowser(sharedBrowser, launchBrowser)
   return sharedBrowser
+}
+
+async function launchBrowser(): Promise<Browser> {
+  const { chromium } = await loadPlaywright()
+  return chromium.launch()
+}
+
+const defaultLog = debuglog('ctf')
+type Log = (msg: string) => void
+const CLOSE_TIMEOUT_MS = 2_000
+
+/** Per-call budget for the @ui hook: `launchTimeoutMs`, else 40% of the step timeout (30s default), at least 5s. */
+export function launchBudget(config: {
+  launchTimeoutMs?: number
+  defaultStepTimeout?: number
+}): number {
+  return (
+    config.launchTimeoutMs ??
+    Math.max(5_000, Math.round((config.defaultStepTimeout ?? 30_000) * 0.4))
+  )
+}
+
+class LaunchTimeout extends Error {
+  constructor(
+    readonly call: string,
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
+async function bounded<T>(
+  call: string,
+  budgetMs: number,
+  getBrowser: () => Browser | null,
+  work: () => Promise<T>,
+  log: Log,
+): Promise<T> {
+  const start = Date.now()
+  let timer: NodeJS.Timeout | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      const connected = getBrowser()?.isConnected() ?? false
+      reject(
+        new LaunchTimeout(
+          call,
+          `@ui hook: ${call} did not finish within ${budgetMs}ms (elapsed ${Date.now() - start}ms, shared browser connected: ${connected})`,
+        ),
+      )
+    }, budgetMs)
+  })
+  try {
+    const result = await Promise.race([work(), timeout])
+    log(`${call} took ${Date.now() - start}ms`)
+    return result
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function discard(target: { close(): Promise<void> } | null | undefined): Promise<void> {
+  if (!target) return
+  let timer: NodeJS.Timeout | undefined
+  try {
+    await Promise.race([
+      target.close(),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, CLOSE_TIMEOUT_MS)
+      }),
+    ])
+  } catch {
+    // Abandoned already; a failed close changes nothing about the retry.
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export interface UiLaunchDeps {
+  getBrowser: () => Promise<Browser>
+  peekBrowser: () => Browser | null
+  dropBrowser: () => void
+  log?: Log
+}
+
+/**
+ * Browser, context and page for a @ui scenario, each call bounded by
+ * `budgetMs`. A disconnected browser or a hung newContext is discarded and
+ * relaunched once; a second failure is reported.
+ */
+export async function launchUi(
+  budgetMs: number,
+  deps: UiLaunchDeps,
+): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
+  const log = deps.log ?? defaultLog
+  const attempt = async () => {
+    const browser = await bounded(
+      'browserForWorker',
+      budgetMs,
+      deps.peekBrowser,
+      deps.getBrowser,
+      log,
+    )
+    let context: BrowserContext | undefined
+    const pendingContext = browser.newContext()
+    try {
+      context = await bounded(
+        'newContext',
+        budgetMs,
+        () => browser,
+        () => pendingContext,
+        log,
+      )
+      const page = await bounded(
+        'newPage',
+        budgetMs,
+        () => browser,
+        () => context!.newPage(),
+        log,
+      )
+      return { browser, context, page }
+    } catch (err) {
+      // A context that resolves after its timeout would otherwise leak.
+      void pendingContext.then(
+        (c) => discard(c),
+        () => undefined,
+      )
+      await discard(context)
+      throw err
+    }
+  }
+  try {
+    return await attempt()
+  } catch (err) {
+    const stale = deps.peekBrowser()
+    const retry = err instanceof LaunchTimeout && err.call === 'newContext'
+    if (!retry && stale?.isConnected() !== false) throw err
+    log(`relaunching shared browser after: ${(err as Error).message}`)
+    deps.dropBrowser()
+    await discard(stale)
+    return attempt()
+  }
 }
 
 export async function loadPlaywright(
@@ -154,9 +293,16 @@ export function registerHooks(options: FrameworkOptions): void {
 
   // --- Before @ui scenarios: launch Playwright ---
   Before({ tags: '@ui' }, async function (this: ComponentTestWorld) {
-    this.browser = await browserForWorker()
-    this.browserContext = await this.browser.newContext()
-    this.page = await this.browserContext.newPage()
+    const ui = await launchUi(launchBudget(config), {
+      getBrowser: browserForWorker,
+      peekBrowser: () => sharedBrowser,
+      dropBrowser: () => {
+        sharedBrowser = null
+      },
+    })
+    this.browser = ui.browser
+    this.browserContext = ui.context
+    this.page = ui.page
 
     // Page objects from the pages option, so the suite needn't register them.
     for (const [name, PageObject] of Object.entries(config.pages ?? {})) {

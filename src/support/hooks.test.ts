@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import type { Browser } from '@playwright/test'
 
-import { loadPlaywright, reuseBrowser } from './hooks'
+import { launchBudget, launchUi, loadPlaywright, reuseBrowser } from './hooks'
 
 const browser = (connected: boolean, id = 'b'): Browser =>
   ({ isConnected: () => connected, id }) as unknown as Browser
@@ -63,5 +63,87 @@ describe('loadPlaywright', () => {
     const importer = vi.fn().mockRejectedValue(err)
 
     await expect(loadPlaywright(importer)).rejects.toBe(err)
+  })
+})
+
+describe('launchUi (COMPONENT-41)', () => {
+  const never = () => new Promise<never>(() => undefined)
+  const fakePage = { close: vi.fn() }
+  const ctx = (newPage: () => Promise<unknown> = async () => fakePage) =>
+    ({
+      newPage,
+      close: vi.fn().mockResolvedValue(undefined),
+    }) as unknown as import('@playwright/test').BrowserContext
+  const fakeBrowser = (connected: boolean, newContext: () => Promise<unknown>) =>
+    ({
+      isConnected: () => connected,
+      newContext,
+      close: vi.fn().mockResolvedValue(undefined),
+    }) as unknown as Browser
+  const harness = (first: Browser, later: Browser[] = []) => {
+    let shared: Browser | null = null
+    const queue = [first, ...later]
+    const getBrowser = vi.fn(async () => {
+      if (!shared?.isConnected()) shared = queue.shift() as Browser
+      return shared
+    })
+    return {
+      getBrowser,
+      deps: { getBrowser, peekBrowser: () => shared, dropBrowser: () => (shared = null) },
+    }
+  }
+
+  it('names browserForWorker and the connected flag when it hangs', async () => {
+    const { deps } = harness(fakeBrowser(true, async () => ctx()))
+    await expect(launchUi(20, { ...deps, getBrowser: never })).rejects.toThrow(
+      /browserForWorker.*20ms.*connected: false/,
+    )
+  })
+
+  it('names newPage and the connected flag when it hangs', async () => {
+    const { deps } = harness(fakeBrowser(true, async () => ctx(never)))
+    await expect(launchUi(20, deps)).rejects.toThrow(/newPage.*connected: true/)
+  })
+
+  it('relaunches once when newContext hangs, then succeeds', async () => {
+    const hung = fakeBrowser(true, never)
+    const good = fakeBrowser(true, async () => ctx())
+    const { deps, getBrowser } = harness(hung, [good])
+    const got = await launchUi(20, deps)
+    expect(got.browser).toBe(good)
+    expect(getBrowser).toHaveBeenCalledTimes(2)
+    expect(hung.close).toHaveBeenCalled()
+  })
+
+  it('relaunches once when the browser is disconnected, then succeeds', async () => {
+    const dead = fakeBrowser(false, async () => {
+      throw new Error('Target closed')
+    })
+    const good = fakeBrowser(true, async () => ctx())
+    const { deps } = harness(dead, [good])
+    const got = await launchUi(20, deps)
+    expect(got.browser).toBe(good)
+  })
+
+  it('fails after a single retry when newContext hangs again', async () => {
+    const a = fakeBrowser(true, never)
+    const b = fakeBrowser(true, never)
+    const { deps, getBrowser } = harness(a, [b, fakeBrowser(true, async () => ctx())])
+    await expect(launchUi(20, deps)).rejects.toThrow(/newContext.*connected: true/)
+    expect(getBrowser).toHaveBeenCalledTimes(2)
+  })
+
+  it('logs timings through the ctf debug channel', async () => {
+    const { deps } = harness(fakeBrowser(true, async () => ctx()))
+    const lines: string[] = []
+    await launchUi(1000, { ...deps, log: (m) => lines.push(m) })
+    expect(lines.join('\n')).toMatch(/newPage took \d+ms/)
+  })
+
+  it('launchBudget derives 40% of the step timeout, floor 5s, overridable', () => {
+    expect(launchBudget({})).toBe(12_000)
+    expect(launchBudget({ defaultStepTimeout: 60_000 })).toBe(24_000)
+    expect(launchBudget({ defaultStepTimeout: 5_000 })).toBe(5_000)
+    expect(launchBudget({ launchTimeoutMs: 123 })).toBe(123)
   })
 })

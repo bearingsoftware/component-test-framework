@@ -193,6 +193,11 @@ export interface FrameworkConfig {
    */
   defaultStepTimeout?: number
   /**
+   * Budget in ms for each of the three @ui launch calls (browser, context,
+   * page). Defaults to 40% of `defaultStepTimeout` (30s if unset), at least 5s.
+   */
+  launchTimeoutMs?: number
+  /**
    * How long waiting steps poll before failing, in ms. Defaults to 1s less
    * than `defaultStepTimeout`, so a failed wait reports what it was waiting
    * for before Cucumber's timeout fires. Without either, steps that used to
