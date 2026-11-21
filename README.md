@@ -88,6 +88,7 @@ Point `API_BASE_URL` at your own service, add its operations to the map, and rep
 - [Running in parallel](docs/parallel.md): worker isolation, and making suites fast in CI
 - [OpenAPI tooling and `ctf init`](docs/openapi-cli.md): the `ctf` command
 - [Test evidence](docs/evidence.md): `ctf evidence`, coverage and api-break files for risk-gate
+- [Cucumber gate](docs/gate.md): `ctf gate`, fail a run unless enough scenarios passed
 - [Lifecycle](docs/lifecycle.md): starting the service under test, lifecycle hooks and the scenario lifecycle
 - [Entry points and exports](docs/entry-points.md): the package's entry points and moving to `/core`
 - [Adapters](docs/adapters.md)
