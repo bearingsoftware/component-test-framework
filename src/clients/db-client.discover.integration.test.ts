@@ -146,6 +146,70 @@ describe.skipIf(!url)('DbClient table discovery (COMPONENT-37)', () => {
     }
   })
 
+  describe('inheritance and partitions', () => {
+    const other = `${schema}_inh`
+    const fresh = () => new DbClient(url)
+    beforeAll(async () => {
+      await admin.query(`CREATE SCHEMA "${other}"`)
+    })
+    afterAll(async () => {
+      await admin.query(`DROP SCHEMA "${other}" CASCADE`)
+    })
+
+    it('throws on an INHERITS child, including a chain, in another schema', async () => {
+      await admin.query(`
+        CREATE TABLE ${q('base')} (id int);
+        CREATE TABLE ${q('mid')} () INHERITS (${q('base')});
+        CREATE TABLE ${q('leaf', other)} () INHERITS (${q('mid')});
+        INSERT INTO ${q('leaf', other)} VALUES (1);
+      `)
+      const c = fresh()
+      try {
+        await expect(c.cleanDiscovered({ schema, keep })).rejects.toThrow(
+          new RegExp(`${other}\\.leaf inherits ${schema}\\.mid`),
+        )
+        expect(await count('leaf', other)).toBe(1)
+      } finally {
+        await c.close()
+        await admin.query(
+          `DROP TABLE ${q('leaf', other)}; DROP TABLE ${q('mid')}; DROP TABLE ${q('base')}`,
+        )
+      }
+    })
+
+    it('throws on a partition in another schema', async () => {
+      await admin.query(`
+        CREATE TABLE ${q('events')} (id int) PARTITION BY RANGE (id);
+        CREATE TABLE ${q('events_far', other)} PARTITION OF ${q('events')} FOR VALUES FROM (0) TO (10);
+      `)
+      const c = fresh()
+      try {
+        await expect(c.cleanDiscovered({ schema, keep })).rejects.toThrow(
+          new RegExp(`${other}\\.events_far inherits ${schema}\\.events`),
+        )
+      } finally {
+        await c.close()
+        await admin.query(`DROP TABLE ${q('events')}`)
+      }
+    })
+
+    it('still empties same-schema partitions', async () => {
+      await admin.query(`
+        CREATE TABLE ${q('metrics')} (id int) PARTITION BY RANGE (id);
+        CREATE TABLE ${q('metrics_a')} PARTITION OF ${q('metrics')} FOR VALUES FROM (0) TO (10);
+        INSERT INTO ${q('metrics')} VALUES (1);
+      `)
+      const c = fresh()
+      try {
+        await c.cleanDiscovered({ schema, keep })
+        expect(await count('metrics_a')).toBe(0)
+      } finally {
+        await c.close()
+        await admin.query(`DROP TABLE ${q('metrics')}`)
+      }
+    })
+  })
+
   it('names the non-empty tables', async () => {
     await admin.query(
       `INSERT INTO ${q('parents')} (name) VALUES ('x'); INSERT INTO ${q('children')} (parent_id) VALUES (1)`,

@@ -143,6 +143,40 @@ export class DbClient {
           `include its schema), drop the foreign key, or stop using discover.`,
       )
     }
+    const kids = await this.pool.query<{
+      child_schema: string
+      child: string
+      parent_schema: string
+      parent: string
+    }>(
+      `WITH RECURSIVE d(child, parent) AS (
+         SELECT i.inhrelid, i.inhparent
+           FROM pg_inherits i
+           JOIN pg_class p ON p.oid = i.inhparent
+           JOIN pg_namespace pn ON pn.oid = p.relnamespace
+          WHERE pn.nspname = $1
+         UNION
+         SELECT i.inhrelid, i.inhparent FROM pg_inherits i JOIN d ON i.inhparent = d.child
+       )
+       SELECT cn.nspname AS child_schema, c.relname AS child, pn.nspname AS parent_schema, p.relname AS parent
+         FROM d
+         JOIN pg_class c ON c.oid = d.child
+         JOIN pg_namespace cn ON cn.oid = c.relnamespace
+         JOIN pg_class p ON p.oid = d.parent
+         JOIN pg_namespace pn ON pn.oid = p.relnamespace
+        WHERE cn.nspname <> $1
+        ORDER BY cn.nspname, c.relname`,
+      [schema],
+    )
+    if (kids.rows.length > 0) {
+      const pairs = kids.rows
+        .map((r) => `${r.child_schema}.${r.child} inherits ${r.parent_schema}.${r.parent}`)
+        .join(', ')
+      throw new Error(
+        `cleanupTables: tables outside the schema descend from discovered tables (${pairs}). TRUNCATE on ` +
+          `the parent would empty them. Move or detach the child, or stop using discover.`,
+      )
+    }
     return tables
   }
 
