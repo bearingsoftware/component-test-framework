@@ -19,6 +19,12 @@ export interface CaptureServerOptions {
   portEnv?: string
   /** `https` only: a certificate and key, or `'self-signed'` (needs the `openssl` binary). */
   tls?: { cert: string; key: string } | 'self-signed'
+  /**
+   * `tcp` only. `'chunk'` (default) records each `data` event; `'line'` records
+   * each `\n`-terminated line (the `\n` and a preceding `\r` dropped), buffering
+   * partial lines, and a line left unfinished when the connection ends.
+   */
+  framing?: 'chunk' | 'line'
 }
 
 export interface Reply {
@@ -147,6 +153,9 @@ function record(req: http.IncomingMessage, body: Buffer): CapturedRequest {
  */
 export async function startCaptureServer(options: CaptureServerOptions): Promise<CaptureServer> {
   const { kind } = options
+  if (options.framing !== undefined && kind !== 'tcp') {
+    throw new Error(`framing is only for kind 'tcp', not '${kind}'`)
+  }
   if (options.tls !== undefined && kind !== 'https') {
     throw new Error(`tls is only for kind 'https', not '${kind}'`)
   }
@@ -154,13 +163,16 @@ export async function startCaptureServer(options: CaptureServerOptions): Promise
   let recorded: CapturedRequest[] = []
   let rules: ActiveRule[] = []
   let boundPort = requested
-  let tmpDir: string | undefined
   let ca: string | undefined
   let tlsMaterial: { cert: string; key: string } | undefined
   if (kind === 'https') {
     if (options.tls === 'self-signed' || options.tls === undefined) {
-      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctf-capture-'))
-      tlsMaterial = selfSigned(tmpDir)
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctf-capture-'))
+      try {
+        tlsMaterial = selfSigned(dir)
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true })
+      }
       ca = tlsMaterial.cert
     } else {
       tlsMaterial = options.tls
@@ -214,9 +226,25 @@ export async function startCaptureServer(options: CaptureServerOptions): Promise
       s.on('tlsClientError', () => undefined)
     } else {
       s = net.createServer((socket) => {
-        socket.on('data', (d: Buffer) => {
+        const push = (d: Buffer) =>
           recorded.push({ at: new Date(), body: d, text: d.toString('utf-8') })
-        })
+        if (options.framing === 'line') {
+          let pending = Buffer.alloc(0)
+          socket.on('data', (d: Buffer) => {
+            pending = Buffer.concat([pending, d])
+            for (let i = pending.indexOf(10); i >= 0; i = pending.indexOf(10)) {
+              const end = i > 0 && pending[i - 1] === 13 ? i - 1 : i
+              push(pending.subarray(0, end))
+              pending = pending.subarray(i + 1)
+            }
+          })
+          socket.on('end', () => {
+            if (pending.length > 0) push(pending)
+            pending = Buffer.alloc(0)
+          })
+        } else {
+          socket.on('data', push)
+        }
         socket.on('error', () => undefined)
       })
     }
@@ -247,6 +275,7 @@ export async function startCaptureServer(options: CaptureServerOptions): Promise
   await listen()
   const scheme = kind
   let stopped = false
+  let starting: Promise<void> | undefined
 
   return {
     get url() {
@@ -272,14 +301,16 @@ export async function startCaptureServer(options: CaptureServerOptions): Promise
     async down() {
       await unlisten()
     },
-    async up() {
-      if (!server && !udp && !stopped) await listen()
+    up() {
+      if (server || udp || stopped) return Promise.resolve()
+      starting ??= listen().finally(() => {
+        starting = undefined
+      })
+      return starting
     },
     async stop() {
       stopped = true
       await unlisten()
-      if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true })
-      tmpDir = undefined
     },
   }
 }

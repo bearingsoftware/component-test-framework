@@ -12,10 +12,12 @@ export interface StubStepOptions {
 }
 
 const DEFAULT_WAIT = 10_000
-const STEP_HEADROOM = 1_000
+// The wait bounds the step itself, and a later call may change it.
+const NO_STEP_TIMEOUT = -1
 
 const servers = new Map<string, StubSource>()
 let defined = false
+let waitMs = DEFAULT_WAIT
 
 function stub(name: string): CaptureServer {
   const source = servers.get(name)
@@ -39,16 +41,17 @@ function stub(name: string): CaptureServer {
  *
  * The matching string is `;`-separated terms: `path=/x`, `method=POST`,
  * `query.NAME=v`, `header.NAME=v`, and `body~text` last (it takes the rest).
- * Calling this again adds servers to the same steps, which are defined once.
+ * Calling this again adds servers to the same steps, which are defined once;
+ * a later call's `stubWaitTimeout`, when given, replaces the earlier one.
  */
 export function registerStubSteps(
   named: Record<string, StubSource>,
   options: StubStepOptions = {},
 ): void {
   for (const [name, source] of Object.entries(named)) servers.set(name, source)
+  if (options.stubWaitTimeout !== undefined) waitMs = options.stubWaitTimeout
   if (defined) return
   defined = true
-  const wait = options.stubWaitTimeout ?? DEFAULT_WAIT
 
   Given(
     'the {word} stub answers {int} for requests matching {string}',
@@ -75,7 +78,7 @@ export function registerStubSteps(
 
   Then(
     'I wait for the {word} stub to see {int} request(s) matching {string}',
-    { timeout: wait + STEP_HEADROOM },
+    { timeout: NO_STEP_TIMEOUT },
     async function (name: string, want: number, spec: string) {
       const match = parseMatch(spec)
       await eventually(
@@ -86,7 +89,7 @@ export function registerStubSteps(
               `the ${name} stub has seen ${got} requests matching "${spec}", expected ${want}`,
             )
         },
-        { timeout: wait, description: `waiting for the ${name} stub` },
+        { timeout: waitMs, description: `waiting for the ${name} stub` },
       )
     },
   )

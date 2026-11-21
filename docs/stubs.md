@@ -20,6 +20,7 @@ await hec.stop()
 | `kind` | `'http'`, `'https'`, `'tcp'` or `'udp'` |
 | `port` | The port to listen on. `0` or unset picks a free one; read it back from `server.port` |
 | `portEnv` | The name of an environment variable holding the port. It wins over `port` when set |
+| `framing` | `tcp` only: `'chunk'` (default) or `'line'`, see below |
 | `tls` | `https` only: `{ cert, key }` as PEM, or `'self-signed'`, which makes a throwaway certificate with the `openssl` binary and exposes it as `server.ca` |
 
 It listens on `127.0.0.1`. Under [`workerIsolation`](parallel.md) pass `port: workerPort(base)`, or leave the port unset.
@@ -35,7 +36,7 @@ It listens on `127.0.0.1`. Under [`workerIsolation`](parallel.md) pass `port: wo
 | `down()` / `up()` | Stop accepting connections, keeping the port; listen again on the same port |
 | `stop()` | Close everything, and remove the certificate files |
 
-A recorded request is `{ at, method?, path?, query?, headers?, body: Buffer, text, json? }`. `json` is set when the content type says JSON and the body parses. Header names are lower case. A tcp or udp record has `at`, `body` and `text` only: each `data` chunk of a tcp connection and each datagram is one record, so a sender that splits messages across writes is seen in pieces.
+A recorded request is `{ at, method?, path?, query?, headers?, body: Buffer, text, json? }`. `json` is set when the content type says JSON and the body parses. Header names are lower case. A tcp or udp record has `at`, `body` and `text` only: each `data` chunk of a tcp connection and each datagram is one record, so a sender that splits messages across writes is seen in pieces. Pass `framing: 'line'` (tcp only) to get one record per `\n`-terminated line instead: a trailing `\r` is dropped, partial lines are buffered, and a line the connection ends without finishing is recorded as it stands.
 
 ## Scripting
 
@@ -60,7 +61,7 @@ The steps take the same thing as a string, `;`-separated terms:
 | `header.NAME=value` | A request header |
 | `body~text` | The body contains `text`. It takes the rest of the string, so put it last; it may contain `;` |
 
-An empty string matches every request. `parseMatch(spec)` turns a string into the object.
+Values can't contain `;`, except in a trailing `body~` term, and `body~` drops whitespace before the text. An empty string matches every request. `parseMatch(spec)` turns a string into the object.
 
 ## Steps
 
@@ -80,4 +81,4 @@ registerStubSteps({ siem: () => siem, syslog }, { stubWaitTimeout: 10_000 })
 | `Then I wait for the {word} stub to see {int} request(s) matching {string}` | At least that many, within `stubWaitTimeout` (10s by default) |
 | `When the {word} stub is down` / `is up` | `down()` and `up()` |
 
-Calling `registerStubSteps` again adds servers to the same steps. Servers keep their requests and rules across scenarios, so call `reset()` in a `Before` hook, or match on something unique to the scenario. The [`examples/stubs`](../examples/stubs/README.md) suite shows the setup.
+Calling `registerStubSteps` again adds servers to the same steps, and a later `stubWaitTimeout` replaces the earlier one (the wait step has no Cucumber timeout of its own). Servers keep their requests and rules across scenarios, so call `reset()` in a `Before` hook, or match on something unique to the scenario. The [`examples/stubs`](../examples/stubs/README.md) suite shows the setup.

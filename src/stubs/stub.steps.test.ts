@@ -43,6 +43,7 @@ describe('stub steps', async () => {
   })
   registerStubSteps({ siem }, { stubWaitTimeout: 400 })
   registerStubSteps({}) // a second call defines nothing more
+  registerStubSteps({}, { stubWaitTimeout: 150 }) // and a later timeout wins
 
   it('scripts answers, counts requests and waits', async () => {
     run(
@@ -85,10 +86,11 @@ describe('stub steps', async () => {
     await expect(run('the {word} stub is up', 'nope')).rejects.toThrow(/No stub named "nope".*siem/)
   })
 
-  it('has the wait step time out beyond its wait', () => {
-    expect(
-      steps.get('I wait for the {word} stub to see {int} request(s) matching {string}')?.options
-        .timeout,
-    ).toBe(1400)
+  it('uses the latest stubWaitTimeout and leaves the step timeout to it', async () => {
+    const wait = 'I wait for the {word} stub to see {int} request(s) matching {string}'
+    expect(steps.get(wait)?.options.timeout).toBe(-1)
+    const t = Date.now()
+    await expect(run(wait, 'siem', 1, 'path=/never2')).rejects.toThrow(/timed out after 150ms/)
+    expect(Date.now() - t).toBeLessThan(380)
   })
 })

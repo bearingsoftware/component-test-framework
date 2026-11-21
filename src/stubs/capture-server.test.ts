@@ -2,7 +2,10 @@ import { describe, it, expect, afterEach } from 'vitest'
 import * as dgram from 'dgram'
 import * as http from 'http'
 import * as https from 'https'
+import { execFileSync } from 'child_process'
+import * as fs from 'fs'
 import * as net from 'net'
+import * as os from 'os'
 import { startCaptureServer } from './capture-server'
 import type { CaptureServer } from './capture-server'
 
@@ -136,6 +139,13 @@ describe('http', () => {
     expect((await call(s.url)).status).toBe(200)
   })
 
+  it('listens once when up() is called concurrently', async () => {
+    const s = await start({ kind: 'http' })
+    await s.down()
+    await expect(Promise.all([s.up(), s.up(), s.up()])).resolves.toBeDefined()
+    expect((await call(s.url)).status).toBe(200)
+  })
+
   it('uses the port from portEnv, then port, and starts on an ephemeral one otherwise', async () => {
     const probe = await start({ kind: 'http' })
     const free = probe.port
@@ -155,8 +165,33 @@ describe('http', () => {
   })
 })
 
+const hasOpenssl = (() => {
+  try {
+    execFileSync('openssl', ['version'], { stdio: 'ignore' })
+    return true
+  } catch {
+    return false
+  }
+})()
+const captureDirs = () => fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('ctf-capture-'))
+
 describe('https', () => {
-  it('serves a self-signed certificate the caller can trust', async () => {
+  it.skipIf(!hasOpenssl)('leaves no key on disk after a failed start', async () => {
+    const held = await start({ kind: 'http' })
+    const before = captureDirs()
+    await expect(
+      startCaptureServer({ kind: 'https', tls: 'self-signed', port: held.port }),
+    ).rejects.toThrow(/EADDRINUSE/)
+    expect(captureDirs()).toEqual(before)
+  })
+
+  it.skipIf(!hasOpenssl)('removes the certificate files as soon as it has started', async () => {
+    const before = captureDirs()
+    await start({ kind: 'https', tls: 'self-signed' })
+    expect(captureDirs()).toEqual(before)
+  })
+
+  it.skipIf(!hasOpenssl)('serves a self-signed certificate the caller can trust', async () => {
     const s = await start({ kind: 'https', tls: 'self-signed' })
     expect(s.url.startsWith('https://')).toBe(true)
     expect(s.ca).toContain('BEGIN CERTIFICATE')
@@ -188,6 +223,45 @@ describe('tcp', () => {
     await eventuallyHas(s, 2)
     expect(s.requests({ bodyIncludes: 'two' })).toHaveLength(1)
     expect(() => s.script({ respond: 200 })).toThrow(/never replies/)
+  })
+})
+
+describe('tcp line framing', () => {
+  it('records one record per line, across split and coalesced writes', async () => {
+    const s = await start({ kind: 'tcp', framing: 'line' })
+    const c = net.connect(s.port, '127.0.0.1')
+    c.setNoDelay(true)
+    const write = async (t: string) => {
+      c.write(t)
+      await new Promise((r) => setTimeout(r, 30))
+    }
+    await write('<14>fi')
+    await write('rst\n<14>second\r\n<14>thi')
+    await write('rd\n')
+    await write('tail')
+    c.end()
+    await eventuallyHas(s, 4)
+    expect(s.requests().map((r) => r.text)).toEqual([
+      '<14>first',
+      '<14>second',
+      '<14>third',
+      'tail',
+    ])
+  })
+
+  it('rejects framing on other kinds', async () => {
+    await expect(startCaptureServer({ kind: 'udp', framing: 'line' })).rejects.toThrow(/tcp/)
+  })
+
+  it('defaults to a record per chunk', async () => {
+    const s = await start({ kind: 'tcp' })
+    const c = net.connect(s.port, '127.0.0.1')
+    c.setNoDelay(true)
+    c.write('a')
+    await new Promise((r) => setTimeout(r, 30))
+    c.end('b')
+    await eventuallyHas(s, 2)
+    expect(s.requests().map((r) => r.text)).toEqual(['a', 'b'])
   })
 })
 
