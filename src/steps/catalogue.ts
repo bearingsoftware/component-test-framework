@@ -13,7 +13,7 @@ export interface StepEntry {
   /** The register function that registers it. */
   registeredBy: string
   /** The package entry point that exports that function. */
-  entryPoint: 'core' | 'mailpit' | 'spa'
+  entryPoint: 'core' | 'mailpit' | 'oidc' | 'spa' | 'stubs'
   /** Registered only when a suite calls the function, never on import of the package root. */
   optIn: boolean
 }
@@ -103,6 +103,21 @@ const GROUPS: Group[] = [
     optIn: true,
     run: () =>
       (require('./mailpit.steps') as typeof import('./mailpit.steps')).registerMailpitSteps(),
+  },
+  {
+    registeredBy: 'registerOidcSteps',
+    entryPoint: 'oidc',
+    optIn: true,
+    run: () => (require('./oidc.steps') as typeof import('./oidc.steps')).registerOidcSteps(),
+  },
+  {
+    registeredBy: 'registerStubSteps',
+    entryPoint: 'stubs',
+    optIn: true,
+    run: () =>
+      (require('../stubs/stub.steps') as typeof import('../stubs/stub.steps')).registerStubSteps(
+        {},
+      ),
   },
   {
     registeredBy: 'registerAccessibilitySteps',

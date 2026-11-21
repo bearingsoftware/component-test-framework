@@ -49,6 +49,10 @@
       "types": "./dist/mailpit.d.ts",
       "default": "./dist/mailpit.js"
     },
+    "./oidc": {
+      "types": "./dist/oidc.d.ts",
+      "default": "./dist/oidc.js"
+    },
     "./playwright-test": {
       "types": "./dist/playwright-test.d.ts",
       "default": "./dist/playwright-test.js"
@@ -56,6 +60,10 @@
     "./testcontainers": {
       "types": "./dist/testcontainers.d.ts",
       "default": "./dist/testcontainers.js"
+    },
+    "./stubs": {
+      "types": "./dist/stubs.d.ts",
+      "default": "./dist/stubs.js"
     },
     "./package.json": "./package.json"
   },
@@ -88,11 +96,17 @@
       "mailpit": [
         "dist/mailpit.d.ts"
       ],
+      "oidc": [
+        "dist/oidc.d.ts"
+      ],
       "playwright-test": [
         "dist/playwright-test.d.ts"
       ],
       "testcontainers": [
         "dist/testcontainers.d.ts"
+      ],
+      "stubs": [
+        "dist/stubs.d.ts"
       ]
     }
   },
