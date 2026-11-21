@@ -32,8 +32,15 @@ export function currentWorker(): WorkerInfo {
 let portStride = 1
 const claimedPorts = new Map<string, string>()
 
+/** For tests: forget the stride and every port handed out. */
+export function resetWorkerPorts(): void {
+  portStride = 1
+  claimedPorts.clear()
+}
+
 /**
  * Set the gap between workers' ports, which `workerPort` uses. Default 1.
+ * Throws if it would change the stride after ports have been handed out.
  * `registerHooks` sets it from `workerIsolation.portStride`; call this
  * yourself first if `workerPort` runs before `registerHooks` does.
  */
@@ -41,8 +48,13 @@ export function setWorkerPortStride(stride: number): void {
   if (!Number.isInteger(stride) || stride < 1) {
     throw new Error(`Worker port stride must be a positive integer, not ${stride}`)
   }
+  if (stride === portStride) return
+  if (claimedPorts.size > 0) {
+    throw new Error(
+      `Worker port stride is already ${portStride} and ports have been handed out; set it to ${stride} before the first workerPort call`,
+    )
+  }
   portStride = stride
-  claimedPorts.clear()
 }
 
 /**
@@ -78,8 +90,27 @@ export function workerPort(base: number, offset = 0): number {
  * result, for service arguments and environment values.
  */
 export function expandWorkerPorts(value: string): string {
-  return value.replace(/\$\{WORKER_PORT:(\d+)(?::(\d+))?\}/g, (_, base, offset) =>
-    String(workerPort(Number(base), offset === undefined ? 0 : Number(offset))),
+  return value.replace(/\$\{WORKER_PORT:([^}]*)\}/g, (match, spec: string) => {
+    const m = /^(\d+)(?::(\d+))?$/.exec(spec)
+    if (!m) {
+      throw new Error(
+        `Malformed placeholder "${match}": expected \${WORKER_PORT:<base>[:<offset>]} with non-negative whole numbers`,
+      )
+    }
+    return String(workerPort(Number(m[1]), m[2] === undefined ? 0 : Number(m[2])))
+  })
+}
+
+/**
+ * Expand placeholders in the values a service configured itself. A value
+ * identical to the same variable in `process.env` is inherited, so it's left alone.
+ */
+export function expandWorkerPortsInEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(env).map(([k, v]) => [
+      k,
+      typeof v === 'string' && v !== process.env[k] ? expandWorkerPorts(v) : v,
+    ]),
   )
 }
 

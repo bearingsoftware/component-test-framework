@@ -3,7 +3,9 @@ import {
   currentWorker,
   workerPort,
   setWorkerPortStride,
+  resetWorkerPorts,
   expandWorkerPorts,
+  expandWorkerPortsInEnv,
   workerFile,
   workerWiremockUrl,
   workerDatabaseUrl,
@@ -17,7 +19,7 @@ function asWorker(id: number, total = 4): void {
 }
 
 afterEach(() => {
-  setWorkerPortStride(1)
+  resetWorkerPorts()
   delete process.env.CUCUMBER_PARALLEL
   delete process.env.CUCUMBER_WORKER_ID
   delete process.env.CUCUMBER_TOTAL_WORKERS
@@ -112,6 +114,18 @@ describe('workerPort stride and offset', () => {
     expect(workerPort(18080)).toBe(18180)
   })
 
+  it('throws when changing the stride after ports were handed out', () => {
+    workerPort(18080)
+    expect(() => setWorkerPortStride(100)).toThrow(/already 1/)
+  })
+
+  it('accepts the same stride again after ports were handed out', () => {
+    setWorkerPortStride(100)
+    workerPort(18080)
+    expect(() => setWorkerPortStride(100)).not.toThrow()
+    expect(workerPort(18080)).toBe(18080)
+  })
+
   it('rejects a bad stride', () => {
     expect(() => setWorkerPortStride(0)).toThrow(/stride/)
   })
@@ -126,5 +140,29 @@ describe('expandWorkerPorts', () => {
       'http://h:18283/x 19200',
     )
     expect(expandWorkerPorts('no placeholders')).toBe('no placeholders')
+  })
+})
+
+describe('placeholder scope and errors', () => {
+  it.each(['${WORKER_PORT:abc}', '${WORKER_PORT:-1}', '${WORKER_PORT:}', '${WORKER_PORT:1:x}'])(
+    'throws naming %s',
+    (bad) => {
+      expect(() => expandWorkerPorts(`x ${bad}`)).toThrow(bad)
+    },
+  )
+
+  it('expands configured env values but not inherited process.env ones', () => {
+    asWorker(1)
+    process.env.CTF_TEST_INHERITED = 'keep ${WORKER_PORT:18080}'
+    try {
+      const out = expandWorkerPortsInEnv({
+        ...process.env,
+        OWN: ':${WORKER_PORT:18080}',
+      })
+      expect(out.OWN).toBe(':18081')
+      expect(out.CTF_TEST_INHERITED).toBe('keep ${WORKER_PORT:18080}')
+    } finally {
+      delete process.env.CTF_TEST_INHERITED
+    }
   })
 })
