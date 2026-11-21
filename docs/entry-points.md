@@ -4,7 +4,7 @@ The package root works as it always has: it exports everything and registers eve
 
 | Entry point | Contents |
 |---|---|
-| `@bearingsoftware/component-test-framework/core` | World, config, `registerHooks`, services, waiting, requests and login, the parallel-run helpers (`currentWorker`, `workerPort`, `worker…Url`, `prepareWorkerDatabase`), utilities, and `register…Steps()` for each step group |
+| `@bearingsoftware/component-test-framework/core` | World, config, `registerHooks`, services, waiting, requests and login, the parallel-run helpers (`currentWorker`, `workerPort`, `worker…Url`, `prepareWorkerDatabase`), utilities, and `register…Steps()` for each step group, and `restartContainer`, `startContainer`, `stopContainer` ([container control](containers.md)) |
 | `…/wiremock` | `WireMockClient`, `requestPattern`, `registerWiremockSteps`, and the namespacing helpers `namespaceStub`, `namespaceUrlMatcher`, `namespaceId`, `namespaceScenarioName` |
 | `…/postgres` | `DbClient`, `countRows`, `queryOnce`, `registerDbSteps`, `registerServiceSteps`, `prepareWorkerDatabase` |
 | `…/redis` | `RedisClient`, `registerRedisSteps` |
@@ -18,7 +18,7 @@ The package root works as it always has: it exports everything and registers eve
 | `…/stubs` | `startCaptureServer`, `registerStubSteps`, `parseMatch` |
 | `…/playwright-test` | `defineFixtures`: the SPA server, WireMock, stubs, logins and coverage as Playwright Test fixtures. Loads no Cucumber |
 
-The step groups are `registerApiSteps`, `registerRawApiSteps`, `registerSseSteps`, `registerResponseSteps`, `registerWiremockSteps`, `registerDbSteps`, `registerRedisSteps`, `registerServiceSteps` and `registerUiSteps`, plus the opt-in `registerWaitingSteps` and `registerRequestSteps`. Calling one twice, or after importing the root, registers nothing more.
+The step groups are `registerApiSteps`, `registerRawApiSteps`, `registerSseSteps`, `registerResponseSteps`, `registerWiremockSteps`, `registerDbSteps`, `registerRedisSteps`, `registerServiceSteps` and `registerUiSteps`, plus the opt-in `registerWaitingSteps`, `registerRequestSteps` and `registerContainerSteps`. Calling one twice, or after importing the root, registers nothing more.
 
 The database and Redis drivers (`pg`, `ioredis`) and Playwright load only when they're used, whichever entry point a suite imports. A UI-only suite never loads `pg` or `ioredis`.
 

@@ -60,3 +60,8 @@ export function registerServiceSteps(): void {
 export function registerUiSteps(): void {
   require('./ui/generic-ui.steps')
 }
+
+/** `the {string} container is restarted`, `stopped` and `started`: the docker CLI, see `restartContainer`. */
+export function registerContainerSteps(): void {
+  ;(require('./container.steps') as typeof import('./container.steps')).registerContainerSteps()
+}

@@ -86,6 +86,10 @@ export {
 } from './support/auth'
 export type { AdoptTokensOptions, LoginResponse, LoginTagOptions } from './support/auth'
 
+// Containers
+export { restartContainer, startContainer, stopContainer } from './container'
+export type { ContainerOptions, ContainerReadiness, DockerRunner } from './container'
+
 // Utilities
 export { signHS256, base64UrlEncode } from './utils/jwt'
 export { assertPartialMatch } from './utils/match'
@@ -103,6 +107,7 @@ export {
   registerRedisSteps,
   registerServiceSteps,
   registerUiSteps,
+  registerContainerSteps,
 } from './steps/register'
 export { registerWaitingSteps } from './steps/waiting.steps'
 export type { WaitingStepOptions } from './steps/waiting.steps'
