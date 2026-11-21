@@ -111,6 +111,12 @@ export interface WorkerIsolationOptions {
    * channel names alone being theirs.
    */
   redis?: boolean
+  /**
+   * The gap between workers' ports for `workerPort`: worker n's port is
+   * `base + n * portStride + offset`. Default 1. A larger stride (such as
+   * 100) leaves room for several services per worker, told apart by offset.
+   */
+  portStride?: number
 }
 
 /** `cleanupTables` by discovery: every base table in `schema`, minus `keep`. */
