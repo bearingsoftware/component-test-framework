@@ -116,9 +116,11 @@ describe('startOidcIssuer', () => {
     const body = (await res.json()) as Record<string, string>
     const { header, claims } = await verifyJwt(issuer, body.id_token)
     expect(header.alg).toBe('RS256')
+    expect(claims.nbf).toBe(claims.iat)
     expect(claims).toMatchObject({
       iss: issuer.issuer,
       aud: 'app',
+      azp: 'app',
       sub: 'u1',
       email: 'u1@example.test',
       name: 'User One',
@@ -262,6 +264,17 @@ describe('startOidcIssuer', () => {
     expect((await tokenRequest(issuer, grant(await code()), { Authorization: basic })).status).toBe(
       200,
     )
+  })
+
+  it('rejects a Basic credential without a colon as invalid_client', async () => {
+    const issuer = await start()
+    const res = await tokenRequest(
+      issuer,
+      { grant_type: 'authorization_code', code: 'x' },
+      { Authorization: 'Basic ' + Buffer.from('app').toString('base64') },
+    )
+    expect(res.status).toBe(401)
+    expect(await res.json()).toMatchObject({ error: 'invalid_client' })
   })
 
   it('needs a user', async () => {

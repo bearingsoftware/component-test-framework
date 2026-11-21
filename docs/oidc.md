@@ -2,6 +2,8 @@
 
 A service that signs users in with OpenID Connect can sign them in against a stub issuer instead of a real identity provider. `startOidcIssuer` from `@bearingsoftware/component-test-framework/oidc` starts one on `127.0.0.1`, with no dependency beyond Node: RS256 signing uses `node:crypto`.
 
+The issuer is for tests only. Without `clients` it accepts any `client_id` and `redirect_uri`, and its access tokens never expire. Never point a real service at it.
+
 ```typescript
 import { startOidcIssuer, registerOidcSteps } from '@bearingsoftware/component-test-framework/oidc'
 

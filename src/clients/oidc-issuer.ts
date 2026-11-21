@@ -154,7 +154,9 @@ export async function startOidcIssuer(options: OidcIssuerOptions): Promise<OidcI
       ...claimsFor(user),
       iss: issuer,
       aud: grant.clientId,
+      azp: grant.clientId,
       iat: now,
+      nbf: now,
       exp: now + TOKEN_LIFETIME_S,
       ...(withNonce && grant.nonce !== undefined ? { nonce: grant.nonce } : {}),
     }
@@ -240,6 +242,7 @@ export async function startOidcIssuer(options: OidcIssuerOptions): Promise<OidcI
     if (basic?.startsWith('Basic ')) {
       const decoded = Buffer.from(basic.slice(6), 'base64').toString()
       const colon = decoded.indexOf(':')
+      if (colon < 0) return null
       id = decodeURIComponent(decoded.slice(0, colon))
       secret = decodeURIComponent(decoded.slice(colon + 1))
     }
