@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.22](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.21...v0.3.22) (2026-11-21)
+
+
+### Bug Fixes
+
+* **ui:** bound the [@ui](https://github.com/ui) Before hook launch calls ([d6426d0](https://github.com/bearingsoftware/component-test-framework/commit/d6426d002bd881c9c8514606b3f6244fb79eb95a))
+* **ui:** bound the [@ui](https://github.com/ui) Before hook's browser launch, context and page ([805ed6e](https://github.com/bearingsoftware/component-test-framework/commit/805ed6e9b74f625ca88df9dee4e993fbc45493c4))
+* **ui:** fit the [@ui](https://github.com/ui) launch budget inside its own hook timeout ([4b8f290](https://github.com/bearingsoftware/component-test-framework/commit/4b8f290ba1f146b57d51a8fc3c478cc6c10bad94))
+
 ## [0.3.21](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.20...v0.3.21) (2026-11-21)
 
 
