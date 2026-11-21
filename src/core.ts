@@ -17,6 +17,7 @@ export type {
   LifecycleHooks,
   PageClass,
   WorkerIsolationOptions,
+  DiscoverTablesOptions,
 } from './types'
 
 // Setup

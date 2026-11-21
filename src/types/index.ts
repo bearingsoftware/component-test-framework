@@ -113,6 +113,17 @@ export interface WorkerIsolationOptions {
   redis?: boolean
 }
 
+/** `cleanupTables` by discovery: every base table in `schema`, minus `keep`. */
+export interface DiscoverTablesOptions {
+  discover: true
+  /** Default `public`. */
+  schema?: string
+  /** Tables to leave alone, added to the migration tables that are always kept (`schema_migrations`, `goose_db_version`, …). */
+  keep?: string[]
+  /** Fail the first scenario of each worker naming every discovered table that already has rows. Needs a database per worker when workers share one. Default false. */
+  assertEmptyAtStart?: boolean
+}
+
 /** Framework configuration — consumers provide their project-specific values. */
 export interface FrameworkConfig {
   /** Base URL of the API service under test. */
@@ -157,8 +168,12 @@ export interface FrameworkConfig {
    * cleanup when both are set.
    */
   cleanup?: (world: ComponentTestWorld) => unknown | Promise<unknown>
-  /** Tables to clear between scenarios: DELETE, falling back to TRUNCATE … CASCADE. */
-  cleanupTables?: string[]
+  /**
+   * Tables to clear between scenarios. A list is emptied with DELETE (falling
+   * back to TRUNCATE … CASCADE); `{ discover: true }` reads the schema's tables
+   * instead. See {@link DiscoverTablesOptions}.
+   */
+  cleanupTables?: string[] | DiscoverTablesOptions
   /**
    * Keep Cucumber `--parallel` workers apart: WireMock by path prefix,
    * Postgres by database, Redis by database index. Opt-in, and only used in

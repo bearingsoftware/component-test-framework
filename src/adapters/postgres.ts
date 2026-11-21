@@ -1,14 +1,16 @@
 import { DbClient } from '../clients/db-client'
 import { defineAdapter } from '../support/adapter'
 import type { Adapter } from '../support/adapter'
+import { parseCleanupTables } from '../support/cleanup-tables'
 import { runMigrations } from '../support/migrations'
 import type { MigrationsOptions } from '../support/migrations'
 import { prepareWorkerDatabase } from '../support/worker-database'
+import type { DiscoverTablesOptions } from '../types'
 
 export interface PostgresAdapterOptions {
   url: string
-  /** Tables to truncate after each scenario. */
-  cleanupTables?: string[]
+  /** Tables to empty after each scenario: a list, or `{ discover: true, … }`. */
+  cleanupTables?: string[] | DiscoverTablesOptions
   /** Copy this worker's database from `sourceUrl` before the suite (see `workerIsolation.database`). */
   workerDatabase?: { sourceUrl: string; template?: string }
   /**
@@ -21,7 +23,9 @@ export interface PostgresAdapterOptions {
 
 /** Cleans tables after each scenario. State is the client. */
 export function postgresAdapter(options: PostgresAdapterOptions): Adapter<DbClient> {
-  const { cleanupTables, workerDatabase, migrations } = options
+  const { workerDatabase, migrations } = options
+  const cleanup = parseCleanupTables(options.cleanupTables)
+  let guarded = false
   return defineAdapter<DbClient>({
     name: 'postgres',
     setup: () => new DbClient(options.url),
@@ -45,11 +49,24 @@ export function postgresAdapter(options: PostgresAdapterOptions): Adapter<DbClie
         }
       },
     }),
-    beforeScenario(world, db) {
+    async beforeScenario(world, db) {
       world.db = db
+      if (cleanup?.kind === 'discover' && cleanup.assertEmptyAtStart && !guarded) {
+        const tables = await db.discoverTables(cleanup.schema, cleanup.keep)
+        const dirty = await db.nonEmptyTables(cleanup.schema, tables)
+        // Checked once per worker, and only once there are tables to check.
+        if (tables.length > 0) guarded = true
+        if (dirty.length > 0) {
+          throw new Error(
+            `cleanupTables.assertEmptyAtStart: tables not empty before the first scenario: ${dirty.join(', ')}. ` +
+              `A previous run left rows behind, or something wrote outside a scenario.`,
+          )
+        }
+      }
     },
     async afterScenario(_world, _scenario, db) {
-      if (cleanupTables && cleanupTables.length > 0) await db.cleanTables(cleanupTables)
+      if (cleanup?.kind === 'discover') await db.cleanDiscovered(cleanup)
+      else if (cleanup && cleanup.tables.length > 0) await db.cleanTables(cleanup.tables)
     },
   })
 }

@@ -17,6 +17,8 @@ export class DbClient {
   private pool: Pool
   /** Set once a DELETE cleanup has been refused by a foreign key; see cleanTables. */
   private cascadeNeeded = false
+  /** Discovered tables per schema and keep list, for the run. */
+  private discovered = new Map<string, string[]>()
 
   constructor(connectionString: string) {
     this.pool = new (pg().Pool)({ connectionString })
@@ -103,6 +105,140 @@ export class DbClient {
   }
 
   /**
+   * The base tables of `schema` (partitions excluded) except those in `keep`,
+   * read from the catalog. Not cached; see {@link cleanDiscovered}.
+   */
+  async discoverTables(schema: string, keep: string[] = []): Promise<string[]> {
+    const { rows } = await this.pool.query<{ relname: string }>(
+      `SELECT c.relname
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+        ORDER BY c.relname`,
+      [schema],
+    )
+    const skip = new Set(keep)
+    const tables = rows.map((r) => r.relname).filter((t) => !skip.has(t))
+    const fks = await this.pool.query<{ child_schema: string; child: string; parent: string }>(
+      `SELECT cn.nspname AS child_schema, child.relname AS child, parent.relname AS parent
+         FROM pg_constraint k
+         JOIN pg_class child ON child.oid = k.conrelid
+         JOIN pg_namespace cn ON cn.oid = child.relnamespace
+         JOIN pg_class parent ON parent.oid = k.confrelid
+         JOIN pg_namespace pn ON pn.oid = parent.relnamespace
+        WHERE k.contype = 'f' AND k.conparentid = 0 AND pn.nspname = $1
+        ORDER BY cn.nspname, child.relname, parent.relname`,
+      [schema],
+    )
+    const found = new Set(tables)
+    const conflicts = fks.rows.filter(
+      (r) => found.has(r.parent) && !(r.child_schema === schema && found.has(r.child)),
+    )
+    if (conflicts.length > 0) {
+      const pairs = conflicts
+        .map((r) => `${r.child_schema}.${r.child} -> ${schema}.${r.parent}`)
+        .join(', ')
+      throw new Error(
+        `cleanupTables: tables outside discovery reference discovered tables (${pairs}). Emptying the ` +
+          `referenced table would fail or empty them. Add the child to discovery (remove it from keep, or ` +
+          `include its schema), drop the foreign key, or stop using discover.`,
+      )
+    }
+    const kids = await this.pool.query<{
+      child_schema: string
+      child: string
+      parent_schema: string
+      parent: string
+    }>(
+      `WITH RECURSIVE d(child, parent) AS (
+         SELECT i.inhrelid, i.inhparent
+           FROM pg_inherits i
+           JOIN pg_class p ON p.oid = i.inhparent
+           JOIN pg_namespace pn ON pn.oid = p.relnamespace
+          WHERE pn.nspname = $1
+         UNION
+         SELECT i.inhrelid, i.inhparent FROM pg_inherits i JOIN d ON i.inhparent = d.child
+       )
+       SELECT cn.nspname AS child_schema, c.relname AS child, pn.nspname AS parent_schema, p.relname AS parent
+         FROM d
+         JOIN pg_class c ON c.oid = d.child
+         JOIN pg_namespace cn ON cn.oid = c.relnamespace
+         JOIN pg_class p ON p.oid = d.parent
+         JOIN pg_namespace pn ON pn.oid = p.relnamespace
+        WHERE cn.nspname <> $1
+        ORDER BY cn.nspname, c.relname`,
+      [schema],
+    )
+    if (kids.rows.length > 0) {
+      const pairs = kids.rows
+        .map((r) => `${r.child_schema}.${r.child} inherits ${r.parent_schema}.${r.parent}`)
+        .join(', ')
+      throw new Error(
+        `cleanupTables: tables outside the schema descend from discovered tables (${pairs}). TRUNCATE on ` +
+          `the parent would empty them. Move or detach the child, or stop using discover.`,
+      )
+    }
+    return tables
+  }
+
+  /**
+   * Empty every discovered table in one `TRUNCATE ... RESTART IDENTITY`, which
+   * needs no foreign-key order and never touches a table outside `schema`. The list is cached for the run, but an
+   * empty result is not (the service under test may apply its schema after the
+   * first hook), and a table that has gone missing (SQLSTATE 42P01) triggers one
+   * re-discovery. Discovery throws when any table outside the discovered set (kept, or in another
+   * schema) has a foreign key to a discovered table. Retries on deadlock like {@link cleanTables}.
+   */
+  async cleanDiscovered(
+    { schema, keep = [] }: { schema: string; keep?: string[] },
+    opts?: { maxAttempts?: number; baseDelayMs?: number },
+  ): Promise<void> {
+    const maxAttempts = opts?.maxAttempts ?? 4
+    const baseDelayMs = opts?.baseDelayMs ?? 50
+    const key = JSON.stringify([schema, keep])
+    let rediscovered = false
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let tables = this.discovered.get(key)
+      if (!tables) {
+        tables = await this.discoverTables(schema, keep)
+        if (tables.length === 0) return
+        this.discovered.set(key, tables)
+      }
+      try {
+        await this.pool.query(
+          `TRUNCATE ${tables.map(qualified(schema)).join(', ')} RESTART IDENTITY`,
+        )
+        return
+      } catch (err) {
+        if (isUndefinedTable(err) && !rediscovered) {
+          rediscovered = true
+          this.discovered.delete(key)
+          attempt--
+          continue
+        }
+        if (!isDeadlock(err) || attempt === maxAttempts) throw err
+        const delay = baseDelayMs * 2 ** (attempt - 1)
+        console.warn(
+          `[component-test-framework] cleanup deadlock on attempt ${attempt}/${maxAttempts}; retrying in ${delay}ms`,
+        )
+        await new Promise((r) => setTimeout(r, delay))
+      }
+    }
+  }
+
+  /** The tables of `schema` among `tables` that have at least one row, in the given order. */
+  async nonEmptyTables(schema: string, tables: string[]): Promise<string[]> {
+    if (tables.length === 0) return []
+    const sql = tables
+      .map((t, i) => `SELECT ${i} AS i WHERE EXISTS (SELECT 1 FROM ${qualified(schema)(t)})`)
+      .join(' UNION ALL ')
+    const { rows } = await this.pool.query<{ i: number }>(sql)
+    return rows
+      .map((r) => r.i)
+      .sort((a, b) => a - b)
+      .map((i) => tables[i])
+  }
+
+  /**
    * Bulk insert rows into a table.
    * @param table - Table name
    * @param rows - Array of objects where keys are column names
@@ -158,4 +294,18 @@ function isDeadlock(err: unknown): boolean {
   if (typeof err !== 'object' || err === null) return false
   const code = (err as { code?: unknown }).code
   return code === '40P01'
+}
+
+/** Detect Postgres undefined-table errors (SQLSTATE 42P01). */
+function isUndefinedTable(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+  return (err as { code?: unknown }).code === '42P01'
+}
+
+function quoteIdent(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`
+}
+
+function qualified(schema: string): (table: string) => string {
+  return (table) => `${quoteIdent(schema)}.${quoteIdent(table)}`
 }
