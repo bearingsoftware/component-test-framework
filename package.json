@@ -57,6 +57,10 @@
       "types": "./dist/testcontainers.d.ts",
       "default": "./dist/testcontainers.js"
     },
+    "./stubs": {
+      "types": "./dist/stubs.d.ts",
+      "default": "./dist/stubs.js"
+    },
     "./package.json": "./package.json"
   },
   "typesVersions": {
@@ -93,6 +97,9 @@
       ],
       "testcontainers": [
         "dist/testcontainers.d.ts"
+      ],
+      "stubs": [
+        "dist/stubs.d.ts"
       ]
     }
   },
