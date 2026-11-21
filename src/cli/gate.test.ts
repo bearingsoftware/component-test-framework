@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import { main } from '../cli'
-import { checkGate, parseCucumberSummary } from './gate'
+import { gate, main } from '../cli'
+import { checkGate, parseCucumberSummary, type CucumberSummary } from './gate'
 
 const allPass = `Feature: a
 
@@ -52,17 +52,73 @@ const noSummary = `Feature: a
     Given a step
 `
 
-const parseCases: Array<{ name: string; output: string; want?: Record<string, number> }> = [
-  { name: 'all passed', output: allPass, want: { passed: 2 } },
-  { name: 'below floor is still parsed', output: belowFloor, want: { passed: 1 } },
-  { name: 'ambiguous', output: ambiguous, want: { ambiguous: 1, passed: 2 } },
-  { name: 'undefined', output: undefinedStep, want: { undefined: 1, passed: 1 } },
-  { name: 'uses the last summary', output: multipleSummaries, want: { passed: 1 } },
-  { name: 'rerun output', output: rerunOutput, want: { passed: 2 } },
-  { name: 'skipped', output: withSkipped, want: { passed: 3, skipped: 1 } },
-  { name: 'pending', output: pending, want: { pending: 1, passed: 1 } },
-  { name: 'ANSI colours and CRLF', output: colored, want: { passed: 2 } },
+const stepsOnly = `  Given a step
+  When another step
+
+4 steps (4 passed)
+`
+
+const zeroScenarios = `0 scenarios
+`
+
+const bareNonZero = `3 scenarios
+`
+
+const interleavedService = `1 scenario (1 failed)
+service: listening on :9999
+GET /orders 500
+2 scenarios (2 passed)
+service: stopped
+`
+
+const serviceLineLooksLikeSummary = `2 scenarios (2 passed)
+[svc] 9 scenarios (9 failed)
+`
+
+const parseCases: Array<{ name: string; output: string; want?: CucumberSummary }> = [
+  { name: 'all passed', output: allPass, want: { total: 2, counts: { passed: 2 } } },
+  {
+    name: 'below floor is still parsed',
+    output: belowFloor,
+    want: { total: 1, counts: { passed: 1 } },
+  },
+  {
+    name: 'ambiguous',
+    output: ambiguous,
+    want: { total: 3, counts: { ambiguous: 1, passed: 2 } },
+  },
+  {
+    name: 'undefined',
+    output: undefinedStep,
+    want: { total: 2, counts: { undefined: 1, passed: 1 } },
+  },
+  {
+    name: 'uses the last summary',
+    output: multipleSummaries,
+    want: { total: 1, counts: { passed: 1 } },
+  },
+  { name: 'rerun output', output: rerunOutput, want: { total: 2, counts: { passed: 2 } } },
+  {
+    name: 'skipped',
+    output: withSkipped,
+    want: { total: 4, counts: { passed: 3, skipped: 1 } },
+  },
+  { name: 'pending', output: pending, want: { total: 2, counts: { pending: 1, passed: 1 } } },
+  { name: 'ANSI colours and CRLF', output: colored, want: { total: 2, counts: { passed: 2 } } },
+  { name: 'bare 0 scenarios', output: zeroScenarios, want: { total: 0, counts: {} } },
+  { name: 'bare non-zero count is not a summary', output: bareNonZero, want: undefined },
+  { name: 'steps only, no scenario summary', output: stepsOnly, want: undefined },
   { name: 'no summary', output: noSummary, want: undefined },
+  {
+    name: 'service stdout between summary lines',
+    output: interleavedService,
+    want: { total: 2, counts: { passed: 2 } },
+  },
+  {
+    name: 'service line with a summary shape is ignored',
+    output: serviceLineLooksLikeSummary,
+    want: { total: 2, counts: { passed: 2 } },
+  },
 ]
 
 describe('parseCucumberSummary', () => {
@@ -84,9 +140,9 @@ const checkCases: Array<{ name: string; output: string; min: number; ok: boolean
 
 describe('checkGate', () => {
   it.each(checkCases)('$name', ({ output, min, ok }) => {
-    const counts = parseCucumberSummary(output)
-    expect(counts).toBeDefined()
-    expect(checkGate(counts!, min).problems.length === 0).toBe(ok)
+    const summary = parseCucumberSummary(output)
+    expect(summary).toBeDefined()
+    expect(checkGate(summary!.counts, min).problems.length === 0).toBe(ok)
   })
 
   it('reports skipped without failing', () => {
@@ -98,7 +154,7 @@ describe('checkGate', () => {
   })
 })
 
-describe('ctf gate exit codes', () => {
+describe('ctf gate', () => {
   let dir: string
   let out: ReturnType<typeof vi.spyOn>
   let err: ReturnType<typeof vi.spyOn>
@@ -126,15 +182,32 @@ describe('ctf gate exit codes', () => {
     { name: 'fails below the floor', output: belowFloor, min: '2', code: 1 },
     { name: 'fails on ambiguous', output: ambiguous, min: '1', code: 1 },
     { name: 'exits 2 with no summary', output: noSummary, min: '1', code: 2 },
-    { name: 'exits 2 on a bad floor', output: allPass, min: 'two', code: 2 },
+    { name: 'exits 2 when cucumber ran 0 scenarios', output: zeroScenarios, min: '0', code: 2 },
+    { name: 'exits 2 on a non-numeric floor', output: allPass, min: 'two', code: 2 },
+    { name: 'exits 2 on an empty floor', output: allPass, min: '', code: 2 },
+    { name: 'exits 2 on a blank floor', output: allPass, min: '   ', code: 2 },
+    { name: 'exits 2 on a negative floor', output: allPass, min: '-1', code: 2 },
   ])('$name', ({ output, min, code }) => {
     expect(main(['gate', '--min', min, '--log', log('run.log', output)])).toBe(code)
+  })
+
+  it('names the zero-scenario run apart from a missing summary', () => {
+    main(['gate', '--min', '1', '--log', log('zero.log', zeroScenarios)])
+    expect(err).toHaveBeenCalledWith(expect.stringContaining('cucumber ran 0 scenarios'))
+    main(['gate', '--min', '1', '--log', log('none.log', noSummary)])
+    expect(err).toHaveBeenCalledWith(expect.stringContaining('no cucumber scenario summary'))
   })
 
   it('prints the gate line with the suite name and skipped count', () => {
     const file = log('run.log', withSkipped)
     expect(main(['gate', '--min', '3', '--log', file, '--suite', 'api'])).toBe(0)
     expect(out).toHaveBeenCalledWith('gate api: 3/3 passed, 1 skipped')
+  })
+
+  it('reads stdin for --log -', () => {
+    expect(gate(['--min', '2', '--log', '-'], () => allPass)).toBe(0)
+    expect(out).toHaveBeenCalledWith('gate cucumber: 2/2 passed')
+    expect(gate(['--min', '2', '--log', '-'], () => belowFloor)).toBe(1)
   })
 
   it('needs --min and --log', () => {

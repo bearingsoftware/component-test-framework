@@ -3,21 +3,29 @@
 
 export type CucumberCounts = Record<string, number>
 
+export type CucumberSummary = { total: number; counts: CucumberCounts }
+
 export type GateResult = { passed: number; skipped: number; problems: string[] }
 
 // Cucumber colours its summary on a terminal; the log may carry the codes.
 // eslint-disable-next-line no-control-regex
 const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g
-const SUMMARY = /^(\d+) scenarios? \((.+)\)$/
+// Cucumber prints a bare "0 scenarios" when no feature matched; no parentheses.
+const SUMMARY = /^(\d+) scenarios?(?: \((.+)\))?$/
 const COUNT = /^(\d+) (\w+)$/
 const BLOCKING = ['failed', 'ambiguous', 'undefined', 'pending'] as const
 
-export function parseCucumberSummary(output: string): CucumberCounts | undefined {
-  let last: CucumberCounts | undefined
+export function parseCucumberSummary(output: string): CucumberSummary | undefined {
+  let last: CucumberSummary | undefined
   for (const raw of output.split('\n')) {
     const m = SUMMARY.exec(raw.replace(ANSI, '').trimEnd())
     if (!m) continue
-    const counts: Record<string, number> = {}
+    const total = Number(m[1])
+    if (m[2] === undefined) {
+      if (total === 0) last = { total, counts: {} }
+      continue
+    }
+    const counts: CucumberCounts = {}
     let valid = true
     for (const part of m[2].split(', ')) {
       const c = COUNT.exec(part)
@@ -27,7 +35,7 @@ export function parseCucumberSummary(output: string): CucumberCounts | undefined
       }
       counts[c[2]] = Number(c[1])
     }
-    if (valid) last = counts
+    if (valid) last = { total, counts }
   }
   return last
 }

@@ -14,6 +14,6 @@ The floor catches a suite that finds no features: Cucumber exits 0 for that, and
 | `--log <path>`   | Required. The Cucumber output to read. `-` reads stdin. |
 | `--suite <name>` | Shown in the result line (default `cucumber`).          |
 
-Exit codes: 0 when the gate passes, 1 when it fails (the reasons go to stderr), 2 when it couldn't run, such as when the log has no scenario summary or `--min` is not a count.
+Exit codes: 0 when the gate passes, 1 when it fails (the reasons go to stderr), 2 when it couldn't run, such as when the log has no scenario summary, when Cucumber ran 0 scenarios, or when `--min` is not a count.
 
 The parser is exported as `parseCucumberSummary` and `checkGate` from `src/cli/gate.ts` for reuse.

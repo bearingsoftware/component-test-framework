@@ -596,7 +596,10 @@ function apiDiff(args: string[]): number {
   return breaking.length > 0 || allowed.stale.length > 0 ? 1 : 0
 }
 
-function gate(args: string[]): number {
+export function gate(
+  args: string[],
+  readStdin: () => string = () => fs.readFileSync(0, 'utf8'),
+): number {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -609,14 +612,15 @@ function gate(args: string[]): number {
   if (positionals.length > 0) throw new UsageError('gate takes options only')
   if (values.min === undefined) throw new UsageError('gate needs --min')
   if (!values.log) throw new UsageError('gate needs --log')
+  if (!/^\d+$/.test(values.min)) throw new UsageError(`--min is not a count: '${values.min}'`)
   const min = Number(values.min)
-  if (!Number.isInteger(min) || min < 0) throw new UsageError(`--min is not a count: ${values.min}`)
 
-  const output = fs.readFileSync(values.log === '-' ? 0 : values.log, 'utf8')
-  const counts = parseCucumberSummary(output)
-  if (!counts) throw new Error(`no cucumber scenario summary in ${values.log}`)
+  const output = values.log === '-' ? readStdin() : fs.readFileSync(values.log, 'utf8')
+  const summary = parseCucumberSummary(output)
+  if (!summary) throw new Error(`no cucumber scenario summary in ${values.log}`)
+  if (summary.total === 0) throw new Error(`cucumber ran 0 scenarios in ${values.log}`)
   const suite = values.suite ?? 'cucumber'
-  const result = checkGate(counts, min)
+  const result = checkGate(summary.counts, min)
   const skipped = result.skipped > 0 ? `, ${result.skipped} skipped` : ''
   console.log(`gate ${suite}: ${result.passed}/${min} passed${skipped}`)
   for (const problem of result.problems) console.error(`gate ${suite}: ${problem}`)
