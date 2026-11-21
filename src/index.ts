@@ -37,6 +37,7 @@ export type { EventuallyOptions, HoldsForOptions } from './support/eventually'
 export {
   currentWorker,
   workerPort,
+  setWorkerPortStride,
   workerFile,
   wiremockNamespace,
   workerWiremockUrl,

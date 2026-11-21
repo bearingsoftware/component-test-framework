@@ -29,13 +29,89 @@ export function currentWorker(): WorkerInfo {
   }
 }
 
+let portStride = 1
+const claimedPorts = new Map<string, string>()
+
+/** For tests: forget the stride and every port handed out. */
+export function resetWorkerPorts(): void {
+  portStride = 1
+  claimedPorts.clear()
+}
+
 /**
- * A port for this worker: `base` when not running in parallel, `base + id`
- * in worker `id`. Space the bases of a suite's services further apart than
- * the worker count, so one service's range can't run into the next.
+ * Set the gap between workers' ports, which `workerPort` uses. Default 1.
+ * Throws if it would change the stride after ports have been handed out.
+ * `registerHooks` sets it from `workerIsolation.portStride`; call this
+ * yourself first if `workerPort` runs before `registerHooks` does.
  */
-export function workerPort(base: number): number {
-  return base + currentWorker().id
+export function setWorkerPortStride(stride: number): void {
+  if (!Number.isInteger(stride) || stride < 1) {
+    throw new Error(`Worker port stride must be a positive integer, not ${stride}`)
+  }
+  if (stride === portStride) return
+  if (claimedPorts.size > 0) {
+    throw new Error(
+      `Worker port stride is already ${portStride} and ports have been handed out; set it to ${stride} before the first workerPort call`,
+    )
+  }
+  portStride = stride
+}
+
+/**
+ * A port for this worker: `base + offset` when not running in parallel,
+ * `base + id * stride + offset` in worker `id`. With the default stride of 1,
+ * space the bases of a suite's services further apart than the worker count;
+ * with a larger stride (`workerIsolation.portStride`), give each service an
+ * `offset` inside it, so one worker's services sit side by side.
+ *
+ * Throws if the port is above 65535, or is the port another `workerPort`
+ * call (a different base or offset) already returned for this worker.
+ */
+export function workerPort(base: number, offset = 0): number {
+  const id = currentWorker().id
+  const port = base + id * portStride + offset
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(
+      `workerPort(${base}, ${offset}) is ${port} in worker ${id} (stride ${portStride}); ports run from 1 to 65535`,
+    )
+  }
+  const key = `${id}:${port}`
+  const source = `workerPort(${base}, ${offset})`
+  const earlier = claimedPorts.get(key)
+  if (earlier !== undefined && earlier !== source) {
+    throw new Error(`${source} and ${earlier} are both port ${port} in worker ${id}`)
+  }
+  claimedPorts.set(key, source)
+  return port
+}
+
+/**
+ * Replace `${WORKER_PORT:<base>[:<offset>]}` in a string with `workerPort`'s
+ * result, for service arguments and environment values.
+ */
+export function expandWorkerPorts(value: string): string {
+  return value.replace(/\$\{WORKER_PORT:([^}]*)\}/g, (match, spec: string) => {
+    const m = /^(\d+)(?::(\d+))?$/.exec(spec)
+    if (!m) {
+      throw new Error(
+        `Malformed placeholder "${match}": expected \${WORKER_PORT:<base>[:<offset>]} with non-negative whole numbers`,
+      )
+    }
+    return String(workerPort(Number(m[1]), m[2] === undefined ? 0 : Number(m[2])))
+  })
+}
+
+/**
+ * Expand placeholders in the values a service configured itself. A value
+ * identical to the same variable in `process.env` is inherited, so it's left alone.
+ */
+export function expandWorkerPortsInEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(env).map(([k, v]) => [
+      k,
+      typeof v === 'string' && v !== process.env[k] ? expandWorkerPorts(v) : v,
+    ]),
+  )
 }
 
 /**

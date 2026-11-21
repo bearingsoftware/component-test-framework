@@ -3,7 +3,7 @@ import { spawn, ChildProcess } from 'node:child_process'
 import { createWriteStream, WriteStream, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { Before, After, BeforeAll, AfterAll } from '@cucumber/cucumber'
-import { workerFile } from './worker'
+import { expandWorkerPorts, expandWorkerPortsInEnv, workerFile } from './worker'
 
 /**
  * Options for {@link spawnServiceUnderTest}.
@@ -199,11 +199,14 @@ class ManagedService {
 
     const binary = this.opts.binaryEnvVar ? process.env[this.opts.binaryEnvVar] : undefined
     const cmd = binary || this.opts.cmd
-    const args = binary ? (this.opts.binaryArgs ?? []) : (this.opts.args ?? [])
+    const args = (binary ? (this.opts.binaryArgs ?? []) : (this.opts.args ?? [])).map(
+      expandWorkerPorts,
+    )
+    const expandedEnv = env && expandWorkerPortsInEnv(env)
 
     const child = spawn(cmd, args, {
       cwd: this.opts.cwd,
-      env,
+      env: expandedEnv,
       detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
