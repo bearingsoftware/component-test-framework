@@ -17,6 +17,8 @@ export class DbClient {
   private pool: Pool
   /** Set once a DELETE cleanup has been refused by a foreign key; see cleanTables. */
   private cascadeNeeded = false
+  /** Discovered tables per schema and keep list, for the run. */
+  private discovered = new Map<string, string[]>()
 
   constructor(connectionString: string) {
     this.pool = new (pg().Pool)({ connectionString })
@@ -103,6 +105,80 @@ export class DbClient {
   }
 
   /**
+   * The base tables of `schema` (partitions excluded) except those in `keep`,
+   * read from the catalog. Not cached; see {@link cleanDiscovered}.
+   */
+  async discoverTables(schema: string, keep: string[] = []): Promise<string[]> {
+    const { rows } = await this.pool.query<{ relname: string }>(
+      `SELECT c.relname
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = $1 AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+        ORDER BY c.relname`,
+      [schema],
+    )
+    const skip = new Set(keep)
+    return rows.map((r) => r.relname).filter((t) => !skip.has(t))
+  }
+
+  /**
+   * Empty every discovered table in one `TRUNCATE ... RESTART IDENTITY CASCADE`,
+   * which needs no foreign-key order. The list is cached for the run, but an
+   * empty result is not (the service under test may apply its schema after the
+   * first hook), and a table that has gone missing (SQLSTATE 42P01) triggers one
+   * re-discovery. CASCADE also empties any table, kept or not, that references a
+   * discovered one. Retries on deadlock like {@link cleanTables}.
+   */
+  async cleanDiscovered(
+    { schema, keep = [] }: { schema: string; keep?: string[] },
+    opts?: { maxAttempts?: number; baseDelayMs?: number },
+  ): Promise<void> {
+    const maxAttempts = opts?.maxAttempts ?? 4
+    const baseDelayMs = opts?.baseDelayMs ?? 50
+    const key = JSON.stringify([schema, keep])
+    let rediscovered = false
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let tables = this.discovered.get(key)
+      if (!tables) {
+        tables = await this.discoverTables(schema, keep)
+        if (tables.length === 0) return
+        this.discovered.set(key, tables)
+      }
+      try {
+        await this.pool.query(
+          `TRUNCATE ${tables.map(qualified(schema)).join(', ')} RESTART IDENTITY CASCADE`,
+        )
+        return
+      } catch (err) {
+        if (isUndefinedTable(err) && !rediscovered) {
+          rediscovered = true
+          this.discovered.delete(key)
+          attempt--
+          continue
+        }
+        if (!isDeadlock(err) || attempt === maxAttempts) throw err
+        const delay = baseDelayMs * 2 ** (attempt - 1)
+        console.warn(
+          `[component-test-framework] cleanup deadlock on attempt ${attempt}/${maxAttempts}; retrying in ${delay}ms`,
+        )
+        await new Promise((r) => setTimeout(r, delay))
+      }
+    }
+  }
+
+  /** The tables of `schema` among `tables` that have at least one row, in the given order. */
+  async nonEmptyTables(schema: string, tables: string[]): Promise<string[]> {
+    if (tables.length === 0) return []
+    const sql = tables
+      .map((t, i) => `SELECT ${i} AS i WHERE EXISTS (SELECT 1 FROM ${qualified(schema)(t)})`)
+      .join(' UNION ALL ')
+    const { rows } = await this.pool.query<{ i: number }>(sql)
+    return rows
+      .map((r) => r.i)
+      .sort((a, b) => a - b)
+      .map((i) => tables[i])
+  }
+
+  /**
    * Bulk insert rows into a table.
    * @param table - Table name
    * @param rows - Array of objects where keys are column names
@@ -158,4 +234,18 @@ function isDeadlock(err: unknown): boolean {
   if (typeof err !== 'object' || err === null) return false
   const code = (err as { code?: unknown }).code
   return code === '40P01'
+}
+
+/** Detect Postgres undefined-table errors (SQLSTATE 42P01). */
+function isUndefinedTable(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+  return (err as { code?: unknown }).code === '42P01'
+}
+
+function quoteIdent(name: string): string {
+  return `"${name.replace(/"/g, '""')}"`
+}
+
+function qualified(schema: string): (table: string) => string {
+  return (table) => `${quoteIdent(schema)}.${quoteIdent(table)}`
 }

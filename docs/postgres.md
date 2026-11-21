@@ -8,6 +8,28 @@ Set `DATABASE_URL` (or `databaseUrl` in `registerHooks`) and the framework creat
 - **Migrations and seeding.** The `migrations` option runs a migrate command before the suite, and `registerDbSteps()` adds steps that insert rows. See [Migrations](#migrations) and [Seeding](#seeding).
 - **Parallel runs.** `workerIsolation.database` gives each Cucumber worker its own database. See [Running in parallel](parallel.md).
 
+## Discovering tables
+
+Instead of listing tables, let the framework read them:
+
+```typescript
+registerHooks({
+  ...loadConfig(),
+  cleanupTables: { discover: true, keep: ['countries'], assertEmptyAtStart: true },
+})
+```
+
+| Field | Default | |
+|---|---|---|
+| `discover` | | Must be `true` |
+| `schema` | `public` | The schema to read |
+| `keep` | _(none)_ | Tables to leave alone, added to the migration tables that are always kept: `schema_migrations`, `goose_db_version`, `flyway_schema_history`, `knex_migrations`, `_prisma_migrations`, `alembic_version`, `django_migrations` and a few more |
+| `assertEmptyAtStart` | `false` | Before a worker's first scenario, fail naming every discovered table that already has rows |
+
+Discovery takes the schema's base tables (views and partitions are left out) and empties them after each scenario with one `TRUNCATE ... RESTART IDENTITY CASCADE`, so foreign keys need no ordering. CASCADE also empties any table, kept or not, that references a discovered one. Unlike the DELETE used for a list, TRUNCATE costs more per scenario on a large schema.
+
+The list is read once per run and then reused. An empty result is not remembered, so a service that applies its schema after the first hook is picked up once its tables exist, and a table dropped since the last read triggers one re-read. A table created later than the first non-empty read is not noticed until then.
+
 ## Migrations
 
 Set `migrations` to a shell command that migrates the database named by `$DATABASE_URL`:
