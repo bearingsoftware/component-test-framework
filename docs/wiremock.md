@@ -71,12 +71,12 @@ Matching rules:
 - `withJsonBody` (and GraphQL `withVariables`) also ignore extra trailing items in an array, as WireMock's `ignoreExtraElements` does.
 - A `RegExp` becomes a Java regular expression. Syntax Java cannot compile, such as `[^]`, fails when the stub is registered, not when it is built.
 - `willReturn(status, json?, headers?)` sets `Content-Type: application/json` when there is a body. `willReturnStatus` sends no body. `willReturnBody(status, text, contentType)` sends text.
-- Several body matchers all have to match, in the order they are added.
+- Body matchers combine: a request must match all of them.
+- A lower `priority` wins. At equal priority the stub registered last wins.
 
 Response templating:
 
 `templated()` turns on WireMock's `response-template` transformer for the stub, whichever order it is called in relative to `willReturn*` and `withDelay`. Templates such as `{{now format='yyyy'}}` and `{{request.body}}` render in `willReturnBody` text. They also render in a `willReturn` `jsonBody` string value, such as `{ year: "{{now format='yyyy'}}" }`, but a raw `{{{request.body}}}` there is inserted unescaped and can break the JSON. To echo a request, use `willReturnBody`. Under worker namespacing the path is prefixed, so `{{request.path}}` and `{{request.url}}` include the namespace prefix, not the path the stub was written with.
-- A lower `priority` wins. At equal priority the stub registered last wins.
 
 ## GraphQL
 
