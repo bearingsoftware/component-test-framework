@@ -52,6 +52,9 @@ await this.wiremock.register(
   stub.get('/slow').withQuery({ page: '2' }).withHeader('Authorization', /^Bearer /).withDelay(500).willReturnStatus(503),
   stub.any('/pricing/.*').pathPattern().priority(1).willReturnStatus(500),
   stub.get('/state').inScenario('flow', 'Started', 'Second').willReturn(200, { n: 1 }),
+  stub.post('/credentials').withJsonPath('$.credential.id', /^c-/).withBodyContaining('card').willReturnStatus(202),
+  stub.post('/strict').withJsonBody({ sku: 'WIDGET' }, { strict: true }).willReturnStatus(201),
+  stub.post('/echo').templated().willReturnBody(200, "{{now format='yyyy'}} {{{request.body}}}", 'text/plain'),
 )
 ```
 
@@ -60,13 +63,20 @@ await this.wiremock.register(
 Matching rules:
 
 - The path is exact. `pathPattern()` makes it a regular expression that must match the whole path. `any` matches every method.
-- `withJsonBody` is a partial match: extra properties in the request are ignored, array order is not.
+- `withJsonBody` is a partial match: extra properties in the request are ignored, array order is not. `withJsonBody(body, { strict: true })` also rejects extra properties.
+- `withJsonPath(expression, value?)` matches when the JSON body has the path, or has the value there. The expression must start with `$`. A value is an exact string or a `RegExp`, as for `withQuery`.
+- `withBodyContaining(text)` matches when the body contains the text.
 - `withQuery` and `withHeader` take an exact string or a `RegExp`. A `RegExp` matches where `test` would, anywhere in the value, so `/^Bearer /` matches `Bearer abc`. Only the `i` flag is supported.
 - Other query parameters and headers are ignored.
 - `withJsonBody` (and GraphQL `withVariables`) also ignore extra trailing items in an array, as WireMock's `ignoreExtraElements` does.
 - A `RegExp` becomes a Java regular expression. Syntax Java cannot compile, such as `[^]`, fails when the stub is registered, not when it is built.
 - `willReturn(status, json?, headers?)` sets `Content-Type: application/json` when there is a body. `willReturnStatus` sends no body. `willReturnBody(status, text, contentType)` sends text.
+- Body matchers combine: a request must match all of them.
 - A lower `priority` wins. At equal priority the stub registered last wins.
+
+Response templating:
+
+`templated()` turns on WireMock's `response-template` transformer for the stub, whichever order it is called in relative to `willReturn*` and `withDelay`. Templates such as `{{now format='yyyy'}}` and `{{request.body}}` render in `willReturnBody` text. They also render in a `willReturn` `jsonBody` string value, such as `{ year: "{{now format='yyyy'}}" }`, but a raw `{{{request.body}}}` there is inserted unescaped and can break the JSON. To echo a request, use `willReturnBody`. Under worker namespacing the path is prefixed, so `{{request.path}}` and `{{request.url}}` include the namespace prefix, not the path the stub was written with.
 
 ## GraphQL
 

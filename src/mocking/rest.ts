@@ -31,6 +31,7 @@ export class StubBuilder implements Buildable {
   private response: Mapping = { status: 200 }
   private extra: Mapping = {}
   private delay?: number
+  private templating = false
 
   constructor(method: Method, path: string) {
     this.request = { method, urlPath: path }
@@ -43,13 +44,39 @@ export class StubBuilder implements Buildable {
     return this
   }
 
-  /** Match when the JSON body contains this, ignoring extra properties and keeping array order. */
-  withJsonBody(body: unknown): this {
+  /** Match when the JSON body contains this, keeping array order. Extra properties are ignored unless `strict`. */
+  withJsonBody(body: unknown, options: { strict?: boolean } = {}): this {
     const patterns = (this.request.bodyPatterns as Mapping[] | undefined) ?? []
     this.request.bodyPatterns = [
       ...patterns,
-      { equalToJson: JSON.stringify(body), ignoreArrayOrder: false, ignoreExtraElements: true },
+      {
+        equalToJson: JSON.stringify(body),
+        ignoreArrayOrder: false,
+        ignoreExtraElements: !options.strict,
+      },
     ]
+    return this
+  }
+
+  /** Match when the JSON body has the value at this JSONPath, which must start with `$`. */
+  withJsonPath(expression: string, value?: ValueMatcher): this {
+    if (!expression.startsWith('$')) {
+      throw new Error(`JSONPath ${JSON.stringify(expression)} must start with $`)
+    }
+    const patterns = (this.request.bodyPatterns as Mapping[] | undefined) ?? []
+    this.request.bodyPatterns = [
+      ...patterns,
+      {
+        matchesJsonPath: value === undefined ? expression : { expression, ...valueMatcher(value) },
+      },
+    ]
+    return this
+  }
+
+  /** Match when the body contains this text. */
+  withBodyContaining(text: string): this {
+    const patterns = (this.request.bodyPatterns as Mapping[] | undefined) ?? []
+    this.request.bodyPatterns = [...patterns, { contains: text }]
     return this
   }
 
@@ -90,6 +117,12 @@ export class StubBuilder implements Buildable {
     return this
   }
 
+  /** Render `{{...}}` templates in the response, such as `{{request.body}}` or `{{now}}`. */
+  templated(): this {
+    this.templating = true
+    return this
+  }
+
   /** Hold the response back, in ms. */
   withDelay(ms: number): this {
     this.delay = ms
@@ -111,10 +144,12 @@ export class StubBuilder implements Buildable {
   }
 
   build(): Mapping {
-    const response =
-      this.delay === undefined
-        ? this.response
-        : { ...this.response, fixedDelayMilliseconds: this.delay }
+    const templated = this.templating ? { transformers: ['response-template'] } : {}
+    const response = {
+      ...this.response,
+      ...templated,
+      ...(this.delay === undefined ? {} : { fixedDelayMilliseconds: this.delay }),
+    }
     return structuredClone({ request: this.request, response, ...this.extra })
   }
 }
