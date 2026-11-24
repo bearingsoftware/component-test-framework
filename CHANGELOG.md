@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.23](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.22...v0.3.23) (2026-11-24)
+
+
+### Features
+
+* **mocking:** add JSONPath, contains, strict and templated to the stub builder ([cf747de](https://github.com/bearingsoftware/component-test-framework/commit/cf747de431b673541da6893b2e828ee3f1a36c9c))
+* **mocking:** JSONPath, contains, strict and templated in the stub builder ([247790f](https://github.com/bearingsoftware/component-test-framework/commit/247790f4b2030f471660c5375a884b74869fd3c2))
+
 ## [0.3.22](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.21...v0.3.22) (2026-11-21)
 
 
