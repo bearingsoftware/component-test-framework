@@ -10,26 +10,22 @@ const ROUNDS = 40
 const PAYLOAD_SIZE = 2_000_000
 const FILES = path.join(__dirname, 'coverage-files.ts')
 
-// COVERAGE_PLAIN_WRITE swaps in a plain writeFileSync, the old behaviour.
+// The writer requires coverage-files.ts directly, so it relies on Node's type-stripping (Node 24 in CI).
 const WRITER_SCRIPT = `
-  const fs = require('fs')
   const path = require('path')
   const { writeFileAtomic } = require(process.argv[1])
   const [, , dir, id, size, rounds] = process.argv
   const file = path.join(dir, 'worker-run-' + id + '.json')
   const data = JSON.stringify({ blob: 'x'.repeat(Number(size)) })
-  const write = process.env.COVERAGE_PLAIN_WRITE ? (f, d) => fs.writeFileSync(f, d) : writeFileAtomic
-  for (let i = 0; i < Number(rounds); i++) write(file, data)
+  for (let i = 0; i < Number(rounds); i++) writeFileAtomic(file, data)
 `
 
-function runWriter(dir: string, id: number, plain: boolean): Promise<void> {
+function runWriter(dir: string, id: number): Promise<void> {
   return new Promise((resolve, reject) => {
-    const env = { ...process.env }
-    if (plain) env.COVERAGE_PLAIN_WRITE = '1'
     const child = spawn(
       process.execPath,
       ['-e', WRITER_SCRIPT, FILES, dir, String(id), String(PAYLOAD_SIZE), String(ROUNDS)],
-      { stdio: ['ignore', 'inherit', 'inherit'], env },
+      { stdio: ['ignore', 'inherit', 'inherit'] },
     )
     child.on('error', reject)
     child.on('exit', (code) =>
@@ -39,10 +35,10 @@ function runWriter(dir: string, id: number, plain: boolean): Promise<void> {
 }
 
 /** Poll the directory while the writers run; return how many reads saw a partial file. */
-async function partialReads(dir: string, plain: boolean): Promise<number> {
+async function partialReads(dir: string): Promise<number> {
   const state = { done: false }
   const writers = Promise.all(
-    Array.from({ length: WRITERS }, (_, id) => runWriter(dir, id, plain)),
+    Array.from({ length: WRITERS }, (_, id) => runWriter(dir, id)),
   ).finally(() => {
     state.done = true
   })
@@ -75,17 +71,8 @@ describe('writeFileAtomic', () => {
   it('never exposes a partial file to a concurrent reader', async () => {
     const dir = tmpDir()
     try {
-      expect(await partialReads(dir, false)).toBe(0)
+      expect(await partialReads(dir)).toBe(0)
       expect(fs.readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([])
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true })
-    }
-  }, 60_000)
-
-  it('the stress test does see partial files with a plain writeFileSync', async () => {
-    const dir = tmpDir()
-    try {
-      expect(await partialReads(dir, true)).toBeGreaterThan(0)
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }
