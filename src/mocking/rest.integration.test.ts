@@ -115,4 +115,56 @@ describe.skipIf(!url)('REST stub builder against WireMock (COMPONENT-23)', () =>
     expect(res.headers.get('content-type')).toContain('text/plain')
     expect(await res.text()).toBe('plain')
   })
+
+  it('matches a JSON path in the body, present or with a value', async () => {
+    await client.register(
+      stub.post('/jp').withJsonPath('$.credential.id').willReturnStatus(201),
+      stub.post('/jv').withJsonPath('$.kind', 'card').willReturnStatus(202),
+    )
+    expect((await post('/jp', { credential: { id: 'c1' } })).status).toBe(201)
+    expect((await post('/jp', { credential: { name: 'c1' } })).status).toBe(404)
+    expect((await post('/jv', { kind: 'card' })).status).toBe(202)
+    expect((await post('/jv', { kind: 'bank' })).status).toBe(404)
+  })
+
+  it('rejects an extra property with strict, and accepts it by default', async () => {
+    await client.register(
+      stub.post('/loose').withJsonBody({ sku: 'W' }).willReturnStatus(201),
+      stub.post('/strict').withJsonBody({ sku: 'W' }, { strict: true }).willReturnStatus(201),
+    )
+    expect((await post('/loose', { sku: 'W', extra: true })).status).toBe(201)
+    expect((await post('/strict', { sku: 'W' })).status).toBe(201)
+    expect((await post('/strict', { sku: 'W', extra: true })).status).toBe(404)
+  })
+
+  it('matches a body containing text', async () => {
+    await client.register(stub.post('/bc').withBodyContaining('needle').willReturnStatus(200))
+    expect((await post('/bc', { note: 'a needle here' })).status).toBe(200)
+    expect((await post('/bc', { note: 'nothing' })).status).toBe(404)
+  })
+
+  it('renders a text body template with the request body and the year', async () => {
+    await client.register(
+      stub
+        .post('/tpl')
+        .templated()
+        .willReturnBody(200, "{{now format='yyyy'}} {{{request.body}}}", 'text/plain'),
+    )
+    const res = await post('/tpl', { a: 1 })
+    expect(await res.text()).toBe(`${new Date().getFullYear()} {"a":1}`)
+  })
+
+  it('renders templates in a jsonBody value', async () => {
+    await client.register(
+      stub.get('/tj').templated().willReturn(200, { year: "{{now format='yyyy'}}" }),
+    )
+    expect(await (await call('/tj')).json()).toEqual({ year: String(new Date().getFullYear()) })
+  })
+
+  it('gives templates the namespace prefix in request.path', async () => {
+    await client.register(
+      stub.get('/np').templated().willReturnBody(200, '{{request.path}}', 'text/plain'),
+    )
+    expect(await (await call('/np')).text()).toBe(`${NS}/np`)
+  })
 })
