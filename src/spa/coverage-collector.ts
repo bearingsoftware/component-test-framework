@@ -7,6 +7,7 @@ import type { CoverageMap, CoverageMapData } from 'istanbul-lib-coverage'
 import { isMainThread } from 'worker_threads'
 import { requireOptional } from './optional'
 import { currentWorker } from '../support/worker'
+import { loadWorkerFiles, withLock, writeFileAtomic } from './coverage-files'
 
 /** Options for {@link createCoverageCollector}. */
 export interface CoverageCollectorOptions {
@@ -159,7 +160,7 @@ export function createCoverageCollector(options: CoverageCollectorOptions): Cove
 
     fs.mkdirSync(options.outDir, { recursive: true })
     // .nyc_output for tooling that expects it; the reports are what gates read.
-    fs.writeFileSync(path.join(nycOutput, 'out.json'), JSON.stringify(merged.toJSON()))
+    writeFileAtomic(path.join(nycOutput, 'out.json'), JSON.stringify(merged.toJSON()))
 
     const context = createContext({ dir: options.outDir, coverageMap: merged })
     for (const reporter of options.reporters ?? DEFAULT_REPORTERS) {
@@ -192,22 +193,12 @@ export function createCoverageCollector(options: CoverageCollectorOptions): Cove
     fs.mkdirSync(workers, { recursive: true })
     const key = run?.key ?? runKey()
     const mine: WorkerCoverage = { counts, coverage: map.toJSON() }
-    fs.writeFileSync(path.join(workers, `worker-${key}-${worker.id}.json`), JSON.stringify(mine))
+    writeFileAtomic(path.join(workers, `worker-${key}-${worker.id}.json`), JSON.stringify(mine))
     withLock(path.join(workers, '.lock'), () => {
       const merged = createCoverageMap({})
       const totals = { collected: 0, missed: 0 }
       let reported = 0
-      for (const file of fs.readdirSync(workers)) {
-        const match = /^worker-([\w.]+)-\d+\.json$/.exec(file)
-        if (!match) continue
-        if (match[1] !== key) {
-          // Left by an earlier run.
-          fs.rmSync(path.join(workers, file), { force: true })
-          continue
-        }
-        const saved = JSON.parse(
-          fs.readFileSync(path.join(workers, file), 'utf-8'),
-        ) as WorkerCoverage
+      for (const saved of loadWorkerFiles<WorkerCoverage>(workers, key)) {
         merged.merge(saved.coverage)
         totals.collected += saved.counts.collected
         totals.missed += saved.counts.missed
@@ -235,28 +226,4 @@ interface WorkerCoverage {
  */
 function runKey(): string {
   return String(isMainThread ? process.ppid : process.pid)
-}
-
-/** Run `fn` holding a lock directory, so only one worker writes the reports at a time. */
-function withLock(lock: string, fn: () => void): void {
-  const deadline = Date.now() + 30_000
-  const pause = new Int32Array(new SharedArrayBuffer(4))
-  for (;;) {
-    try {
-      fs.mkdirSync(lock)
-      break
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-      // A lock older than the deadline was left by a worker that died holding it.
-      const age = Date.now() - (fs.statSync(lock, { throwIfNoEntry: false })?.mtimeMs ?? Date.now())
-      if (age > 30_000) fs.rmSync(lock, { recursive: true, force: true })
-      else if (Date.now() > deadline) throw new Error(`[coverage] Timed out waiting for ${lock}`)
-      else Atomics.wait(pause, 0, 0, 50)
-    }
-  }
-  try {
-    fn()
-  } finally {
-    fs.rmSync(lock, { recursive: true, force: true })
-  }
 }
