@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.24](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.23...v0.3.24) (2026-11-24)
+
+
+### Bug Fixes
+
+* **coverage:** write coverage files atomically and own the merge lock ([6b5cb98](https://github.com/bearingsoftware/component-test-framework/commit/6b5cb980131e0eb57007503280546b8e6edc5880))
+* **coverage:** write worker and merged coverage atomically ([f9173a1](https://github.com/bearingsoftware/component-test-framework/commit/f9173a152fd955dc20eb0975402862087df997d5))
+
 ## [0.3.23](https://github.com/bearingsoftware/component-test-framework/compare/v0.3.22...v0.3.23) (2026-11-24)
 
 
